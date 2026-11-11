@@ -21,8 +21,10 @@
   /api/assistant/voice/...                   — голосовой чат с роботом (assistant_voice.py)
 """
 import datetime
+import difflib
 import json
 import math
+import os
 import re
 import uuid
 from pathlib import Path
@@ -512,21 +514,96 @@ def to_codes(text, al):
     return text
 
 
+# Локальная модель небольшого размера в длинной расшифровке теряет поручения (на контрольной встрече находила 3 из 8),
+# а короткие разбирает хорошо. Поэтому в локальном режиме длинную расшифровку разбираем частями и сводим результат.
+PART_LINES = int(os.environ.get("LOCAL_PROTO_PART", "8"))       # реплик в одной части; 0 — не делить
+PART_OVERLAP = 2                                                # сколько реплик повторяется в соседних частях
+
+
+def _same(a, b, key, by_owner=False):
+    ta, tb = str(a.get(key) or "").lower(), str(b.get(key) or "").lower()
+    sim = difflib.SequenceMatcher(None, ta, tb).ratio()
+    if a.get("line") is not None and a.get("line") == b.get("line") and sim > 0.45:
+        return True
+    if by_owner and a.get("owner") and str(a.get("owner")).lstrip("@") == str(b.get("owner")).lstrip("@") and sim > 0.6:
+        return True
+    return sim > 0.78
+
+
+def _merge(items, key, by_owner=False):
+    out = []
+    for x in items:
+        if isinstance(x, dict) and str(x.get(key) or "").strip() and not any(_same(x, y, key, by_owner) for y in out):
+            out.append(x)
+    return out
+
+
+def _protocol_by_parts(core, head, lines):
+    """Разбор расшифровки частями: каждая часть — отдельный короткий запрос, затем задачи и пункты сводятся без повторов."""
+    step = max(1, PART_LINES - PART_OVERLAP)
+    starts = list(range(0, max(1, len(lines) - PART_OVERLAP), step))
+    got = {"points": [], "tasks": [], "risks": []}
+    summaries, last, ok = [], None, 0
+    for n, a in enumerate(starts, 1):
+        part = lines[a:a + PART_LINES]
+        user = ("{}\nЭто часть {} из {} расшифровки, реплики с {} по {}. Разбирай только эти реплики, номера реплик не меняй. "
+                "Выпиши каждое поручение и каждое обещание из этой части — ни одно не пропускай.\n\n"
+                "<<<ДАННЫЕ (расшифровка)\n{}\nДАННЫЕ>>>").format(head, n, len(starts), a, a + len(part) - 1, "\n".join(part))
+        mapping = {}
+        r = core.ask_model(PROTO_SYSTEM, core.mask(user, mapping), True, 900)
+        if not (r.get("ok") and isinstance(r.get("json"), dict)):
+            last = last or r
+            continue
+        last, ok = r, ok + 1
+        j = json.loads(core.unmask(json.dumps(r["json"], ensure_ascii=False), mapping))
+        for k in got:
+            got[k] += [x for x in (j.get(k) or []) if isinstance(x, dict)]
+        if j.get("summary"):
+            summaries.append(str(j["summary"]))
+    if not ok:
+        return None, last or {"ok": False, "reason": "модель не ответила"}
+    out = {"points": _merge(got["points"], "text"), "tasks": _merge(got["tasks"], "title", True), "risks": _merge(got["risks"], "text")}
+    # общий итог встречи — одним коротким запросом по уже найденным пунктам
+    digest = "\n".join(["- [{}] {}".format(p.get("status"), p.get("text")) for p in out["points"][:24]] +
+                       ["- поручение: {}".format(t.get("title")) for t in out["tasks"][:16]])
+    mapping = {}
+    rs = core.ask_model("Ты ведёшь протокол совещания. По списку пунктов и поручений напиши итог встречи в 2–3 предложениях: "
+                        "что обсудили и к чему пришли. Ничего не выдумывай. Верни JSON: {\"summary\": \"...\"}.",
+                        core.mask("<<<ДАННЫЕ\n" + digest + "\nДАННЫЕ>>>", mapping), True, 300)
+    if rs.get("ok") and isinstance(rs.get("json"), dict) and rs["json"].get("summary"):
+        out["summary"] = core.unmask(str(rs["json"]["summary"]), mapping)
+    else:
+        out["summary"] = " ".join(summaries[:2])
+    return out, dict(last, parts=len(starts), parts_ok=ok)
+
+
 def model_protocol(core, meeting, tr, people):
     al = aliases()
     roles = "\n".join("@{} — {}".format(p["id"], p["title"].lower()) for p in people if p["id"] in meeting["participants"])
-    body = "\n".join("[{}] @{}: {}".format(i, ln["s"], to_codes(ln["text"], al)) for i, ln in enumerate(tr["lines"]))
-    user = "Встреча: {}, {} (день недели: {}).\nУчастники:\n{}\n\n<<<ДАННЫЕ (расшифровка)\n{}\nДАННЫЕ>>>".format(
+    lines = ["[{}] @{}: {}".format(i, ln["s"], to_codes(ln["text"], al)) for i, ln in enumerate(tr["lines"])]
+    head = "Встреча: {}, {} (день недели: {}).\nУчастники:\n{}".format(
         meeting["title"], tr["date"][:10], ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"][
-            datetime.date.fromisoformat(tr["date"][:10]).weekday()], roles, body)
-    mapping = {}
-    r = core.ask_model(PROTO_SYSTEM, core.mask(user, mapping), True, 1800)
-    if not (r.get("ok") and isinstance(r.get("json"), dict)):
-        return None, r
-    j = json.loads(core.unmask(json.dumps(r["json"], ensure_ascii=False), mapping))
+            datetime.date.fromisoformat(tr["date"][:10]).weekday()], roles)
+    local = getattr(core, "mode", lambda: "")() == "local"
+    if local and PART_LINES and len(lines) > PART_LINES + PART_OVERLAP:
+        j, r = _protocol_by_parts(core, head, lines)
+        if j is None:
+            return None, r
+    else:
+        user = "{}\n\n<<<ДАННЫЕ (расшифровка)\n{}\nДАННЫЕ>>>".format(head, "\n".join(lines))
+        mapping = {}
+        r = core.ask_model(PROTO_SYSTEM, core.mask(user, mapping), True, 1800)
+        if not (r.get("ok") and isinstance(r.get("json"), dict)):
+            return None, r
+        j = json.loads(core.unmask(json.dumps(r["json"], ensure_ascii=False), mapping))
     ids = {p["id"] for p in people}
     n = len(tr["lines"])
-    line = lambda v: v if isinstance(v, int) and 0 <= v < n else None  # noqa: E731
+    def line(v):
+        """Номер реплики: модели иногда присылают его строкой или в скобках."""
+        if isinstance(v, str) and re.fullmatch(r"\[?\d+\]?", v.strip()):
+            v = int(v.strip().strip("[]"))
+        return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < n else None
+
     stat = {"решено", "предложено", "обсуждалось", "требует уточнения"}
 
     def own(v):
