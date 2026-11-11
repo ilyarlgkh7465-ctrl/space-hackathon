@@ -1,0 +1,90 @@
+/* Приложение в языке пульта: светлое «жидкое стекло» в цветах picPac (концепт из shared/glass.css и t1).
+   Подключается после picpac.css и только перекрашивает: разметка и размеры не меняются.
+   Контраст текста держим не ниже 4.5:1 — красный градиент на кнопках темнее, чем в пульте. */
+.stage { background: linear-gradient(180deg, #FAF5ED, #FAF7F5 60%); position: relative; isolation: isolate; }
+.stage::before { content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(520px 520px at -4% -6%, rgba(246, 201, 196, .85), transparent 70%),
+    radial-gradient(480px 480px at 104% 18%, rgba(220, 214, 238, .8), transparent 70%),
+    radial-gradient(560px 560px at 30% 108%, rgba(207, 227, 216, .85), transparent 70%),
+    radial-gradient(420px 420px at 70% -8%, rgba(241, 222, 198, .8), transparent 70%); }
+.app { background: linear-gradient(180deg, rgba(250, 245, 237, .96), rgba(250, 247, 245, .98)); position: relative; isolation: isolate; }
+.app::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(300px 300px at -10% 0%, rgba(246, 201, 196, .75), transparent 70%),
+    radial-gradient(280px 280px at 110% 40%, rgba(220, 214, 238, .7), transparent 70%),
+    radial-gradient(320px 320px at 20% 105%, rgba(207, 227, 216, .75), transparent 70%); }
+
+/* стекло: карточки, шапка, нижняя панель */
+.app .card, .app .pcard, .app .ocard, .app .sumcard, .app .tcard, .app .rcard, .app .compose, .app .thread, .app .fcard {
+  background: linear-gradient(160deg, rgba(255, 255, 255, .86), rgba(255, 255, 255, .58) 60%); border: 1px solid rgba(255, 255, 255, .85);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 10px 28px rgba(120, 86, 66, .10), 0 0 0 1px rgba(56, 82, 79, .08);
+  -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%); }
+.app .card-flat { background: rgba(255, 255, 255, .72); border: 1px solid rgba(56, 82, 79, .11); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9); }
+.app .pcard.sk { box-shadow: none; }
+.app-head { background: rgba(255, 253, 251, .72); -webkit-backdrop-filter: blur(20px) saturate(150%); backdrop-filter: blur(20px) saturate(150%); }
+.actionbar { background: rgba(255, 253, 251, .82); -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%); border-top: 1px solid rgba(56, 82, 79, .1); }
+.sheet-body { background: rgba(255, 253, 251, .94); -webkit-backdrop-filter: blur(26px); backdrop-filter: blur(26px); box-shadow: 0 -18px 50px rgba(70, 50, 40, .18); }
+
+/* кнопки и поля */
+.app .btn { background: rgba(255, 255, 255, .82); border-color: rgba(56, 82, 79, .24); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9); }
+.app .btn:hover { background: #fff; border-color: var(--accent); }
+.app .btn-primary { background: linear-gradient(135deg, #D9564A 0%, #B63F3F 100%); border-color: transparent; color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 8px 20px rgba(189, 52, 52, .26); }
+.app .btn-primary:hover { background: linear-gradient(135deg, #CF4B40 0%, #A93636 100%); border-color: transparent; }
+.app .btn-ghost { background: transparent; box-shadow: none; border-color: transparent; }
+.app .input, .app .select, .app .textarea { background: rgba(255, 255, 255, .92); border-color: rgba(56, 82, 79, .24); }
+.app .input:focus, .app .select:focus, .app .textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56, 82, 79, .14); }
+.chip { background: rgba(56, 82, 79, .08); color: var(--ink2); }
+.pchip, .occ-i { background: rgba(255, 255, 255, .8); border-color: rgba(56, 82, 79, .18); }
+.occ-i[aria-pressed="true"], .pchip[aria-pressed="true"] { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-ink); }
+.tabs3 { background: rgba(255, 253, 251, .55); }
+.tab3[aria-current="true"] svg { filter: drop-shadow(0 2px 6px rgba(189, 52, 52, .35)); }
+.sec-t, .eyebrow { letter-spacing: .09em; }
+
+/* ---- сообщество: шаблоны и отзывы ---- */
+.tcard { padding: 0; overflow: hidden; }
+.tcover { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9; }
+.tcover .art, .tcover > svg { transform: scale(.92); }
+.tcover > svg { width: 56px; height: 56px; color: var(--ink3); }
+.tcover .chip { position: absolute; left: 10px; top: 10px; background: rgba(255, 255, 255, .85); }
+.tone0 { background: linear-gradient(135deg, #F6C9C4, #FBE5E2); } .tone1 { background: linear-gradient(135deg, #DCD6EE, #EEEAF8); }
+.tone2 { background: linear-gradient(135deg, #CFE3D8, #E5F1EA); } .tone3 { background: linear-gradient(135deg, #F1DEC6, #FAEFDD); }
+.tone4 { background: linear-gradient(135deg, #D6E4EE, #EAF1F7); } .tone5 { background: linear-gradient(135deg, #EBD3DE, #F6E6EE); }
+.tbody { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.tbody h3 { font-size: 17px; font-weight: 600; line-height: 1.25; }
+.tbody p { color: var(--ink2); font-size: 15px; }
+.tbody small, .rtop small { color: var(--ink3); font-size: 13px; display: block; }
+.trow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.trow .btn-primary { flex: 1; }
+.by { font-size: 13px; color: var(--ink3); }
+.like { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 56px; padding: 0 12px; border-radius: 999px; border: 1px solid rgba(56, 82, 79, .2); background: rgba(255, 255, 255, .8); color: var(--ink2); cursor: pointer; }
+.like svg { width: 20px; height: 20px; }
+.like.on { color: var(--brand); border-color: var(--brand-line); background: var(--brand-soft); }
+.stars { display: inline-flex; gap: 2px; color: #D9A441; }
+.stars i { display: inline-flex; width: 18px; height: 18px; color: #CFC7BC; }
+.stars i.on { color: #D9A441; } .stars i svg { width: 100%; height: 100%; } .stars i.on svg { fill: currentColor; }
+.stars.big i { width: 22px; height: 22px; }
+.rate { display: flex; gap: 4px; }
+.rate button { width: 52px; height: 52px; border-radius: 14px; border: 1px solid rgba(56, 82, 79, .2); background: rgba(255, 255, 255, .85); color: #CFC7BC; display: grid; place-items: center; cursor: pointer; }
+.rate button svg { width: 28px; height: 28px; }
+.rate button.on { color: #D9A441; border-color: #E8C77F; background: #FFF8E6; } .rate button.on svg { fill: currentColor; }
+.rcard { display: flex; flex-direction: column; gap: 10px; }
+.rcard.hid { opacity: .6; }
+.rtop { display: flex; gap: 10px; align-items: center; } .rtop > div { flex: 1; min-width: 0; } .rtop b { font-size: 16px; }
+.avatar.sm { width: 40px; height: 40px; font-size: 17px; }
+.rtext { font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.rreply { border-left: 3px solid var(--brand); background: rgba(255, 255, 255, .7); border-radius: 0 12px 12px 0; padding: 8px 12px; }
+.rreply b { font-size: 13px; color: var(--brand-ink); } .rreply p { font-size: 15px; }
+.racts { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.sumcard { display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; }
+.avg { display: flex; flex-direction: column; align-items: center; gap: 4px; } .avg b { font-size: 40px; line-height: 1; font-weight: 600; } .avg small { color: var(--ink3); }
+.dists { display: flex; flex-direction: column; gap: 5px; }
+.dist { display: grid; grid-template-columns: 12px 1fr 20px; gap: 8px; align-items: center; font-size: 12px; color: var(--ink3); }
+.dist i { height: 8px; border-radius: 99px; background: rgba(56, 82, 79, .1); overflow: hidden; } .dist b { display: block; height: 100%; background: #D9A441; border-radius: 99px; }
+.compose { display: flex; flex-direction: column; gap: 12px; } .compose h3 { font-size: 18px; font-weight: 600; }
+.uses { color: var(--ink3); }
+.tabs3.five, .tabs3 { grid-template-columns: repeat(5, 1fr); }
+.tab3 { font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .like, .btn { transition: none; } }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .app .card, .app .pcard, .app .ocard, .app-head, .actionbar { background: #fff; }
+}

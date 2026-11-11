@@ -170,6 +170,63 @@ class Api(unittest.TestCase):
         st, _ = self.call("POST", "/api/app/orders", {"items": [{"product": "magnet", "variant": "10x10", "qty": 1}]}, self.client)
         self.assertEqual(st, 400)
 
+    # ---- соцсеть: отзывы и шаблоны
+    def test_social_reviews_and_templates(self):
+        feed = self.call("GET", "/api/app/social/feed")[1]                                        # читать ленту можно без входа
+        self.assertGreaterEqual(len(feed["templates"]), 6)
+        self.assertFalse(feed["can_publish"])
+        t = self.login("sales")
+        # шаблон публикует только сотрудник компании (head/director)
+        tpl = {"title": "Выпускной альбом", "product": "book", "variant": "lite", "options": {"pages": 24}, "per_page": 2, "occasion": "Праздник"}
+        self.assertEqual(self.call("POST", "/api/app/social/templates", tpl, self.client)[0], 403)
+        self.assertEqual(self.call("POST", "/api/app/social/templates", dict(tpl, variant="нет"), t)[0], 400)
+        self.assertEqual(self.call("POST", "/api/app/social/templates", dict(tpl, options={"pages": 23}), t)[0], 400)
+        a = self.call("POST", "/api/app/social/templates", tpl, t, {"Idempotency-Key": "t-1"})[1]
+        b = self.call("POST", "/api/app/social/templates", tpl, t, {"Idempotency-Key": "t-1"})[1]
+        self.assertEqual(a["id"], b["id"])
+        feed = self.call("GET", "/api/app/social/feed", token=self.client)[1]
+        self.assertEqual(feed["templates"][0]["id"], a["id"])
+        self.assertEqual(self.call("POST", "/api/app/social/templates/%s/use" % a["id"], token=self.client)[1]["uses"], 1)
+        lk = self.call("POST", "/api/app/social/templates/%s/like" % a["id"], token=self.client)[1]
+        self.assertEqual((lk["likes"], lk["liked"]), (1, True))
+        self.assertEqual(self.call("POST", "/api/app/social/templates/%s/like" % a["id"], token=self.client)[1]["likes"], 0)
+        self.assertEqual(self.call("POST", "/api/app/social/templates/t-seed-year/delete", token=t)[0], 403)   # шаблоны picPac не удаляются
+        self.assertEqual(self.call("POST", "/api/app/social/templates/%s/delete" % a["id"], token=self.client)[0], 403)
+        self.assertEqual(self.call("POST", "/api/app/social/templates/%s/delete" % a["id"], token=t)[0], 200)
+        # отзыв — только по своему заказу, без ссылок, один на заказ
+        tok = self.call("POST", "/api/app/guest")[1]["token"]
+        rv = {"order_id": "нет", "rating": 5, "text": "Всё получилось быстро и красиво"}
+        self.assertEqual(self.call("POST", "/api/app/social/reviews", rv, tok)[0], 404)
+        self.assertEqual(self.call("POST", "/api/app/social/reviews", rv)[0], 401)
+        order = {"items": [{"product": "magnet", "variant": "10x10", "qty": 3}], "delivery": {"id": "pickup", "point": "center"},
+                 "contact": {"name": "Вера Иванова", "phone": "+375 29 111-22-33"}}
+        o = self.call("POST", "/api/app/orders", order, tok, {"Idempotency-Key": "rv-o"})[1]
+        rv["order_id"] = o["id"]
+        self.assertEqual(self.call("POST", "/api/app/social/reviews", dict(rv, rating=7), tok)[0], 400)
+        self.assertEqual(self.call("POST", "/api/app/social/reviews", dict(rv, text="смотри www.site.by"), tok)[0], 422)
+        self.assertEqual(self.call("POST", "/api/app/social/reviews", dict(rv, text="коротко"), tok)[0], 400)
+        st, r1 = self.call("POST", "/api/app/social/reviews", rv, tok)
+        self.assertEqual((st, r1["name"], r1["mine"]), (201, "Вера", True))
+        st, r2 = self.call("POST", "/api/app/social/reviews", dict(rv, rating=4), tok)             # повтор правит тот же отзыв
+        self.assertEqual((st, r2["id"], r2["rating"]), (200, r1["id"], 4))
+        mine = self.call("GET", "/api/app/social/feed", token=tok)[1]
+        self.assertEqual(len([x for x in mine["reviews"] if not x["demo"]]), 1)
+        self.assertTrue(mine["my_orders"][0]["reviewed"])
+        # чужой отзыв не удалить, ответить может только компания, скрыть тоже
+        other = self.call("POST", "/api/app/guest")[1]["token"]
+        self.assertEqual(self.call("POST", "/api/app/social/reviews/%s/delete" % r1["id"], token=other)[0], 403)
+        self.assertEqual(self.call("POST", "/api/app/social/reviews/%s/reply" % r1["id"], {"text": "Спасибо!"}, tok)[0], 403)
+        self.assertEqual(self.call("POST", "/api/app/social/reviews/%s/reply" % r1["id"], {"text": "Спасибо, Вера!"}, t)[0], 200)
+        self.call("POST", "/api/app/social/reviews/%s/hide" % r1["id"], token=t)
+        pub = self.call("GET", "/api/app/social/feed", token=other)[1]
+        self.assertFalse(any(x["id"] == r1["id"] for x in pub["reviews"]))                        # скрытый отзыв посторонним не виден
+        self.call("POST", "/api/app/social/reviews/%s/hide" % r1["id"], token=t)
+        shown = [x for x in self.call("GET", "/api/app/social/feed", token=other)[1]["reviews"] if x["id"] == r1["id"]][0]
+        self.assertEqual(shown["reply"]["text"], "Спасибо, Вера!")
+        # удаление данных забирает и отзывы
+        self.call("POST", "/api/app/account/delete", {"confirm": True}, tok)
+        self.assertFalse(any(x["id"] == r1["id"] for x in self.call("GET", "/api/app/social/feed", token=other)[1]["reviews"]))
+
     # ---- удаление данных (МП-06)
     def test_delete_account(self):
         t = self.call("POST", "/api/app/guest")[1]["token"]

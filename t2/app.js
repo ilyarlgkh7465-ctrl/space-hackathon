@@ -296,15 +296,19 @@
     ok: SV('<path d="M20 6L9 17l-5-5"/>'), warn: SV('<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/>'),
     spark: SV('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>'),
     info: SV('<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>'),
+    people: SV('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14.5a5 5 0 0 1 4.5 5.5"/>'),
+    star: SV('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9 6.8 19.7l1-5.9L3.5 9.7l5.9-.8z"/>'),
+    heart: SV('<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.4C19.5 15.4 12 20 12 20z"/>'),
   };
   const haptic = (ok) => { try { navigator.vibrate && navigator.vibrate(ok ? [20, 40, 20] : 10); } catch (e) { /* нет вибрации */ } };
 
   /* ---------- навигация и отрисовка ---------- */
-  const TITLES = { home: 'picPac', product: 'Продукт', photos: 'Фото', layout: 'Макет', check: 'Проверка', cart: 'Оформление', done: 'Заказ', orders: 'Мои заказы', order: 'Заказ', profile: 'Профиль', login: 'Вход', feed: 'Лента' };
-  const TABS = ['home', 'feed', 'orders', 'profile'];
+  const TITLES = { home: 'picPac', product: 'Продукт', photos: 'Фото', layout: 'Макет', check: 'Проверка', cart: 'Оформление', done: 'Заказ', orders: 'Мои заказы', order: 'Заказ', profile: 'Профиль', login: 'Вход', feed: 'Лента', social: 'Сообщество' };
+  const TABS = ['home', 'feed', 'social', 'orders', 'profile'];
   const flowOf = () => S.draft && hasLayout(S.draft) ? ['product', 'photos', 'layout', 'check', 'cart'] : ['product', 'photos', 'check', 'cart'];
   function go(view, replace) {
     if (!replace && S.view !== view) S.stack.push(S.view);
+    if (view === 'social' && S.soc) S.soc.fetched = false;
     S.view = view; S.err = ''; stopPoll(); render(); const s = $('#screen'); s.scrollTop = 0;
     s.classList.remove('enter'); void s.offsetWidth; s.classList.add('enter');        // мягкий переход между экранами
   }
@@ -332,11 +336,12 @@
     document.querySelectorAll('[data-tab]').forEach((t) => { t.onclick = () => { S.stack = []; go(t.dataset.tab, true); }; });
     v.bind && v.bind($('#screen'), $('#bar'));
     if (S.view === 'orders') loadOrders();
+    if (S.view === 'social' && !S.soc.fetched) { S.soc.fetched = true; loadSocial(); }
     if (S.view === 'order' || S.view === 'done') startPoll();
   }
   function tabbar() {
     const t = (id, ic, name) => `<button class="tab3" data-tab="${id}" aria-current="${S.view === id}">${ICON[ic]}<span>${name}</span></button>`;
-    return `<nav class="tabs3" aria-label="Разделы">${t('home', 'home', 'Каталог')}${t('feed', 'photos', 'Лента')}${t('orders', 'list', 'Заказы')}${t('profile', 'user', 'Профиль')}</nav>`;
+    return `<nav class="tabs3" aria-label="Разделы">${t('home', 'home', 'Каталог')}${t('feed', 'photos', 'Лента')}${t('social', 'people', 'Идеи')}${t('orders', 'list', 'Заказы')}${t('profile', 'user', 'Профиль')}</nav>`;
   }
   function renderNet() {
     const n = $('#net'); if (!n) return;
@@ -844,6 +849,134 @@
       },
     };
   };
+
+  /* ---------- сообщество: шаблоны от компании и отзывы покупателей ---------- */
+  S.soc = { data: LS.get('pp_social', null), tab: 'tpl', occ: 'Все', compose: null, rate: 0, err: '', loading: false, openReply: null };
+  async function loadSocial() {
+    if (S.soc.loading) return;
+    S.soc.loading = true;
+    try { S.soc.data = await call('GET', '/social/feed'); LS.set('pp_social', S.soc.data); S.soc.off = false; }
+    catch (e) { S.soc.off = true; }
+    S.soc.loading = false;
+    if (S.view === 'social' && !S.soc.compose) rerender();
+  }
+  const stars = (n, big) => `<span class="stars${big ? ' big' : ''}" role="img" aria-label="${n} из 5">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= Math.round(n) ? 'on' : ''}">${ICON.star}</i>`).join('')}</span>`;
+  const heart = (liked) => liked ? ICON.heart.replace('fill="none"', 'fill="currentColor"') : ICON.heart;
+  function tplCard(t, pub) {
+    const prod = prodOf(t.product) || {}, v = (prod.variants || []).find((x) => x.id === t.variant);
+    const meta = [prod.name, v && v.name, t.options && t.options.pages ? t.options.pages + ' стр.' : '', t.per_page > 1 ? 'до ' + t.per_page + ' фото на странице' : ''].filter(Boolean).join(' · ');
+    return `<article class="card tcard"><div class="tcover tone${(t.tone || 0) % 6}">${artOf(prod.kind || 'print')}<span class="chip">${esc(t.occasion)}</span></div>
+      <div class="tbody"><h3>${esc(t.title)}</h3><p>${esc(t.desc || '')}</p><small>${esc(meta)}</small>
+      <div class="trow"><span class="by">от picPac${t.seed ? '' : ' · новое'}</span><button class="like${t.liked ? ' on' : ''}" data-tl="${t.id}" aria-pressed="${!!t.liked}" aria-label="Нравится">${heart(t.liked)}<span class="num">${t.likes}</span></button></div>
+      <div class="trow"><button class="btn btn-primary" data-tu="${t.id}">Использовать шаблон</button>${pub && !t.seed ? `<button class="btn btn-sm btn-ghost" data-td="${t.id}">Убрать</button>` : ''}</div>
+      ${t.uses ? `<small class="uses">Использовали ${t.uses} ${plural(t.uses, 'раз', 'раза', 'раз')}</small>` : ''}</div></article>`;
+  }
+  function revCard(r, pub) {
+    const reply = r.reply ? `<div class="rreply"><b>${esc(r.reply.by)}</b><p>${esc(r.reply.text)}</p></div>` : '';
+    const replyForm = S.soc.openReply === r.id ? `<div class="field"><label for="rp">Ответ покупателю</label><textarea class="textarea" id="rp" rows="2" maxlength="400"></textarea><div class="row2"><button class="btn btn-sm btn-primary" data-rs="${r.id}">Отправить</button><button class="btn btn-sm" data-rc="1">Отмена</button></div></div>` : '';
+    const acts = [];
+    if (pub && !r.demo) acts.push(`<button class="btn btn-sm btn-ghost" data-ro="${r.id}">${r.reply ? 'Изменить ответ' : 'Ответить'}</button>`, `<button class="btn btn-sm btn-ghost" data-rh="${r.id}">${r.hidden ? 'Показать' : 'Скрыть'}</button>`);
+    if (r.mine) acts.push(`<button class="btn btn-sm btn-ghost" data-rd="${r.id}">Удалить</button>`);
+    return `<article class="card rcard${r.hidden ? ' hid' : ''}"><div class="rtop"><span class="avatar sm" aria-hidden="true">${esc((r.name || '?')[0])}</span><div><b>${esc(r.name)}</b><small>${esc(r.product || '')} · ${fdate(r.ts)}</small></div>${r.demo ? '<span class="chip">пример</span>' : r.hidden ? '<span class="chip chip-warn">скрыт</span>' : ''}</div>
+      ${stars(r.rating)}<p class="rtext">${esc(r.text)}</p>${reply}${replyForm}
+      <div class="trow"><button class="like${r.liked ? ' on' : ''}" data-rl="${r.id}" aria-pressed="${!!r.liked}" aria-label="Полезный отзыв">${heart(r.liked)}<span class="num">${r.likes}</span></button><span class="racts">${acts.join('')}</span></div></article>`;
+  }
+  function composeReview(D) {
+    const orders = (D.my_orders || []);
+    if (!S.session) return '<div class="card-flat"><p>Чтобы оставить отзыв, нужен заказ.</p></div>';
+    if (!orders.length) return '<div class="card-flat"><b>Отзыв можно оставить после заказа</b><p class="muted">Сделайте первый заказ — и расскажите, как всё прошло.</p></div>';
+    return `<div class="card compose"><h3>Ваш отзыв</h3>
+      <div class="field"><label for="ro">Заказ</label><select class="select" id="ro">${orders.map((o) => `<option value="${o.id}">${esc(o.number)} · ${esc(o.product || 'заказ')}${o.reviewed ? ' (изменить отзыв)' : ''}</option>`).join('')}</select></div>
+      <div class="field"><label id="rl">Оценка</label><div class="rate" role="radiogroup" aria-labelledby="rl">${[1, 2, 3, 4, 5].map((i) => `<button type="button" role="radio" class="${i <= S.soc.rate ? 'on' : ''}" data-st="${i}" aria-checked="${i === S.soc.rate}" aria-label="${i} из 5">${ICON.star}</button>`).join('')}</div></div>
+      <div class="field"><label for="rt">Что понравилось и что можно улучшить</label><textarea class="textarea" id="rt" rows="4" maxlength="600" placeholder="Например: быстро собрала книгу, но хотелось больше шаблонов для календаря"></textarea><small class="muted"><span id="rn">0</span>/600 · без ссылок и контактов</small></div>
+      ${S.soc.err ? `<p class="err" role="alert">${esc(S.soc.err)}</p>` : ''}
+      <div class="row2"><button class="btn btn-primary" id="rsend">Опубликовать</button><button class="btn" id="rcancel">Отмена</button></div></div>`;
+  }
+  function composeTemplate(D) {
+    const prods = S.catalog ? S.catalog.products : [], p0 = prods[0] || { variants: [] };
+    return `<div class="card compose"><h3>Новый шаблон от компании</h3>
+      <div class="field"><label for="tt">Название</label><input class="input" id="tt" maxlength="60" placeholder="Например: Альбом выпускника"></div>
+      <div class="field"><label for="td">Описание</label><textarea class="textarea" id="td" rows="2" maxlength="200" placeholder="Для чего подходит и как лучше собрать"></textarea></div>
+      <div class="row2"><div class="field"><label for="tp">Продукт</label><select class="select" id="tp">${prods.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
+      <div class="field"><label for="tv">Вариант</label><select class="select" id="tv">${p0.variants.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></div></div>
+      <div class="row2"><div class="field"><label for="tn">Страниц (для книги)</label><input class="input" id="tn" inputmode="numeric" placeholder="20"></div>
+      <div class="field"><label for="tf">Фото на странице</label><select class="select" id="tf">${[1, 2, 3, 4].map((n) => `<option>${n}</option>`).join('')}</select></div></div>
+      <div class="field"><label for="to">Повод</label><select class="select" id="to">${(D.occasions || []).map((o) => `<option>${esc(o)}</option>`).join('')}</select></div>
+      ${S.soc.err ? `<p class="err" role="alert">${esc(S.soc.err)}</p>` : ''}
+      <div class="row2"><button class="btn btn-primary" id="tsend">Опубликовать</button><button class="btn" id="tcancel">Отмена</button></div></div>`;
+  }
+  VIEWS.social = () => {
+    const so = S.soc, D = so.data;
+    if (!D) return { html: `<div class="loading"><div class="ai-ava" style="margin:0 auto">${ICON.spark}</div><p>${so.off ? 'Нет сети — лента появится, когда она вернётся' : 'Загружаю ленту…'}</p></div>`, bind() { } };
+    const pub = D.can_publish, sm = D.summary;
+    const seg = `<div class="seg" role="tablist"><button role="tab" data-sg="tpl" aria-pressed="${so.tab === 'tpl'}">Шаблоны</button><button role="tab" data-sg="rev" aria-pressed="${so.tab === 'rev'}">Отзывы · ${sm.count}</button></div>`;
+    const off = so.off ? '<div class="warnbox"><span>Нет сети — показываю сохранённую ленту</span></div>' : '';
+    let body;
+    if (so.tab === 'tpl') {
+      const occ = ['Все'].concat(D.occasions || []), list = D.templates.filter((t) => so.occ === 'Все' || t.occasion === so.occ);
+      body = `${so.compose === 'tpl' ? composeTemplate(D) : pub ? '<button class="btn btn-lg" id="newt">+ Опубликовать шаблон</button>' : ''}
+        <div class="occ" role="list">${occ.map((o) => `<button class="occ-i" role="listitem" data-oc2="${esc(o)}" aria-pressed="${so.occ === o}">${esc(o)}</button>`).join('')}</div>
+        ${list.map((t) => tplCard(t, pub)).join('') || '<div class="empty"><p>Для этого повода шаблонов пока нет.</p></div>'}`;
+    } else {
+      const bars = [5, 4, 3, 2, 1].map((i) => `<div class="dist"><span class="num">${i}</span><i><b style="width:${sm.count ? (sm.dist[i] || 0) / sm.count * 100 : 0}%"></b></i><span class="num">${sm.dist[i] || 0}</span></div>`).join('');
+      body = `<div class="card sumcard"><div class="avg"><b class="num">${sm.avg ? String(sm.avg).replace('.', ',') : '—'}</b>${stars(sm.avg, true)}<small>${sm.count} ${plural(sm.count, 'отзыв', 'отзыва', 'отзывов')}</small></div><div class="dists">${bars}</div></div>
+        ${so.compose === 'rev' ? composeReview(D) : '<button class="btn btn-primary btn-lg" id="newr">Оставить отзыв</button>'}
+        ${D.reviews.map((r) => revCard(r, pub)).join('')}`;
+    }
+    return {
+      html: `<section class="hello"><h1>Сообщество picPac</h1><p>Готовые шаблоны от компании и отзывы тех, кто уже заказал.</p></section>${seg}${off}${body}
+        <p class="src">Отзывы-примеры помечены. Ссылки и контакты в отзывах не публикуются.</p>`,
+      bind(scr) { bindSocial(scr); },
+    };
+  };
+  async function socCall(path, body) {
+    try { return await call('POST', path, body || {}); } catch (e) { toast(e.offline ? 'Нет сети — повторите позже' : e.message); throw e; }
+  }
+  function bindSocial(scr) {
+    const so = S.soc, D = so.data, pub = D.can_publish;
+    const upd = (arr, id, fn) => { const x = arr.find((y) => y.id === id); if (x) fn(x); LS.set('pp_social', D); rerender(); };
+    scr.querySelectorAll('[data-sg]').forEach((b) => { b.onclick = () => { so.tab = b.dataset.sg; so.compose = null; so.err = ''; rerender(); }; });
+    scr.querySelectorAll('[data-oc2]').forEach((b) => { b.onclick = () => { so.occ = b.dataset.oc2; rerender(); }; });
+    scr.querySelectorAll('[data-tl]').forEach((b) => { b.onclick = async () => { if (!S.session) return toast('Войдите, чтобы отмечать'); const r = await socCall('/social/templates/' + b.dataset.tl + '/like').catch(() => null); if (r) upd(D.templates, b.dataset.tl, (t) => { t.likes = r.likes; t.liked = r.liked; }); }; });
+    scr.querySelectorAll('[data-rl]').forEach((b) => { b.onclick = async () => { if (!S.session) return toast('Войдите, чтобы отмечать'); const r = await socCall('/social/reviews/' + b.dataset.rl + '/like').catch(() => null); if (r) upd(D.reviews, b.dataset.rl, (t) => { t.likes = r.likes; t.liked = r.liked; }); }; });
+    scr.querySelectorAll('[data-tu]').forEach((b) => { b.onclick = () => useTemplate(D.templates.find((t) => t.id === b.dataset.tu)); });
+    scr.querySelectorAll('[data-td]').forEach((b) => { b.onclick = async () => { if (!confirm('Убрать шаблон из ленты?')) return; await socCall('/social/templates/' + b.dataset.td + '/delete').catch(() => null); loadSocial(); }; });
+    scr.querySelectorAll('[data-rd]').forEach((b) => { b.onclick = async () => { if (!confirm('Удалить отзыв?')) return; await socCall('/social/reviews/' + b.dataset.rd + '/delete').catch(() => null); loadSocial(); }; });
+    scr.querySelectorAll('[data-rh]').forEach((b) => { b.onclick = async () => { await socCall('/social/reviews/' + b.dataset.rh + '/hide').catch(() => null); loadSocial(); }; });
+    scr.querySelectorAll('[data-ro]').forEach((b) => { b.onclick = () => { so.openReply = b.dataset.ro; rerender(); const t = $('#rp'); if (t) t.focus(); }; });
+    scr.querySelectorAll('[data-rc]').forEach((b) => { b.onclick = () => { so.openReply = null; rerender(); }; });
+    scr.querySelectorAll('[data-rs]').forEach((b) => { b.onclick = async () => { const text = $('#rp').value.trim(); if (text.length < 3) return toast('Напишите ответ'); const r = await socCall('/social/reviews/' + b.dataset.rs + '/reply', { text }).catch(() => null); if (r) { so.openReply = null; toast('Ответ опубликован'); loadSocial(); } }; });
+    const nr = $('#newr'); if (nr) nr.onclick = () => { so.compose = 'rev'; so.rate = 0; so.err = ''; rerender(); };
+    const nt = $('#newt'); if (nt) nt.onclick = () => { so.compose = 'tpl'; so.err = ''; rerender(); };
+    const rc = $('#rcancel'); if (rc) rc.onclick = () => { so.compose = null; rerender(); };
+    const tc = $('#tcancel'); if (tc) tc.onclick = () => { so.compose = null; rerender(); };
+    scr.querySelectorAll('[data-st]').forEach((b) => { b.onclick = () => { so.rate = +b.dataset.st; scr.querySelectorAll('[data-st]').forEach((x) => { x.classList.toggle('on', +x.dataset.st <= so.rate); x.setAttribute('aria-checked', +x.dataset.st === so.rate); }); }; });
+    const rt = $('#rt'); if (rt) rt.oninput = () => { $('#rn').textContent = rt.value.length; };
+    const rs = $('#rsend');
+    if (rs) rs.onclick = async () => {
+      try {
+        const r = await call('POST', '/social/reviews', { order_id: $('#ro').value, rating: so.rate, text: $('#rt').value });
+        so.compose = null; so.err = ''; toast(r.mine ? 'Спасибо за отзыв!' : 'Готово'); haptic(true); await loadSocial();
+      } catch (e) { so.err = e.offline ? 'Нет сети — повторите, когда она появится' : e.message; const keep = $('#rt').value, ord = $('#ro').value; rerender(); $('#rt').value = keep; $('#ro').value = ord; $('#rn').textContent = keep.length; }
+    };
+    const tp = $('#tp');
+    if (tp) tp.onchange = () => { const p = prodOf(tp.value); $('#tv').innerHTML = p.variants.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join(''); };
+    const ts = $('#tsend');
+    if (ts) ts.onclick = async () => {
+      const pages = parseInt($('#tn').value, 10), prod = $('#tp').value;
+      const body = { title: $('#tt').value, desc: $('#td').value, product: prod, variant: $('#tv').value, per_page: +$('#tf').value, occasion: $('#to').value, options: prod === 'book' && pages ? { pages } : {} };
+      try { await call('POST', '/social/templates', body, { headers: { 'Idempotency-Key': 'tpl-' + rid() } }); so.compose = null; so.err = ''; toast('Шаблон опубликован'); await loadSocial(); }
+      catch (e) { so.err = e.offline ? 'Нет сети — повторите позже' : e.message; const k = ['tt', 'td', 'tp', 'tv', 'tn', 'tf', 'to'].map((i) => $('#' + i).value); rerender(); ['tt', 'td', 'tp', 'tv', 'tn', 'tf', 'to'].forEach((i, n) => { $('#' + i).value = k[n]; }); }
+    };
+  }
+  function useTemplate(t) {
+    const prod = t && prodOf(t.product); if (!prod) return toast('Этот продукт сейчас недоступен');
+    if (S.draft && S.draft.photos.length) { S.pool = S.pool.concat(S.draft.photos); LS.set('pp_pool', S.pool); }
+    S.draft = newDraft(prod); if (t.variant) S.draft.variant = t.variant;
+    Object.assign(S.draft.options, t.options || {}); S.draft.title = t.title; S.draft.tpl = t.id; saveDraft();
+    call('POST', '/social/templates/' + t.id + '/use', {}).catch(() => { });
+    step('catalog'); refreshPrice(); toast('Шаблон выбран — добавьте фото'); go('photos');
+  }
 
   VIEWS.profile = () => {
     const u = S.session ? S.session.user : null, guest = !u || u.role === 'customer' && /^g-/.test(u.id);

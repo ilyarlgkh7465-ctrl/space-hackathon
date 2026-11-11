@@ -27,7 +27,7 @@ STAFF_STAGES = {
     "quality": {"quality", "shipped", "done"},
 }
 # сборные коллекции приложения — чтобы кнопка «Сбросить демо-данные» их тоже очищала
-MY_COLLECTIONS = {"projects", "interactions", "uploads_meta"}
+MY_COLLECTIONS = {"projects", "interactions", "uploads_meta", "reviews", "templates", "social_stats"}
 
 # ---------------------------------------------------------------- каталог
 # Продукты и цены по мотивам picpac.by; цены выдуманные, валюта BYN.
@@ -401,6 +401,10 @@ def _route(h, method, path, core):
         return True
     if p == "account/delete" and method == "POST":
         return _account_delete(h, core, me())
+
+    # --- соцсеть: отзывы покупателей и шаблоны от компании
+    if parts and parts[0] == "social" and _social_route(h, method, parts[1:], core):
+        return True
 
     # --- сотрудники
     if p == "staff/orders" and method == "GET":
@@ -867,6 +871,7 @@ def _account_delete(h, core, user):
         shutil.rmtree(d, ignore_errors=True)
         core.save("uploads_meta", [x for x in meta if x.get("user") != user["id"]])
         core.save("projects", [x for x in core.load("projects") if x.get("user") != user["id"]])
+        core.save("reviews", [x for x in core.load("reviews") if x.get("user") != user["id"]])
         # заказы нужны учёту: оставляем без имени, телефона и адреса
         orders = core.load("orders")
         for o in orders:
@@ -887,3 +892,265 @@ def _account_delete(h, core, user):
     h._json({"ok": True, "photos_deleted": len(mine), "account_removed": guest})
     return True
 
+
+# ---------------------------------------------------------------- соцсеть: отзывы и шаблоны
+OCCASIONS = ["Любой повод", "Свадьба", "Семья", "Путешествие", "Дети", "Подарок", "Праздник"]
+LINK_RE = re.compile(r"(https?:|www\.|\.(by|com|ru|org|net)\b|@\w{3,})", re.I)
+# шаблоны от picPac, всегда в ленте (их нельзя удалить); свои компания добавляет через экран публикации
+SEED_TEMPLATES = [
+    {"id": "t-seed-wedding", "title": "Свадебный альбом «Наш день»", "desc": "Крупные кадры на разворот, по одному фото на страницу. Подойдёт для 20–40 лучших снимков.",
+     "product": "book", "variant": "classic", "options": {"pages": 24}, "per_page": 1, "occasion": "Свадьба", "tone": 0},
+    {"id": "t-seed-travel", "title": "Фотокнига о поездке", "desc": "Два-три кадра на странице: пейзаж крупно, рядом детали маршрута.",
+     "product": "book", "variant": "classic", "options": {"pages": 20}, "per_page": 3, "occasion": "Путешествие", "tone": 3},
+    {"id": "t-seed-year", "title": "Календарь «Наш год»", "desc": "По одному фото на месяц. Семейные кадры за год — и на стене весь следующий.",
+     "product": "calendar", "variant": "wall", "options": {}, "per_page": 1, "occasion": "Семья", "tone": 1},
+    {"id": "t-seed-kids", "title": "Магниты «Мои первые…»", "desc": "Яркие квадратные снимки детей на холодильник. Хороший подарок бабушкам.",
+     "product": "magnet", "variant": "10x10", "options": {}, "per_page": 1, "occasion": "Дети", "tone": 2},
+    {"id": "t-seed-mini", "title": "Мини-печать для открыток", "desc": "Набор 10×15 для кармана и открыток. Двенадцать снимков за один заказ.",
+     "product": "print", "variant": "10x15", "options": {}, "per_page": 1, "occasion": "Любой повод", "tone": 4},
+    {"id": "t-seed-canvas", "title": "Холст «Один главный кадр»", "desc": "Самая удачная фотография — на стену. Приложение подскажет, хватит ли у неё пикселей.",
+     "product": "canvas", "variant": "30x40", "options": {}, "per_page": 1, "occasion": "Подарок", "tone": 5},
+]
+SEED_REVIEWS = [  # примеры, чтобы лента не была пустой; в интерфейсе помечены «пример»
+    {"id": "r-demo-1", "name": "Анна", "product": "Фотокнига", "rating": 5, "demo": True, "ts": "2026-10-28T10:00:00+03:00",
+     "text": "Загрузила 40 фото с телефона, приложение само предложило, какие оставить, и разложило по страницам. Заказ собрала за пять минут."},
+    {"id": "r-demo-2", "name": "Максим", "product": "Печать фото", "rating": 4, "demo": True, "ts": "2026-10-30T18:20:00+03:00",
+     "text": "Удобно, что сразу видно, какие снимки получатся размытыми. Забрал в пункте выдачи в тот же день."},
+    {"id": "r-demo-3", "name": "Ольга", "product": "Магниты", "rating": 5, "demo": True, "ts": "2026-11-02T09:05:00+03:00",
+     "text": "Магниты с фото внуков — бабушки в восторге. Цвета как на экране."},
+]
+
+
+def _can_publish(u):
+    return bool(u) and u.get("role") in ("head", "director")
+
+
+def _stats_of(core):
+    return {x["id"]: x for x in core.load("social_stats")}
+
+
+def _stat_touch(core, tid, fn):
+    with core.lock:
+        st = core.load("social_stats")
+        rec = next((x for x in st if x["id"] == tid), None)
+        if not rec:
+            rec = {"id": tid, "likes": [], "uses": 0}
+            st.append(rec)
+        fn(rec)
+        core.save("social_stats", st)
+    return rec
+
+
+def _toggle_like(uid):
+    def fn(r):
+        if uid in r["likes"]:
+            r["likes"].remove(uid)
+        else:
+            r["likes"].append(uid)
+    return fn
+
+
+def _bump_use(r):
+    r["uses"] = r.get("uses", 0) + 1
+
+
+def _template_view(t, stats, uid):
+    s = stats.get(t["id"]) or {}
+    v = {k: t.get(k) for k in ("id", "title", "desc", "product", "variant", "options", "per_page", "occasion", "tone", "ts")}
+    v.update(author="picPac", likes=len(s.get("likes", [])), liked=uid in s.get("likes", []),
+             uses=s.get("uses", 0), seed=t["id"].startswith("t-seed-"))
+    return v
+
+
+def _author_name(user, order=None):
+    name = ((order or {}).get("name") or user.get("name") or "Покупатель").strip()
+    return (name.split() or ["Покупатель"])[0][:20]
+
+
+def _review_view(r, stats, uid):
+    s = stats.get(r["id"]) or {}
+    return {"id": r["id"], "name": r["name"], "product": r.get("product", ""), "rating": r["rating"], "text": r["text"], "ts": r["ts"],
+            "demo": bool(r.get("demo")), "reply": r.get("reply"), "likes": len(s.get("likes", [])), "liked": uid in s.get("likes", []),
+            "mine": bool(uid) and r.get("user") == uid, "hidden": bool(r.get("hidden")), "order_number": r.get("order_number")}
+
+
+def _social_route(h, method, parts, core):
+    u = core.user(h)
+    need = lambda: _need_user(h, core)
+    if method == "GET" and parts == ["feed"]:
+        return _social_feed(h, core, u)
+    if method == "POST" and parts == ["reviews"]:
+        return _review_save(h, core, need())
+    if method == "POST" and len(parts) == 3 and parts[0] == "reviews":
+        return _review_act(h, core, need(), parts[1], parts[2])
+    if method == "POST" and parts == ["templates"]:
+        return _template_publish(h, core, need())
+    if method == "POST" and len(parts) == 3 and parts[0] == "templates":
+        return _template_act(h, core, need(), parts[1], parts[2])
+    return False
+
+
+def _social_feed(h, core, u):
+    uid = u["id"] if u else None
+    stats = _stats_of(core)
+    pub = _can_publish(u)
+    tpls = [_template_view(t, stats, uid) for t in core.load("templates")][::-1] + [_template_view(t, stats, uid) for t in SEED_TEMPLATES]
+    real = [r for r in core.load("reviews") if not r.get("hidden") or pub or r.get("user") == uid]
+    revs = [_review_view(r, stats, uid) for r in real][::-1] + [_review_view(r, stats, uid) for r in SEED_REVIEWS]
+    shown = [x for x in revs if not x["hidden"]]
+    dist = {str(i): sum(1 for x in shown if x["rating"] == i) for i in range(1, 6)}
+    out = {"templates": tpls, "reviews": revs, "occasions": OCCASIONS, "can_publish": pub,
+           "summary": {"count": len(shown), "avg": round(sum(x["rating"] for x in shown) / len(shown), 1) if shown else 0, "dist": dist}}
+    if u:
+        mine = {r["order_id"] for r in core.load("reviews") if r.get("user") == uid}
+        out["my_orders"] = [{"id": o["id"], "number": o["number"], "reviewed": o["id"] in mine,
+                             "product": ", ".join(i.get("name", "") for i in (o.get("items") or [])[:2])}
+                            for o in core.load("orders") if o.get("customer_id") == uid][::-1]
+    h._json(out)
+    return True
+
+
+def _review_save(h, core, user):
+    b = h._body()
+    try:
+        rating = int(b.get("rating"))
+    except (TypeError, ValueError):
+        rating = 0
+    if not 1 <= rating <= 5:
+        raise Bad("Поставьте оценку от 1 до 5", extra={"field": "rating"})
+    text = " ".join(str(b.get("text") or "").split())
+    if len(text) < 10:
+        raise Bad("Расскажите чуть подробнее — хотя бы пару предложений", extra={"field": "text"})
+    if len(text) > 600:
+        raise Bad("Отзыв длиннее 600 знаков — сократите", extra={"field": "text"})
+    if LINK_RE.search(text):
+        raise Bad("В отзывах нельзя оставлять ссылки и контакты", 422, {"field": "text"})
+    oid = str(b.get("order_id") or "")
+    order = next((o for o in core.load("orders") if o.get("id") == oid and o.get("customer_id") == user["id"]), None)
+    if not order:
+        raise Bad("Отзыв можно оставить только по своему заказу", 404)
+    product = ", ".join(i.get("name", "") for i in (order.get("items") or [])[:2])[:60]
+    with core.lock:
+        items = core.load("reviews")
+        old = next((x for x in items if x.get("order_id") == oid and x.get("user") == user["id"]), None)   # один отзыв на заказ: повтор правит
+        if old:
+            old.update(rating=rating, text=text, edited=core.now())
+            rec = old
+        else:
+            rec = {"id": _new_id("r-"), "user": user["id"], "name": _author_name(user, order), "order_id": oid,
+                   "order_number": order.get("number"), "product": product, "rating": rating, "text": text, "ts": core.now(), "reply": None}
+            items.append(rec)
+        core.save("reviews", items)
+    core.audit(user["name"], "отзыв изменён" if old else "оставил отзыв", "%d из 5" % rating, obj="review " + rec["id"])
+    h._json(_review_view(rec, {}, user["id"]), 200 if old else 201)
+    return True
+
+
+def _review_act(h, core, user, rid, act):
+    b = h._body()
+    if act == "like":
+        if rid.startswith("r-demo-") or any(x["id"] == rid for x in core.load("reviews")):
+            rec = _stat_touch(core, rid, _toggle_like(user["id"]))
+            h._json({"likes": len(rec["likes"]), "liked": user["id"] in rec["likes"]})
+            return True
+        raise Bad("Не найдено", 404)
+    if act not in ("delete", "reply", "hide"):
+        raise Bad("Неизвестное действие", 404)
+    with core.lock:
+        items = core.load("reviews")
+        rec = next((x for x in items if x["id"] == rid), None)
+        if not rec:
+            raise Bad("Не найдено", 404)
+        if act == "delete":
+            if rec["user"] != user["id"] and not _can_publish(user):
+                raise Bad("Удалять можно только свой отзыв", 403)
+            core.save("reviews", [x for x in items if x["id"] != rid])
+        else:
+            if not _can_publish(user):
+                raise Bad("Это действие доступно сотрудникам компании", 403)
+            if act == "reply":
+                text = " ".join(str(b.get("text") or "").split())[:400]
+                if len(text) < 3:
+                    raise Bad("Напишите ответ", extra={"field": "text"})
+                rec["reply"] = {"by": user.get("title") or "picPac", "text": text, "ts": core.now()}
+            else:
+                rec["hidden"] = not rec.get("hidden")
+            core.save("reviews", items)
+    what = {"delete": "удалил отзыв", "reply": "ответил на отзыв", "hide": "скрыл/показал отзыв"}[act]
+    core.audit(user["name"], what, rid, obj="review " + rid)
+    h._json({"ok": True, "hidden": rec.get("hidden"), "reply": rec.get("reply")})
+    return True
+
+
+def _template_publish(h, core, user):
+    if not _can_publish(user):
+        core.audit(user["name"], "публикация шаблона", "нет прав", obj="template", result="отказ")
+        raise Bad("Публиковать шаблоны могут сотрудники компании", 403)
+    b = h._body()
+    title = " ".join(str(b.get("title") or "").split())
+    if not 3 <= len(title) <= 60:
+        raise Bad("Название — от 3 до 60 знаков", extra={"field": "title"})
+    desc = " ".join(str(b.get("desc") or "").split())[:200]
+    prod = PROD.get(str(b.get("product") or ""))
+    if not prod:
+        raise Bad("Выберите продукт", extra={"field": "product"})
+    variant = b.get("variant")
+    if not any(x["id"] == variant for x in prod["variants"]):
+        raise Bad("Выберите вариант", extra={"field": "variant"})
+    options = {}
+    pages = (b.get("options") or {}).get("pages")
+    if prod["id"] == "book" and pages is not None:
+        try:
+            pages = int(pages)
+        except (TypeError, ValueError):
+            raise Bad("Число страниц — целое число", extra={"field": "pages"})
+        if not 12 <= pages <= 60 or pages % 2:
+            raise Bad("Страниц должно быть чётное число от 12 до 60", extra={"field": "pages"})
+        options = {"pages": pages}
+    try:
+        per = int(b.get("per_page") or 1)
+    except (TypeError, ValueError):
+        per = 0
+    if not 1 <= per <= 4:
+        raise Bad("Фото на странице: от 1 до 4", extra={"field": "per_page"})
+    occ = str(b.get("occasion") or "Любой повод")
+    if occ not in OCCASIONS:
+        occ = "Любой повод"
+    key = str(h.headers.get("Idempotency-Key") or b.get("key") or "").strip()[:80]
+    with core.lock:
+        items = core.load("templates")
+        if key:
+            old = next((x for x in items if x.get("key") == key), None)
+            if old:
+                h._json(dict(_template_view(old, {}, user["id"]), replayed=True))
+                return True
+        rec = {"id": _new_id("t-"), "key": key, "title": title, "desc": desc, "product": prod["id"], "variant": variant, "options": options,
+               "per_page": per, "occasion": occ, "tone": len(items) % 6, "ts": core.now(), "by": user["id"]}
+        items.append(rec)
+        core.save("templates", items)
+    core.audit(user["name"], "опубликовал шаблон", title, obj="template " + rec["id"])
+    h._json(_template_view(rec, {}, user["id"]), 201)
+    return True
+
+
+def _template_act(h, core, user, tid, act):
+    known = any(t["id"] == tid for t in SEED_TEMPLATES) or any(t["id"] == tid for t in core.load("templates"))
+    if not known:
+        raise Bad("Шаблон не найден", 404)
+    if act == "like":
+        rec = _stat_touch(core, tid, _toggle_like(user["id"]))
+        h._json({"likes": len(rec["likes"]), "liked": user["id"] in rec["likes"]})
+        return True
+    if act == "use":
+        rec = _stat_touch(core, tid, _bump_use)
+        h._json({"uses": rec["uses"]})
+        return True
+    if act == "delete":
+        if not _can_publish(user) or tid.startswith("t-seed-"):
+            raise Bad("Удалить можно только шаблон, который опубликовала компания", 403)
+        with core.lock:
+            core.save("templates", [t for t in core.load("templates") if t["id"] != tid])
+        core.audit(user["name"], "удалил шаблон", tid, obj="template " + tid)
+        h._json({"ok": True})
+        return True
+    raise Bad("Неизвестное действие", 404)
