@@ -1,0 +1,96 @@
+/* Тёмное «жидкое стекло» в цветах picPac — для пульта руководителя и помощника.
+   Подключение: shared/fonts/fonts.css, затем shared/glass.css.
+   Цвета — из тёмной темы super.picpac.by: тёплый почти чёрный фон, кремовый текст, фирменный красный и коралл. */
+:root {
+  --bg0: #120C0B; --bg1: #1B1210;
+  --ink: #FFF8F2; --ink2: #EADFD7; --ink3: #BDAFA6; --ink4: #8C7F78;
+  --brand: #C8383A; --brand2: #FF7A66; --brand-ink: #FFD9D2;
+  --grad: linear-gradient(135deg, #FF7A66 0%, #D8403F 55%, #A8262E 100%);
+  --ok: #6FE0A8; --warn: #FFC457; --bad: #FF6464; --none: #8C7F78;
+  --ok-bg: rgba(111, 224, 168, .13); --warn-bg: rgba(255, 196, 87, .14); --bad-bg: rgba(255, 100, 100, .16);
+  --glass: rgba(255, 240, 230, .055); --glass2: rgba(255, 240, 230, .09); --glass3: rgba(255, 240, 230, .14);
+  --edge: rgba(255, 236, 226, .13); --edge2: rgba(255, 236, 226, .24);
+  --shine: inset 0 1px 0 rgba(255, 255, 255, .16), inset 0 -1px 0 rgba(0, 0, 0, .18);
+  --shadow: 0 18px 50px rgba(0, 0, 0, .38), 0 2px 6px rgba(0, 0, 0, .25);
+  --blur: blur(26px) saturate(165%);
+  --r: 22px; --r2: 16px; --r3: 12px;
+  --sans: 'Onest', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; min-height: 100vh; background: var(--bg0); color: var(--ink); font: 400 15px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+h1, h2, h3, h4, p, ul, ol, figure { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: var(--brand-ink); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid #FFB3A6; outline-offset: 2px; border-radius: 10px; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.muted { color: var(--ink3); } .faint { color: var(--ink4); }
+.hidden { display: none !important; }
+
+/* фон: тёплая темнота и три размытых световых пятна */
+.aurora { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none;
+  background: radial-gradient(1200px 800px at 70% -10%, #2A1512 0%, transparent 60%), linear-gradient(180deg, var(--bg1), var(--bg0)); }
+.aurora i { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .55; will-change: transform; }
+.aurora i:nth-child(1) { width: 620px; height: 620px; left: -160px; top: -200px; background: #B32A2E; animation: drift1 38s var(--ease) infinite alternate; }
+.aurora i:nth-child(2) { width: 520px; height: 520px; right: -120px; top: 18%; background: #FF6A55; opacity: .32; animation: drift2 46s var(--ease) infinite alternate; }
+.aurora i:nth-child(3) { width: 680px; height: 680px; left: 30%; bottom: -380px; background: #7A1F3A; opacity: .5; animation: drift3 52s var(--ease) infinite alternate; }
+@keyframes drift1 { to { transform: translate(140px, 110px) scale(1.12); } }
+@keyframes drift2 { to { transform: translate(-160px, 90px) scale(.9); } }
+@keyframes drift3 { to { transform: translate(120px, -120px) scale(1.08); } }
+
+/* стекло */
+.glass { background: linear-gradient(160deg, var(--glass2), var(--glass) 55%); border: 1px solid var(--edge);
+  border-radius: var(--r); box-shadow: var(--shine), var(--shadow); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); }
+.glass-flat { background: var(--glass); border: 1px solid var(--edge); border-radius: var(--r2); box-shadow: var(--shine); }
+.eyebrow { font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink4); font-weight: 500; }
+
+/* кнопки */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 16px;
+  border-radius: 999px; border: 1px solid var(--edge); background: var(--glass2); color: var(--ink); font-weight: 500;
+  font-size: 14px; text-decoration: none; white-space: nowrap; box-shadow: var(--shine);
+  transition: background .18s, border-color .18s, transform .12s var(--ease); }
+.btn:hover { background: var(--glass3); border-color: var(--edge2); }
+.btn:active { transform: scale(.97); }
+.btn-primary { background: var(--grad); border-color: rgba(255, 190, 175, .45); color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 8px 22px rgba(200, 56, 58, .38); }
+.btn-primary:hover { filter: brightness(1.08); background: var(--grad); }
+.btn-ghost { background: transparent; border-color: transparent; box-shadow: none; }
+.btn-ghost:hover { background: var(--glass2); }
+.btn-sm { min-height: 32px; padding: 0 12px; font-size: 13px; }
+.btn-icon { width: 40px; padding: 0; }
+.btn[disabled] { opacity: .45; pointer-events: none; }
+
+/* поля */
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink3); }
+.input, .select, .textarea { width: 100%; min-height: 42px; padding: 9px 13px; border-radius: var(--r3); background: rgba(0, 0, 0, .24);
+  border: 1px solid var(--edge); color: var(--ink); font-size: 15px; outline: none; transition: border-color .15s, background .15s; }
+.textarea { min-height: 72px; resize: vertical; line-height: 1.45; }
+.input:focus, .select:focus, .textarea:focus { border-color: #FF9A8A; background: rgba(0, 0, 0, .34); }
+.input::placeholder, .textarea::placeholder { color: var(--ink4); }
+.select { appearance: none; padding-right: 34px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23BDAFA6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; }
+.select option { background: #241815; color: var(--ink); }
+
+/* статусы: всегда цвет + слово */
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 500; background: var(--glass2); color: var(--ink2); white-space: nowrap; border: 1px solid var(--edge); }
+.chip i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.chip-ok { background: var(--ok-bg); color: var(--ok); border-color: rgba(111, 224, 168, .28); }
+.chip-warn { background: var(--warn-bg); color: var(--warn); border-color: rgba(255, 196, 87, .3); }
+.chip-bad { background: var(--bad-bg); color: var(--bad); border-color: rgba(255, 100, 100, .34); }
+.chip-none { color: var(--ink4); }
+.st-ok { color: var(--ok); } .st-warn { color: var(--warn); } .st-bad { color: var(--bad); } .st-none { color: var(--none); }
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora i { animation: none; }
+  * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+/* на телефоне пятна занимают весь экран — приглушаем, чтобы фон оставался тёмным */
+@media (max-width: 760px) { .aurora i { opacity: .26 !important; } }

@@ -1,843 +1,642 @@
-/* Пульт причин (Трек 1): показатели четырёх блоков → провал до корневой причины → решение с ответственным → контроль.
-   Данные — shared/company.js, хранилище и ИИ — shared/api.js. */
+/* Пульт руководителя «Фотопринт». Данные и права — только с сервера (/api/pult/…), здесь лишь отображение. */
 (() => {
   'use strict';
-  const C = window.COMPANY;
-  const S = C.series;
   const $ = (s, r = document) => r.querySelector(s);
-  const last = (a) => a[a.length - 1];
-  const pad = (n) => String(n).padStart(2, '0');
-  const isoDay = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-  const nowIso = () => { const d = new Date(); return isoDay(d) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); };
-  const TODAY = isoDay(new Date());
-  const nf2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const money = (v) => fmt.money(Math.round(v));
-  const sMoney = (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + fmt.n(Math.abs(Math.round(v))) + ' BYN';
-  const sNum = (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + fmt.n(Math.abs(v));
-  const dateRu = (iso) => iso ? new Date(iso.length === 10 ? iso + 'T12:00:00' : iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : '—';
-  const person = (id) => C.person(id) || { name: id || '—', role: '' };
-
-  /* ---------- производные ряды ---------- */
-  const SER = Object.assign({}, S, {
-    costs: { plan: S.revenue.plan.map((r, i) => r - S.profit.plan[i]), fact: S.revenue.fact.map((r, i) => r - S.profit.fact[i]), unit: 'BYN', good: 'down' },
-    margin: { plan: S.profit.plan.map((p, i) => p / S.revenue.plan[i] * 100), fact: S.profit.fact.map((p, i) => p / S.revenue.fact[i] * 100), unit: '%', good: 'up' },
-  });
-
-  const DOM = {
-    finance: { name: 'Финансы', c: 'var(--fin)' },
-    clients: { name: 'Клиенты', c: 'var(--cli)' },
-    production: { name: 'Производство', c: 'var(--prod)' },
-    hr: { name: 'Кадры', c: 'var(--hr)' },
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (v) => v == null ? '—' : Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('ru-RU').replace(/ /g, ' ') : (Math.round(v * 10) / 10).toLocaleString('ru-RU');
+  const fdate = (s) => s ? s.slice(8, 10) + '.' + s.slice(5, 7) : '—';
+  const ftime = (s) => s ? fdate(s) + ' ' + s.slice(11, 16) : '—';
+  const WORD = { ok: 'в норме', warn: 'внимание', bad: 'плохо', none: 'нет данных' };
+  const COLOR = { ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)', none: 'var(--none)' };
+  const chip = (st) => `<span class="chip chip-${st}"><i></i>${WORD[st] || WORD.none}</span>`;
+  const ic = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${d}</svg>`;
+  const I = {
+    pulse: ic('<path d="M3 12h4l2.5-7 5 14 2.5-7h4"/>'),
+    sales: ic('<path d="M4 5h2l2.2 10h9.6L20 8H7.2"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/>'),
+    production: ic('<path d="M3 20V9l6 4V9l6 4V5h6v15z"/><path d="M8 17h2M13 17h2"/>'),
+    finance: ic('<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18M16 15h2"/>'),
+    decisions: ic('<rect x="3" y="4" width="5" height="16" rx="1.6"/><rect x="9.5" y="4" width="5" height="10" rx="1.6"/><rect x="16" y="4" width="5" height="13" rx="1.6"/>'),
+    data: ic('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
+    search: ic('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>'),
+    bell: ic('<path d="M6 16V11a6 6 0 1112 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 004 0"/>'),
+    plus: ic('<path d="M12 5v14M5 12h14"/>'),
+    lock: ic('<rect x="5" y="11" width="14" height="9" rx="2.5"/><path d="M8 11V8a4 4 0 018 0v3"/>'),
+    close: ic('<path d="M6 6l12 12M18 6L6 18"/>'),
+    out: ic('<path d="M14 4h4a2 2 0 012 2v12a2 2 0 01-2 2h-4M10 16l-4-4 4-4M6 12h10"/>'),
+    spark: ic('<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z"/>'),
+    send: ic('<path d="M4 12l16-8-6 16-3-6z"/>'),
   };
-  const domChip = (d, text) => `<span class="dom dom-${d}">${esc(text || DOM[d].name)}</span>`;
+  const VIEWS = [
+    { id: 'pulse', name: 'Пульс компании', icon: I.pulse },
+    { id: 'sales', name: 'Продажи и клиент', icon: I.sales },
+    { id: 'production', name: 'Производство и качество', icon: I.production },
+    { id: 'finance', name: 'Финансы и люди', icon: I.finance },
+    { id: 'decisions', name: 'Реестр решений', icon: I.decisions },
+    { id: 'data', name: 'Данные и журнал', icon: I.data },
+  ];
+  const STATUSES = ['новое', 'в работе', 'на проверке', 'закрыто'];
+  const DEMO = [['director', 'Директор'], ['production', 'Руководитель производства'], ['finance', 'Руководитель финансов'], ['analyst', 'Аналитик']];
 
-  /* ---------- факторный анализ прибыли (цепные подстановки) ---------- */
-  const q0 = last(S.orders.plan), p0 = last(S.avgCheck.plan), q1 = last(S.orders.fact);
-  const r0 = last(S.revenue.plan), r1 = last(S.revenue.fact);
-  const pr0 = last(S.profit.plan), pr1 = last(S.profit.fact);
-  const CP = C.costs['2026-10-plan'], CF = C.costs['2026-10'], CS = C.costs['2026-09'];
-  const F = {
-    orders: (q1 - q0) * p0,                  // −11 520: меньше заказов при плановом чеке
-    check: r1 - q1 * p0,                     // −1 680: чек ниже плана
-    materials: CP.materials - CF.materials,  // +1 800 (по статичному плану)
-    payroll: CP.payroll - CF.payroll,        // −1 100
-    social: CP.social - CF.social,           // −350
-    rent: CP.rent - CF.rent,
-    other: CP.other - CF.other,              // +50
-  };
-  const volume = r1 / r0;                    // гибкий бюджет: материалы зависят от объёма
-  const FLEX = {
-    materials: CP.materials * volume, payroll: CP.payroll, social: CP.social, rent: CP.rent, other: CP.other,
-  };
-  const overMaterials = CF.materials - FLEX.materials;          // ≈ 2 950
-  const overTotal = Object.keys(FLEX).reduce((s, k) => s + CF[k] - FLEX[k], 0); // ≈ 4 350
-  const round10 = (v) => Math.round(v / 10) * 10;
-  const ch = (id) => C.channels.find((c) => c.id === id);
-  const lab = (id) => C.production.find((p) => p.id === id);
-  const evt = (date) => { const e = C.events.find((x) => x.date === date); return e ? { date: e.date, text: e.text, domain: e.area } : null; };
+  const store = { get: (k) => { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v == null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch (e) { /* закрытое окно */ } } };
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const S = { token: store.get('fp-token'), user: null, view: VIEWS.some((v) => v.id === hash.get('v')) ? hash.get('v') : 'pulse',
+    days: [7, 14, 30, 60].includes(+hash.get('d')) ? +hash.get('d') : 14, product: '', dept: '', pulse: null, cache: {}, err: null, chat: [], seq: 0 };
 
-  /* ---------- граф причин ---------- */
-  const NODES = {
-    profit: {
-      domain: 'finance', title: 'Прибыль ниже плана на ' + fmt.n(pr0 - pr1) + ' BYN', short: 'Прибыль 32 800 BYN вместо 45 600',
-      sum: 'Факторный анализ методом цепных подстановок: прибыль = заказы × средний чек − затраты. Каждая строка — вклад фактора. Щёлкните строку, чтобы идти глубже.',
-      kpis: () => [['План', money(pr0)], ['Факт', money(pr1)], ['Отклонение', fmt.signed(fmt.delta(pr1, pr0)) + ' %'], ['Сентябрь', money(SER.profit.fact[3])]],
-      effect: pr1 - pr0, view: viewProfit, children: ['orders', 'avgcheck', 'materials', 'payroll'],
-    },
-    revenue: {
-      domain: 'finance', parent: 'profit', title: 'Выручка ниже плана на ' + fmt.n(r0 - r1) + ' BYN', short: 'Заказы × средний чек',
-      sum: 'Выручка = заказы × средний чек. Главный вклад — число заказов, и почти весь он в одной точке продаж.',
-      kpis: () => [['План', money(r0)], ['Факт', money(r1)], ['Отклонение', fmt.signed(fmt.delta(r1, r0)) + ' %'], ['Сентябрь', money(SER.revenue.fact[3])]],
-      effect: r1 - r0, view: viewRevenue, children: ['orders', 'avgcheck'],
-    },
-    costs: {
-      domain: 'finance', parent: 'profit', title: 'Затраты: по плану норма, к объёму — перерасход ' + fmt.n(round10(overTotal)) + ' BYN', short: 'Гибкий бюджет',
-      sum: 'По статичному плану затраты даже ниже на 400 BYN. Но заказов меньше на 5 %, значит бумаги должно было уйти меньше. Пересчитываем план на фактический объём — и видим перерасход.',
-      kpis: () => [['План', money(r0 - pr0)], ['План к объёму', money(Object.values(FLEX).reduce((a, b) => a + b, 0))], ['Факт', money(r1 - pr1)], ['Перерасход', sMoney(round10(overTotal))]],
-      effect: -round10(overTotal), view: viewFlex, children: ['materials', 'payroll'],
-    },
-    orders: {
-      domain: 'clients', parent: 'profit', title: 'Заказов на ' + fmt.n(q0 - q1) + ' меньше плана', short: 'Почти весь минус — салон «Галерея»',
-      sum: 'Минус почти целиком в одной точке: «Галерея» недобрала 520 заказов. Остальные салоны — в плане или выше, значит спрос есть и дело не в рынке.',
-      kpis: () => [['План', fmt.n(q0)], ['Факт', fmt.n(q1)], ['Отклонение', fmt.signed(fmt.delta(q1, q0)) + ' %'], ['Влияние', sMoney(F.orders)]],
-      effect: F.orders, view: viewOrders, children: ['gallery', 'online'],
-    },
-    avgcheck: {
-      domain: 'clients', parent: 'profit', title: 'Средний чек ' + nf2.format(r1 / q1) + ' BYN вместо ' + nf2.format(p0), short: 'Онлайн: меньше фотокниг',
-      sum: 'В салонах чек в норме. Просел онлайн: там меньше заказов фотокниг — самого дорогого продукта, — после волны жалоб на просрочку.',
-      kpis: () => [['План', nf2.format(p0) + ' BYN'], ['Факт', nf2.format(r1 / q1) + ' BYN'], ['Отклонение', fmt.signed(fmt.delta(r1 / q1, p0)) + ' %'], ['Влияние', sMoney(F.check)]],
-      effect: F.check, view: viewCheck, children: ['online'],
-    },
-    online: {
-      domain: 'clients', parent: 'avgcheck', title: 'Онлайн: −2 600 BYN, просели фотокниги', short: 'Чек 31,01 вместо 32,00',
-      sum: 'Заказов онлайн почти по плану, но дорогих фотокниг меньше: клиенты, получившие книгу с опозданием, не возвращаются. Повторные клиенты — 38 % вместо 41 %.',
-      kpis: () => { const o = ch('online'); return [['План', money(o.plan.revenue)], ['Факт', money(o.fact.revenue)], ['Заказы', fmt.n(o.fact.orders) + ' / ' + fmt.n(o.plan.orders)], ['Повторные', last(S.repeatShare.fact) + ' %']]; },
-      effect: ch('online').fact.revenue - ch('online').plan.revenue, evidence: () => [evt('2026-10-15'), evt('2026-10-20')], children: ['books'],
-    },
-    gallery: {
-      domain: 'clients', parent: 'orders', title: 'Салон «Галерея»: −11 500 BYN, заказы −35 %', short: 'Закрыт 7 дней из 31',
-      sum: 'Салон не работал 7 дней из 31. В остальные дни администратор была одна — подстраховки не было весь месяц.',
-      kpis: () => { const g = ch('gallery'); return [['Выручка', money(g.fact.revenue) + ' / ' + fmt.n(g.plan.revenue)], ['Заказы', fmt.n(g.fact.orders) + ' / ' + fmt.n(g.plan.orders)], ['Закрыт', g.closedDays + ' дней'], ['Явка', fmt.n1(g.attendance) + ' %']]; },
-      effect: ch('gallery').fact.revenue - ch('gallery').plan.revenue, view: viewSalons, evidence: () => [evt('2026-09-30'), evt('2026-10-13')], children: ['gallery_staff'],
-    },
-    gallery_staff: {
-      domain: 'hr', parent: 'gallery', title: 'Кадры «Галереи»: явка 61 %, подстраховки нет', short: 'По отбивке 13–19.10 — никого',
-      sum: 'По отбивке видно: с 13 по 19 октября в салон никто не пришёл. Единственный администратор на больничном, вторая ставка пустует с 30 сентября.',
-      kpis: () => [['Явка', '61 % / 96 %'], ['Ставок', '1 из 2'], ['Больничный', '13–19.10'], ['Замена', 'не назначена']],
-      effect: ch('gallery').fact.revenue - ch('gallery').plan.revenue, view: viewCalendar, evidence: () => [evt('2026-09-30'), evt('2026-10-13')], children: ['root_gallery'],
-    },
-    root_gallery: {
-      domain: 'hr', parent: 'gallery_staff', root: 'gallery', title: 'Нет кадрового резерва: вакансия открыта 23 дня', short: 'Решение от 01.10 просрочено',
-      sum: 'Решение «Открыть вакансию администратора» приняли на планёрке 1 октября со сроком 15.10 и не выполнили. Пульт это видит, потому что решения ведутся в нём же.',
-      kpis: () => { const d = state.decisions.find((x) => x.id === 'd-0901'); return [['Вакансия', '23 дня (норма 14)'], ['Решение 01.10', d ? statusLabel(d) : 'просрочено'], ['Замена', 'не назначена'], ['Потери', '≈ 11 500 BYN']]; },
-      effect: ch('gallery').fact.revenue - ch('gallery').plan.revenue,
-      evidence: () => [evt('2026-09-30'), { date: '2026-10-01', text: 'Планёрка: решение «Открыть вакансию, дать замену из салона «Центр»», ответственная — Елена Шубина, срок 15.10' }, { date: '2026-10-16', text: 'Срок прошёл — кандидата нет, замену не дали' }, evt('2026-10-13')],
-      chain: [['hr', 'Вакансия 23 дня'], ['hr', 'Явка 61 %'], ['clients', 'Закрыт 7 дней, −520 заказов'], ['finance', '−11 500 BYN']],
-    },
-    materials: {
-      domain: 'finance', parent: 'profit', title: 'Материалы: перерасход ' + fmt.n(round10(overMaterials)) + ' BYN к объёму', short: 'Перепечатки брака',
-      sum: 'По статичному плану всё хорошо: на 1 800 BYN меньше. Но выручка упала на 5,8 %, а бумаги ушло почти столько же. Разница — перепечатки брака.',
-      kpis: () => [['План', money(CP.materials)], ['План к объёму', money(FLEX.materials)], ['Факт', money(CF.materials)], ['Перерасход', sMoney(round10(overMaterials))]],
-      effect: -round10(overMaterials), view: viewMaterials, children: ['lab2'],
-    },
-    lab2: {
-      domain: 'production', parent: 'materials', title: 'Минилаб №2: брак 11,4 % — в 5 раз выше соседнего', short: '6 980 перепечаток',
-      sum: 'Два одинаковых аппарата, одна бумага, а брак разный: 2,3 % и 11,4 %. Значит, причина не в материалах, а в работе на конкретном аппарате.',
-      kpis: () => [['Брак №2', fmt.n1(lab('lab2').defectRate) + ' %'], ['Брак №1', fmt.n1(lab('lab1').defectRate) + ' %'], ['Перепечаток', fmt.n(lab('lab2').reprints)], ['Стоимость', money(lab('lab2').reprintCost)]],
-      effect: -lab('lab2').reprintCost, view: viewLabs, evidence: () => [evt('2026-10-06'), evt('2026-10-07'), evt('2026-10-20')], children: ['root_lab2'],
-    },
-    root_lab2: {
-      domain: 'hr', parent: 'lab2', root: 'lab2', title: 'Пропущены 3 калибровки, новый оператор без обучения', short: 'Наставник не закреплён',
-      sum: 'Регламент — калибровка раз в неделю. Павел Жук вышел 6 октября и не прошёл обучение калибровке по порядку адаптации, наставника к нему не закрепили. Брак пошёл с середины месяца.',
-      kpis: () => [['Пропущено', '3 калибровки'], ['Последняя', '07.10'], ['Обучение', 'не пройдено'], ['Потери', '≈ ' + fmt.n(round10(overMaterials)) + ' BYN + 90 ч']],
-      effect: -round10(overMaterials),
-      evidence: () => [evt('2026-10-06'), evt('2026-10-07'), { date: '2026-10-28', text: 'Калибровка минилаба №1 — по графику; на №2 — нет записи в журнале' }, evt('2026-10-24')],
-      chain: [['hr', 'Оператор без обучения'], ['production', 'Брак 11,4 %'], ['clients', '31 жалоба на цвет'], ['finance', '−2 950 BYN, +90 ч']],
-    },
-    payroll: {
-      domain: 'hr', parent: 'profit', title: 'Оплата труда +1 450 BYN со взносами', short: 'Сверхурочные 212 ч',
-      sum: 'Штат меньше плана на 3 человека, а фонд оплаты больше: цех закрывал брак и просрочку сверхурочными.',
-      kpis: () => [['План', money(CP.payroll + CP.social)], ['Факт', money(CF.payroll + CF.social)], ['Штат', last(S.headcount.fact) + ' из ' + last(S.headcount.plan)], ['Сверхурочные', last(S.overtime.fact) + ' ч']],
-      effect: F.payroll + F.social, view: viewPayroll, children: ['overtime'],
-    },
-    overtime: {
-      domain: 'hr', parent: 'payroll', title: 'Сверхурочные 212 ч вместо 60', short: 'Брак + просрочка фотокниг',
-      sum: 'Лишние 152 часа — не нагрузка от клиентов, а исправление собственных ошибок: перепечатки с минилаба №2 и догоняющий переплёт фотокниг.',
-      kpis: () => [['План', '60 ч'], ['Факт', '212 ч'], ['Лишние', '152 ч'], ['Стоимость', '≈ 1 450 BYN']],
-      effect: F.payroll + F.social, view: viewOvertime, evidence: () => [evt('2026-10-24')], children: ['lab2', 'books'],
-    },
-    books: {
-      domain: 'production', parent: 'online', title: 'Фотокниги: просрочка 14,2 % при норме 3 %', short: 'Переплётчик в отпуске',
-      sum: 'Фотокниги переплетает один человек. Пока он был в отпуске, книги копились: 14,2 % ушли клиентам с опозданием.',
-      kpis: () => [['Просрочка', '14,2 %'], ['Норма', '≤ 3 %'], ['Фотокниг', fmt.n(lab('bind').output)], ['Переплётчиков', '1']],
-      effect: ch('online').fact.revenue - ch('online').plan.revenue, evidence: () => [evt('2026-10-15'), evt('2026-10-20')], children: ['root_books'],
-    },
-    root_books: {
-      domain: 'hr', parent: 'books', root: 'books', title: 'Единственный переплётчик ушёл в отпуск без замены', short: 'Нет кросс-обучения',
-      sum: 'Отпуск согласовали, а замену — нет: второго человека, умеющего переплетать, в цехе нет. 24 жалобы на просрочку, онлайн-выручка −2 600 BYN.',
-      kpis: () => [['Отпуск', '15–26.10'], ['Замена', 'нет'], ['Жалобы', '24'], ['Потери', '≈ 2 600 BYN + 62 ч']],
-      effect: ch('online').fact.revenue - ch('online').plan.revenue, evidence: () => [evt('2026-10-15'), evt('2026-10-20')],
-      chain: [['hr', 'Отпуск без замены'], ['production', 'Просрочка книг 14,2 %'], ['clients', '24 жалобы'], ['finance', '−2 600 BYN, +62 ч']],
-    },
-    complaints: {
-      domain: 'clients', title: 'Жалобы: 64 вместо 20, NPS упал до 41', short: 'Цвет, просрочка, закрытый салон',
-      sum: 'Жалобы втрое выше плана, и у каждой группы — своя производственная или кадровая причина. Щёлкните группу.',
-      kpis: () => [['Жалобы', '64 / 20'], ['NPS', last(S.nps.fact) + ' / ' + last(S.nps.plan)], ['Повторные', last(S.repeatShare.fact) + ' %'], ['Сентябрь', S.complaints.fact[3] + ' жалоба']],
-      effect: 0, view: viewComplaints, evidence: () => [evt('2026-10-20')], children: ['lab2', 'books', 'gallery'],
-    },
-  };
-  Object.keys(NODES).forEach((id) => { NODES[id].id = id; });
-
-  /* что помощник скажет без модели — заранее под каждую корневую причину */
-  const FALLBACK = {
-    gallery: {
-      summary: 'Салон «Галерея» потерял 520 заказов и 11 500 BYN выручки: 7 дней он был закрыт. Корень кадровый — после увольнения 30.09 замену не нашли за 23 дня, решение от 1 октября просрочено, а второй администратор ушла на больничный, и подстраховки не было.',
-      cause: 'Нет кадрового резерва: одна ставка пустует 23 дня, замену из других салонов не назначили.',
-      proposals: [
-        { action: 'Закрепить сменщика из салона «Центр» за «Галереей» до найма (график 2/2)', owner_id: 'grinko', due_days: 2, effect_byn: 9800, metric: 'Дни закрытия салона', target: '0 дней в месяц' },
-        { action: 'Поднять оклад вакансии на 10 % и разместить на трёх площадках', owner_id: 'shubina', due_days: 10, effect_byn: 11500, metric: 'Дней открыта вакансия', target: '≤ 14 дней' },
-        { action: 'Правило: в каждом салоне не меньше 3 обученных сотрудников на 2 ставки', owner_id: 'kovalev', due_days: 30, effect_byn: 0, metric: 'Явка по салонам', target: '≥ 96 %' },
-      ],
-    },
-    lab2: {
-      summary: 'Брак на минилабе №2 — 11,4 % против 2,3 % на соседнем. С 7 октября не было ни одной калибровки (по регламенту — раз в неделю), а с 6 октября там работает новый оператор без обучения. Перепечатки съели 2 300 BYN бумаги и дали 31 жалобу на цвет, цех закрывал хвосты сверхурочными.',
-      cause: 'Новый оператор не обучен калибровке, наставник не закреплён — 3 калибровки пропущены.',
-      proposals: [
-        { action: 'Откалибровать минилаб №2 сегодня и вести журнал калибровки по регламенту', owner_id: 'morozov', due_days: 1, effect_byn: 2300, metric: 'Брак минилаба №2', target: '≤ 2,5 %' },
-        { action: 'Обучить Павла Жука калибровке с наставником, допуск — после проверки', owner_id: 'petrovich', due_days: 5, effect_byn: 650, metric: 'Сверхурочные цеха', target: '≤ 60 ч' },
-        { action: 'Напоминание о калибровке в чат цеха каждый понедельник', owner_id: 'morozov', due_days: 2, effect_byn: 0, metric: 'Пропущенные калибровки', target: '0' },
-      ],
-    },
-    books: {
-      summary: 'Фотокниги ушли в просрочку 14,2 %: единственный переплётчик был в отпуске 15–26 октября, замены не было. 24 жалобы, онлайн-выручка −2 600 BYN, средний чек ниже плана, повторных клиентов меньше.',
-      cause: 'Переплёт держится на одном человеке: отпуск согласовали без замены.',
-      proposals: [
-        { action: 'Обучить второго сотрудника цеха переплёту фотокниг', owner_id: 'morozov', due_days: 14, effect_byn: 2600, metric: 'Просрочка фотокниг', target: '≤ 3 %' },
-        { action: 'Согласовывать отпуск единственных специалистов только с заменой', owner_id: 'shubina', due_days: 7, effect_byn: 0, metric: 'Участки без замены', target: '0' },
-        { action: 'Написать клиентам с просрочкой и дать промокод −15 % на следующий заказ', owner_id: 'yatskevich', due_days: 2, effect_byn: 1200, metric: 'Повторные клиенты', target: '≥ 41 %' },
-      ],
-    },
-  };
-  const ROOTS = {
-    gallery: { node: 'root_gallery', eff: '−11 500 BYN выручки', deviation: 'Прибыль −12 800 BYN к плану; салон «Галерея»: выручка −11 500 BYN, заказы −35 %, закрыт 7 дней', baseline: '7 дней закрыт' },
-    lab2: { node: 'root_lab2', eff: '−2 950 BYN перерасход', deviation: 'Материалы: перерасход 2 950 BYN к объёму; брак минилаба №2 — 11,4 % при норме 2,5 %', baseline: 'брак 11,4 %' },
-    books: { node: 'root_books', eff: '−2 600 BYN онлайн', deviation: 'Онлайн-выручка −2 600 BYN; просрочка фотокниг 14,2 % при норме 3 %; 24 жалобы', baseline: 'просрочка 14,2 %' },
-  };
-
-  /* ---------- плитки ---------- */
-  const TILES = {
-    finance: [['profit', 'Прибыль', 'profit'], ['revenue', 'Выручка', 'revenue'], ['costs', 'Затраты', 'costs'], ['margin', 'Рентабельность продаж', 'profit']],
-    clients: [['orders', 'Заказы', 'orders'], ['avgCheck', 'Средний чек', 'avgcheck'], ['complaints', 'Жалобы', 'complaints'], ['nps', 'NPS', 'complaints']],
-    production: [['output', 'Выпуск отпечатков', 'lab2'], ['defectRate', 'Брак и перепечатки', 'lab2'], ['overdueRate', 'Заказы с просрочкой', 'books'], ['utilization', 'Загрузка оборудования', 'lab2']],
-    hr: [['attendance', 'Явка по отбивке', 'gallery_staff'], ['overtime', 'Сверхурочные', 'overtime'], ['headcount', 'Штат', 'root_gallery'], ['vacancyDays', 'Вакансия открыта', 'root_gallery']],
-  };
-
-  const state = { mode: 'plan', stack: [], decisions: [], health: null, ordersN: null, orders: [], ai: {}, vecMode: 'prev', openRow: null, newId: null };
-
-  /* ---------- значения и сравнение ---------- */
-  function parts(key, v) {
-    const u = SER[key].unit;
-    if (u === 'BYN') return [key === 'avgCheck' ? nf2.format(v) : fmt.n(Math.round(v)), 'BYN'];
-    if (u === '%') return [fmt.n1(v), '%'];
-    if (u === 'отпечатков') return [fmt.n(v), 'шт'];
-    return [fmt.n(v), u];
-  }
-  function cmp(key) {
-    const s = SER[key];
-    const fact = last(s.fact);
-    const base = state.mode === 'plan' ? last(s.plan) : s.fact[s.fact.length - 2];
-    const rel = base ? (fact - base) / Math.abs(base) * 100 : 0;
-    const better = s.good === 'up' ? rel : -rel;
-    const st = better >= -1 ? 'ok' : better >= -5 ? 'warn' : 'bad';
-    let txt;
-    if (s.unit === '%') txt = fmt.signed(fact - base) + ' п.п.';
-    else if (['ч', 'дн', 'чел', ''].includes(s.unit) || key === 'complaints') txt = sNum(Math.round(fact - base)) + (s.unit && s.unit !== 'шт' ? ' ' + s.unit : '');
-    else txt = fmt.signed(rel) + ' %';
-    return { fact, base, rel, st, txt };
-  }
-
-  function spark(s) {
-    const all = s.plan.concat(s.fact);
-    let min = Math.min.apply(null, all), max = Math.max.apply(null, all);
-    if (max === min) { max += 1; min -= 1; }
-    const W = 96, H = 40, p = 5, n = s.fact.length;
-    const x = (i) => p + i * (W - 2 * p) / (n - 1);
-    const y = (v) => H - p - (v - min) / (max - min) * (H - 2 * p);
-    const path = (arr) => arr.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ');
-    return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path class="plan" d="${path(s.plan)}"/><path class="fact" d="${path(s.fact)}"/><circle cx="${x(n - 1).toFixed(1)}" cy="${y(last(s.fact)).toFixed(1)}" r="3"/></svg>`;
-  }
-
-  /* ---------- главное ---------- */
-  function renderHero() {
-    const c = cmp('profit');
-    $('#hero-value').textContent = fmt.n(c.fact) + ' BYN';
-    const d = $('#hero-delta');
-    d.textContent = fmt.signed(c.rel) + ' % ' + (state.mode === 'plan' ? 'к плану' : 'к сентябрю');
-    d.className = 'chip chip-' + c.st;
-    const gap = Math.abs(c.fact - c.base);
-    $('#hero-text').textContent = (c.fact < c.base ? 'Ниже ' : 'Выше ') + (state.mode === 'plan' ? 'плана' : 'сентября') + ' на ' + fmt.n(gap) +
-      ' BYN. Все три корня — кадровые: салон без замены, оператор без обучения, переплётчик без подмены. Финансы, клиенты, производство и кадры здесь связаны одной цепочкой.';
-    $('#hero-roots').innerHTML = Object.keys(ROOTS).map((k) => {
-      const n = NODES[ROOTS[k].node];
-      return `<li><button class="root-link" data-open="${n.id}"><b>${esc(n.title)}</b><span class="eff">${esc(ROOTS[k].eff)}</span>${chainHtml(n.chain)}</button></li>`;
-    }).join('');
-  }
-  function chainHtml(chain) {
-    return `<span class="chain">${chain.map((c, i) => (i ? '<span class="arr">→</span>' : '') + domChip(c[0], c[1])).join('')}</span>`;
-  }
-
-  /* ---------- блоки ---------- */
-  function renderBlocks() {
-    $('#blocks').innerHTML = Object.keys(TILES).map((dom) => {
-      const tiles = TILES[dom].map(([key, label, node]) => {
-        const c = cmp(key), [num, unit] = parts(key, c.fact);
-        const baseTxt = state.mode === 'plan' ? 'план ' : 'сен ';
-        const [bn, bu] = parts(key, c.base);
-        return `<button class="tile st-${c.st}" data-open="${node}" aria-label="${esc(label)}: ${num} ${unit}, ${c.txt}. Открыть причины">
-          <span class="lbl">${esc(label)}</span>
-          <span class="val num">${num}<small>${unit}</small></span>
-          <span class="meta"><span class="chip chip-${c.st}">${c.txt}</span>${baseTxt}${bn} ${bu}</span>
-          ${spark(SER[key])}
-        </button>`;
-      }).join('');
-      const live = dom === 'clients' ? `<div class="mobile-live" id="mobile-live">${mobileHtml()}</div>` : '';
-      return `<article class="card block" style="--c:${DOM[dom].c}" aria-label="${DOM[dom].name}">
-        <div class="block-head"><h2>${DOM[dom].name}</h2><span class="faint small">${state.mode === 'plan' ? 'факт / план' : 'окт / сен'}</span></div>
-        ${live}${tiles}</article>`;
-    }).join('');
-  }
-
-  /* ---------- новый мобильный канал (заказы из Трека 2) ---------- */
-  const orderSum = (o) => +(o.total ?? o.sum ?? o.amount ?? o.price ?? 0) || 0;
-  function mobileHtml() {
-    const n = state.orders.length;
-    const sum = state.orders.reduce((s, o) => s + orderSum(o), 0);
-    const lastO = state.orders[n - 1];
-    const when = lastO && lastO.ts ? 'последний в ' + new Date(lastO.ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'ждём первый заказ';
-    return `<span class="ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/></svg></span>
-      <div><b>Заказы с телефона</b><span>новый канал · ${n ? nf2.format(sum) + ' BYN · ' : ''}${when}</span></div>
-      <span class="cnt" aria-live="polite">${n}</span>`;
-  }
-  async function pollOrders() {
-    const list = await api.list('orders');
-    const grew = state.ordersN !== null && list.length > state.ordersN;
-    state.orders = list;
-    state.ordersN = list.length;
-    const el = $('#mobile-live');
-    if (el) {
-      el.innerHTML = mobileHtml();
-      if (grew) {
-        el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse');
-        const o = last(list);
-        toast('Новый заказ с телефона' + (orderSum(o) ? ': ' + nf2.format(orderSum(o)) + ' BYN' : ''));
-      }
-    }
-  }
-
-  /* ---------- провал до причины ---------- */
-  function pathOf(id) {
-    const out = [];
-    let cur = id;
-    while (cur) { out.unshift(cur); cur = NODES[cur].parent; }
-    return out;
-  }
-  function openPath(id) {
-    state.stack = pathOf(id);
-    const dr = $('#drawer');
-    $('#drawer-back').classList.remove('hidden');
-    dr.classList.add('open');
-    dr.setAttribute('aria-hidden', 'false');
-    renderNode();
-  }
-  function closeDrawer() {
-    const dr = $('#drawer');
-    dr.classList.remove('open');
-    dr.setAttribute('aria-hidden', 'true');
-    $('#drawer-back').classList.add('hidden');
-  }
-  function go(id) { state.stack.push(id); renderNode(); }
-  function back() { if (state.stack.length > 1) { state.stack.pop(); renderNode(); } else closeDrawer(); }
-
-  function renderNode() {
-    const node = NODES[last(state.stack)];
-    $('#crumbs').innerHTML = state.stack.map((id, i) => {
-      const n = NODES[id];
-      const cur = i === state.stack.length - 1;
-      return (i ? '<span class="sep">›</span>' : '') + `<button class="crumb" style="--c:${DOM[n.domain].c}" data-crumb="${i}" ${cur ? 'aria-current="page"' : ''}>${esc(n.short && !cur ? crumbName(n) : crumbName(n))}</button>`;
-    }).join('');
-    const kp = node.kpis().map(([k, v]) => `<div><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
-    const ev = node.evidence ? node.evidence().filter(Boolean) : [];
-    const kids = (node.children || []).map((id) => {
-      const n = NODES[id];
-      const e = n.effect ? `<span class="eff ${n.effect < 0 ? 'neg' : 'pos'}">${sMoney(n.effect)}</span>` : '<span></span>';
-      return `<button class="next-btn" data-go="${id}">${domChip(n.domain)}<div><b>${esc(n.title)}</b><span>${esc(n.short)}</span></div>${e}</button>`;
-    }).join('');
-    const isRoot = !!node.root;
-    $('#node').innerHTML = `<div class="node-enter">
-      <div class="row">${domChip(node.domain)}${isRoot ? '<span class="chip chip-bad">Корневая причина</span>' : ''}</div>
-      <h2 class="node-title" id="node-title" tabindex="-1">${esc(node.title)}</h2>
-      <p class="node-sum">${esc(node.sum)}</p>
-      <div class="nk">${kp}</div>
-      ${node.view ? node.view() : ''}
-      ${isRoot ? rootHtml(node) : ''}
-      ${ev.length ? `<div class="sect"><h3>Доказательства</h3><ul class="ev">${ev.map((e) => `<li><time>${e.date ? e.date.slice(8, 10) + '.' + e.date.slice(5, 7) : ''}</time><span>${esc(e.text)}</span></li>`).join('')}</ul></div>` : ''}
-      ${kids ? `<div class="sect"><h3>${node.id === 'profit' ? 'Куда смотреть дальше' : 'Причина глубже'}</h3><div class="next">${kids}</div></div>` : ''}
-      ${node.id === 'profit' ? `<div class="sect"><h3>Три корня отклонения</h3><div class="next">${Object.keys(ROOTS).map((k) => { const n = NODES[ROOTS[k].node]; return `<button class="next-btn" data-go="${n.id}">${domChip(n.domain)}<div><b>${esc(n.title)}</b>${chainHtml(n.chain)}</div><span class="eff neg">${esc(ROOTS[k].eff)}</span></button>`; }).join('')}</div></div>` : ''}
-    </div>`;
-    $('#back').textContent = state.stack.length > 1 ? '← Назад' : '← Закрыть';
-    $('#node-title').focus({ preventScroll: true });
-    $('#drawer .drawer-body').scrollTop = 0;
-  }
-  function crumbName(n) {
-    const map = { profit: 'Прибыль', revenue: 'Выручка', costs: 'Затраты', orders: 'Заказы', avgcheck: 'Средний чек', online: 'Онлайн', gallery: '«Галерея»', gallery_staff: 'Кадры салона', root_gallery: 'Корень', materials: 'Материалы', lab2: 'Минилаб №2', root_lab2: 'Корень', payroll: 'Оплата труда', overtime: 'Сверхурочные', books: 'Фотокниги', root_books: 'Корень', complaints: 'Жалобы' };
-    return map[n.id] || n.title;
-  }
-  function rootHtml(node) {
-    const cached = state.ai[node.id];
-    return `<div class="sect"><div class="root-box">
-        <h3>Как причина дошла до денег</h3>
-        ${chainHtml(node.chain)}
-        <div class="actions">
-          <button class="btn btn-primary" data-explain="${node.id}">${cached ? 'Спросить ещё раз' : 'Объяснить причину'}</button>
-          <button class="btn" data-decide="0">Оформить решение по отклонению</button>
-        </div>
-      </div>
-      <div class="ai-wrap" id="ai-box">${cached ? aiHtml(node, cached) : ''}</div></div>`;
-  }
-
-  /* ---------- виды узлов ---------- */
-  function wfHtml(steps) {
-    let cum = 0, max = 0;
-    const rows = steps.map((s) => {
-      let from, to;
-      if (s.base) { from = 0; to = s.v; cum = s.v; } else { from = cum; to = cum + s.v; cum = to; }
-      max = Math.max(max, from, to);
-      return Object.assign({}, s, { from, to });
-    });
-    max *= 1.04;
-    return `<div class="sect"><h3>Факторы: от плана к факту</h3><div class="wf">${rows.map((r) => {
-      const l = Math.min(r.from, r.to) / max * 100, w = Math.abs(r.to - r.from) / max * 100;
-      const cls = r.base ? 'base' : r.v < 0 ? 'neg' : 'pos';
-      const tag = r.node ? 'button' : 'div';
-      return `<${tag} class="wf-row${r.base ? ' total' : ''}" ${r.node ? `data-go="${r.node}"` : ''}><span class="lab">${esc(r.label)}</span><span class="wf-track"><i class="${cls}" style="left:${l.toFixed(2)}%;width:${w.toFixed(2)}%"></i></span><span class="v">${r.base ? fmt.n(r.v) : sNum(Math.round(r.v))}</span></${tag}>`;
-    }).join('')}</div></div>`;
-  }
-  function viewProfit() {
-    return wfHtml([
-      { label: 'План', v: pr0, base: true },
-      { label: 'Заказы', v: F.orders, node: 'orders' },
-      { label: 'Средний чек', v: F.check, node: 'avgcheck' },
-      { label: 'Материалы', v: F.materials, node: 'materials' },
-      { label: 'Оплата труда', v: F.payroll, node: 'payroll' },
-      { label: 'Отчисления', v: F.social, node: 'payroll' },
-      { label: 'Прочие', v: F.other },
-      { label: 'Факт', v: pr1, base: true },
-    ]) + `<p class="wf-note">Материалы «в плюсе» только потому, что заказов меньше. Если пересчитать план на фактический объём, это перерасход ${fmt.n(round10(overMaterials))} BYN — <button class="btn btn-sm btn-ghost" data-go="materials">разобрать →</button></p>`;
-  }
-  function divBars(rows, fmtV) {
-    const mx = Math.max.apply(null, rows.map((r) => Math.abs(r.v))) || 1;
-    return `<div class="bars">${rows.map((r) => {
-      const w = Math.abs(r.v) / mx * 50;
-      const tag = r.node ? 'button' : 'div';
-      return `<${tag} class="bar-row" ${r.node ? `data-go="${r.node}"` : ''}><span>${esc(r.label)}</span><span class="dbar"><i class="${r.v < 0 ? 'neg' : 'pos'}" style="width:${w.toFixed(2)}%"></i></span><span class="v">${fmtV(r)}</span></${tag}>`;
-    }).join('')}</div>`;
-  }
-  const chanNode = { gallery: 'gallery', online: 'online' };
-  function viewRevenue() {
-    const rows = C.channels.filter((c) => c.type !== 'mobile').map((c) => ({ label: c.name, v: c.fact.revenue - c.plan.revenue, node: chanNode[c.id] }))
-      .sort((a, b) => a.v - b.v);
-    return `<div class="sect"><h3>Заказы × средний чек</h3><div class="tbl-wrap"><table class="table">
-        <tr><th>Фактор</th><th class="r">План</th><th class="r">Факт</th><th class="r">Влияние</th></tr>
-        <tr><td><button class="btn btn-sm btn-ghost" data-go="orders">Заказы →</button></td><td class="r">${fmt.n(q0)}</td><td class="r">${fmt.n(q1)}</td><td class="r">${sMoney(F.orders)}</td></tr>
-        <tr><td><button class="btn btn-sm btn-ghost" data-go="avgcheck">Средний чек →</button></td><td class="r">${nf2.format(p0)}</td><td class="r">${nf2.format(r1 / q1)}</td><td class="r">${sMoney(F.check)}</td></tr>
-      </table></div></div>
-      <div class="sect"><h3>Выручка по точкам продаж, отклонение от плана</h3>${divBars(rows, (r) => sNum(r.v))}</div>`;
-  }
-  function viewFlex() {
-    const names = { materials: 'Материалы', payroll: 'Оплата труда', social: 'Отчисления', rent: 'Аренда и амортизация', other: 'Прочие' };
-    const node = { materials: 'materials', payroll: 'payroll', social: 'payroll' };
-    const rows = Object.keys(FLEX).map((k) => {
-      const over = CF[k] - FLEX[k];
-      return `<tr class="${over > 300 ? 'hl' : ''}"><td>${node[k] ? `<button class="btn btn-sm btn-ghost" data-go="${node[k]}">${names[k]} →</button>` : names[k]}</td><td class="r">${fmt.n(CP[k])}</td><td class="r">${fmt.n(Math.round(FLEX[k]))}</td><td class="r">${fmt.n(CF[k])}</td><td class="r">${sNum(Math.round(over))}</td></tr>`;
-    }).join('');
-    return `<div class="sect"><h3>Гибкий бюджет: план, пересчитанный на объём</h3><div class="tbl-wrap"><table class="table">
-      <tr><th>Статья</th><th class="r">План</th><th class="r">К объёму</th><th class="r">Факт</th><th class="r">Перерасход</th></tr>${rows}
-      <tr><td><b>Итого</b></td><td class="r">${fmt.n(r0 - pr0)}</td><td class="r">${fmt.n(Math.round(Object.values(FLEX).reduce((a, b) => a + b, 0)))}</td><td class="r">${fmt.n(r1 - pr1)}</td><td class="r"><b>${sNum(round10(overTotal))}</b></td></tr>
-      </table></div><p class="wf-note">Материалы пересчитаны пропорционально выручке (${fmt.n1(volume * 100)} % от плана), остальные статьи — постоянные.</p></div>`;
-  }
-  function viewOrders() {
-    const rows = C.channels.filter((c) => c.type !== 'mobile').map((c) => ({ label: c.name, v: c.fact.orders - c.plan.orders, pct: fmt.delta(c.fact.orders, c.plan.orders), node: chanNode[c.id] }))
-      .sort((a, b) => a.v - b.v);
-    rows.push({ label: 'Мобильный заказ (новый)', v: state.orders.length, pct: null });
-    return `<div class="sect"><h3>Заказы по точкам продаж, отклонение от плана</h3>${divBars(rows, (r) => sNum(r.v) + (r.pct != null ? ' (' + fmt.signed(r.pct, 0) + ' %)' : ''))}</div>`;
-  }
-  function viewCheck() {
-    const sal = C.channels.filter((c) => c.type === 'salon');
-    const sp = sal.reduce((a, c) => ({ o: a.o + c.plan.orders, r: a.r + c.plan.revenue }), { o: 0, r: 0 });
-    const sf = sal.reduce((a, c) => ({ o: a.o + c.fact.orders, r: a.r + c.fact.revenue }), { o: 0, r: 0 });
-    const on = ch('online');
-    return `<div class="sect"><h3>Средний чек по каналам, BYN</h3><div class="tbl-wrap"><table class="table">
-      <tr><th>Канал</th><th class="r">План</th><th class="r">Факт</th><th class="r">Отклонение</th></tr>
-      <tr><td>Салоны (6 точек)</td><td class="r">${nf2.format(sp.r / sp.o)}</td><td class="r">${nf2.format(sf.r / sf.o)}</td><td class="r">${fmt.signed(fmt.delta(sf.r / sf.o, sp.r / sp.o))} %</td></tr>
-      <tr class="hl"><td><button class="btn btn-sm btn-ghost" data-go="online">Онлайн →</button></td><td class="r">${nf2.format(on.plan.revenue / on.plan.orders)}</td><td class="r">${nf2.format(on.fact.revenue / on.fact.orders)}</td><td class="r">${fmt.signed(fmt.delta(on.fact.revenue / on.fact.orders, on.plan.revenue / on.plan.orders))} %</td></tr>
-      </table></div></div>`;
-  }
-  function viewSalons() {
-    const sal = C.channels.filter((c) => c.type === 'salon');
-    return `<div class="sect"><h3>Явка по отбивке и выполнение плана по салонам</h3><div class="tbl-wrap"><table class="table">
-      <tr><th>Салон</th><th class="r">Явка</th><th class="r">Заказы к плану</th></tr>
-      ${sal.map((c) => `<tr class="${c.id === 'gallery' ? 'hl' : ''}"><td>${esc(c.name)}</td><td class="r">${fmt.n1(c.attendance)} %</td><td class="r">${fmt.signed(fmt.delta(c.fact.orders, c.plan.orders))} %</td></tr>`).join('')}
-      </table></div><p class="wf-note">Где явка в норме — план выполнен. Связь кадров и выручки видна прямо в таблице.</p></div>`;
-  }
-  function viewCalendar() {
-    let cells = '';
-    for (let d = 1; d <= 31; d++) {
-      const off = d >= 13 && d <= 19;
-      cells += `<span class="cal-d ${off ? 'off' : 'half'}" title="${d} октября: ${off ? 'никто не отметился' : 'отметился 1 из 2'}">${d}</span>`;
-    }
-    return `<div class="sect"><h3>Отбивка салона «Галерея», октябрь</h3><div class="cal">${cells}</div>
-      <p class="wf-note"><span class="cal-key half"></span> 1 сотрудник из 2 &nbsp; <span class="cal-key off"></span> никто не отметился — салон закрыт</p></div>`;
-  }
-  function hbars(rows, unit) {
-    const mx = Math.max.apply(null, rows.map((r) => r.v)) || 1;
-    return `<div class="bars">${rows.map((r) => {
-      const tag = r.node ? 'button' : 'div';
-      return `<${tag} class="bar-row" ${r.node ? `data-go="${r.node}"` : ''}><span>${esc(r.label)}</span><span class="hbar"><i style="width:${(r.v / mx * 100).toFixed(1)}%;${r.muted ? 'background:var(--line2)' : ''}"></i></span><span class="v">${fmt.n(r.v)} ${unit}</span></${tag}>`;
-    }).join('')}</div>`;
-  }
-  function viewMaterials() {
-    return `<div class="sect"><h3>Из чего перерасход</h3>${hbars([
-      { label: 'Перепечатки минилаба №2 (6 980 отп.)', v: lab('lab2').reprintCost, node: 'lab2' },
-      { label: 'Химия и обложки сверх нормы', v: round10(overMaterials) - lab('lab2').reprintCost, muted: true },
-    ], 'BYN')}</div>`;
-  }
-  function viewLabs() {
-    const rows = C.production.filter((p) => p.id === 'lab1' || p.id === 'lab2');
-    return `<div class="sect"><h3>Два одинаковых аппарата</h3><div class="tbl-wrap"><table class="table">
-      <tr><th>Участок</th><th class="r">Выпуск</th><th class="r">Брак</th><th class="r">Калибровка</th><th>Оператор</th></tr>
-      ${rows.map((p) => `<tr class="${p.id === 'lab2' ? 'hl' : ''}"><td>${esc(p.name)}</td><td class="r">${fmt.n(p.output)}</td><td class="r">${fmt.n1(p.defectRate)} %</td><td class="r">${p.calibratedAt.slice(8, 10)}.${p.calibratedAt.slice(5, 7)}</td><td>${esc(person(p.operator).name)}</td></tr>`).join('')}
-      </table></div></div>`;
-  }
-  function viewPayroll() {
-    return `<div class="sect"><h3>Фонд оплаты труда</h3><div class="tbl-wrap"><table class="table">
-      <tr><th>Статья</th><th class="r">План</th><th class="r">Факт</th><th class="r">Разница</th></tr>
-      <tr class="hl"><td><button class="btn btn-sm btn-ghost" data-go="overtime">Оплата труда →</button></td><td class="r">${fmt.n(CP.payroll)}</td><td class="r">${fmt.n(CF.payroll)}</td><td class="r">${sNum(CF.payroll - CP.payroll)}</td></tr>
-      <tr><td>Отчисления на соцнужды</td><td class="r">${fmt.n(CP.social)}</td><td class="r">${fmt.n(CF.social)}</td><td class="r">${sNum(CF.social - CP.social)}</td></tr>
-      <tr><td>Штат, чел</td><td class="r">${last(S.headcount.plan)}</td><td class="r">${last(S.headcount.fact)}</td><td class="r">${sNum(last(S.headcount.fact) - last(S.headcount.plan))}</td></tr>
-      </table></div></div>`;
-  }
-  function viewOvertime() {
-    return `<div class="sect"><h3>На что ушли часы</h3>${hbars([
-      { label: 'Перепечатки минилаба №2', v: 90, node: 'lab2' },
-      { label: 'Догоняющий переплёт фотокниг', v: 62, node: 'books' },
-      { label: 'Плановые сверхурочные', v: 60, muted: true },
-    ], 'ч')}</div>`;
-  }
-  function viewComplaints() {
-    return `<div class="sect"><h3>Жалобы октября по причинам</h3>${hbars([
-      { label: 'Цвет на отпечатках', v: 31, node: 'lab2' },
-      { label: 'Просроченные фотокниги', v: 24, node: 'books' },
-      { label: 'Салон закрыт, не дозвонились', v: 9, node: 'gallery' },
-    ], '')}</div>`;
-  }
-
-  /* ---------- Объяснить причину ---------- */
-  const toNum = (v) => typeof v === 'number' ? v : parseFloat(String(v || '').replace(/\s/g, '').replace(',', '.').replace(/[^\d.]/g, '')) || 0;
-  async function explain(nodeId) {
-    const node = NODES[nodeId];
-    const box = $('#ai-box');
-    box.innerHTML = `<div class="ai-note"><div class="ai-ava">ИИ</div><div class="ai-body"><p class="typing">Помощник проходит путь от прибыли до причины</p></div></div>`;
-    const path = pathOf(nodeId).map((id) => NODES[id]).map((n) => '- ' + DOM[n.domain].name + ': ' + n.title + '. ' + n.sum + ' Показатели: ' + n.kpis().map((k) => k[0] + ' ' + k[1]).join('; ')).join('\n');
-    const facts = (node.evidence ? node.evidence() : []).filter(Boolean).map((e) => '- ' + (e.date || '') + ' ' + e.text).join('\n');
-    const people = C.people.map((p) => '- ' + p.id + ' — ' + p.name + ', ' + p.role).join('\n');
-    const system = 'Ты — ИИ-аналитик компании «Проявка» (сеть фотосалонов и цех печати, Минск). Руководитель прошёл от отклонения прибыли до корневой причины. ' +
-      'Объясни простыми словами, без канцелярита, и предложи ровно 3 решения. Опирайся только на факты из сообщения, новых цифр не выдумывай. ' +
-      'В тексте могут быть метки вида [ФИО_1] или [СУММА_2] — это скрытые данные, используй метки как есть. ' +
-      'Ответ — только JSON: {"summary": "2–3 предложения: что случилось и почему, с цифрами", "cause": "корневая причина одной фразой", ' +
-      '"proposals": [{"action": "конкретное действие", "owner_id": "id из списка сотрудников", "due_days": число дней, "effect_byn": число BYN в месяц или метка суммы, "metric": "как проверим", "target": "целевое значение"}]}. owner_id — строго из списка. effect_byn — только та часть потерь, которую закрывает именно это действие, не повторяй общую сумму отклонения; для организационных мер ставь 0. metric и target — коротко, до 6 слов.';
-    const user = 'Путь от агрегата к причине:\n' + path + '\n\nФакты:\n' + facts + '\n\nСотрудники (id — имя, роль):\n' + people;
-    const fb = FALLBACK[node.root];
-    const res = await api.ai({ system, user, json: true, mask: true, who: 'Андрей Ковалёв (директор)', title: 'Пульт причин: ' + node.title, max_tokens: 1000, timeout: 25000 }, fb);
-    let j = res.json;
-    if (!j || !Array.isArray(j.proposals) || !j.proposals.length || !j.summary) { j = fb; res.fallback = true; }
-    j = {
-      summary: String(j.summary || fb.summary), cause: String(j.cause || fb.cause),
-      proposals: j.proposals.filter((p) => p && p.action).slice(0, 3).map((p, i) => ({
-        action: String(p.action), owner_id: C.person(p.owner_id) ? p.owner_id : fb.proposals[i % 3].owner_id,
-        due_days: Math.min(60, Math.max(1, Math.round(toNum(p.due_days)) || 7)), effect_byn: Math.max(0, Math.round(toNum(p.effect_byn))),
-        metric: String(p.metric || fb.proposals[i % 3].metric), target: String(p.target || fb.proposals[i % 3].target),
-      })),
-    };
-    state.ai[nodeId] = { j, res };
-    if (last(state.stack) === nodeId) {
-      $('#ai-box').innerHTML = aiHtml(node, state.ai[nodeId]);
-      const b = $('[data-explain]'); if (b) b.textContent = 'Спросить ещё раз';
-    }
-  }
-  function aiHtml(node, cached) {
-    const { j, res } = cached;
-    const src = res.fallback
-      ? 'Встроенная логика: модель недоступна или выключена — ответ собран из правил пульта'
-      : (res.provider || 'Модель') + ' · ' + (res.ms ? (res.ms / 1000).toFixed(1) + ' с · ' : '') + (res.masked && res.masked.count ? 'перед отправкой скрыто ' + res.masked.count + ' меток: ФИО, суммы, телефоны' : 'персональные данные не отправлялись');
-    return `<div class="ai-note"><div class="ai-ava">ИИ</div><div class="ai-body">
-      <p>${esc(j.summary)}</p>
-      <p><b>Корень:</b> ${esc(j.cause)}</p>
-      <div class="proposals">${j.proposals.map((p, i) => `<div class="prop"><div>${esc(p.action)}</div>
-        <div class="m">${esc(person(p.owner_id).name)} · ${p.due_days} дн. · ${p.effect_byn ? '≈ ' + fmt.n(p.effect_byn) + ' BYN/мес' : 'эффект оценим'} · ${esc(p.metric)} → ${esc(p.target)}</div>
-        <button class="btn btn-sm btn-primary" data-decide="${i}">Оформить</button></div>`).join('')}</div>
-      <p class="ai-src">${esc(src)}</p></div></div>`;
-  }
-
-  /* ---------- решение по отклонению ---------- */
-  function addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return isoDay(d); }
-  function openDecision(idx) {
-    const node = NODES[last(state.stack)];
-    const key = node.root;
-    const ai = (state.ai[node.id] && state.ai[node.id].j) || FALLBACK[key];
-    const p = ai.proposals[idx] || ai.proposals[0];
-    const opts = C.people.map((x) => `<option value="${x.id}" ${x.id === p.owner_id ? 'selected' : ''}>${esc(x.name)} — ${esc(x.role)}</option>`).join('');
-    $('#modal').innerHTML = `<form id="dec-form">
-      <p class="eyebrow">Решение по отклонению · ${esc(DOM[node.domain].name)}</p>
-      <h2 id="modal-title">${esc(node.title)}</h2>
-      <div class="pick" role="radiogroup" aria-label="Предложения помощника">${ai.proposals.map((x, i) => `<label><input type="radio" name="prop" value="${i}" ${x === p ? 'checked' : ''}><span>${esc(x.action)}<small>${esc(person(x.owner_id).name)} · ${x.due_days} дн. · ${esc(x.metric)} → ${esc(x.target)}</small></span></label>`).join('')}</div>
-      <div class="form-grid">
-        <div class="field full"><label for="f-dev">Отклонение</label><textarea class="textarea" id="f-dev" rows="2" style="min-height:64px">${esc(ROOTS[key].deviation)}</textarea></div>
-        <div class="field full"><label for="f-cause">Причина</label><input class="input" id="f-cause" value="${esc(ai.cause)}"></div>
-        <div class="field full"><label for="f-act">Что делаем</label><input class="input" id="f-act" required value="${esc(p.action)}"></div>
-        <div class="field"><label for="f-owner">Ответственный</label><select class="select" id="f-owner">${opts}</select></div>
-        <div class="field"><label for="f-due">Срок</label><input class="input" type="date" id="f-due" required value="${addDays(p.due_days)}"></div>
-        <div class="field"><label for="f-metric">Метрика контроля</label><input class="input" id="f-metric" value="${esc(p.metric)}"></div>
-        <div class="field"><label for="f-target">Цель</label><input class="input" id="f-target" value="${esc(p.target)}"></div>
-        <div class="field"><label for="f-eff">Ожидаемый эффект, BYN в месяц</label><input class="input" type="number" min="0" step="50" id="f-eff" value="${p.effect_byn || ''}"></div>
-        <div class="field"><label for="f-base">Сейчас (было)</label><input class="input" id="f-base" value="${esc(ROOTS[key].baseline)}"></div>
-      </div>
-      <div class="modal-foot"><button type="button" class="btn" data-close-modal>Отмена</button><button type="submit" class="btn btn-primary">Оформить и отправить ответственному</button></div>
-    </form>`;
-    showModal();
-    $('#modal').querySelectorAll('input[name="prop"]').forEach((r) => r.addEventListener('change', () => {
-      const x = ai.proposals[+r.value];
-      $('#f-act').value = x.action; $('#f-owner').value = x.owner_id; $('#f-due').value = addDays(x.due_days);
-      $('#f-metric').value = x.metric; $('#f-target').value = x.target; $('#f-eff').value = x.effect_byn || '';
-    }));
-    $('#dec-form').addEventListener('submit', (e) => { e.preventDefault(); saveDecision(node); });
-    setTimeout(() => $('#f-act').focus(), 50);
-  }
-  function showModal() { $('#modal-back').classList.remove('hidden'); }
-  function closeModal() { $('#modal-back').classList.add('hidden'); $('#modal').innerHTML = ''; }
-
-  async function saveDecision(node) {
-    const btn = $('#dec-form button[type="submit"]');
-    btn.disabled = true; btn.textContent = 'Сохраняю…';
-    const v = (id) => $(id).value.trim();
-    const eff = Math.round(+v('#f-eff') || 0);
-    const owner = v('#f-owner');
-    const number = state.decisions.length + 1;
-    const item = {
-      number, source: 't1', node: node.id, status: 'new',
-      title: v('#f-act'), action: v('#f-act'), deviation: v('#f-dev'), cause: v('#f-cause'), owner, due: v('#f-due'),
-      metric: v('#f-metric'), baseline: v('#f-base'), target: v('#f-target'),
-      effect: eff ? fmt.n(eff) + ' BYN в месяц' : '—', effect_byn: eff,
-      history: [{ ts: nowIso(), text: 'Оформлено в пульте причин: ' + pathOf(node.id).map((id) => crumbName(NODES[id])).join(' → ') }],
-    };
+  /* ---------- сервер ---------- */
+  class ApiError extends Error { constructor(msg, code) { super(msg); this.code = code; } }
+  async function api(path, opts = {}) {
+    let r;
     try {
-      const d = await api.add('decisions', item);
-      await api.add('tasks', { title: item.title, owner, due: item.due, status: 'new', source: 't1', decision: d.id });
-      state.newId = d.id;
-      await loadJournal();
-      renderSent(d);
-      if (state.health && state.health.telegram) {
-        const r = await api.telegram(tgText(d, true), 'Андрей Ковалёв (директор)');
-        const n = $('#tg-note'); if (n) n.textContent = r.ok ? 'Сообщение ушло в Telegram.' : 'Telegram не ответил — показываем, как увидит сотрудник.';
+      r = await fetch(path, { method: opts.body ? 'POST' : 'GET', headers: Object.assign({ 'Content-Type': 'application/json' }, S.token ? { Authorization: 'Bearer ' + S.token } : {}),
+        body: opts.body ? JSON.stringify(opts.body) : undefined });
+    } catch (e) { throw new ApiError('Нет связи с сервером. Проверьте сеть и повторите — введённое сохранено.', 0); }
+    let data = null;
+    try { data = await r.json(); } catch (e) { /* пустой ответ */ }
+    if (r.status === 401 && path !== '/api/login') { logout(true); throw new ApiError('Сеанс закончился, войдите снова', 401); }
+    if (!r.ok) throw new ApiError((data && data.error) || 'Сервер ответил ошибкой ' + r.status, r.status);
+    return data;
+  }
+  const q = () => `days=${S.days}${S.product ? '&product=' + S.product : ''}`;
+  async function cached(key, path) {
+    const k = key + '|' + q();
+    if (!S.cache[k]) S.cache[k] = api(path).catch((e) => { delete S.cache[k]; throw e; });
+    return S.cache[k];
+  }
+  const drill = (kpi, by) => cached(`drill:${kpi}:${by}`, `/api/pult/drill?kpi=${kpi}&by=${by}&${q()}`);
+  function toast(text, action) {
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.innerHTML = `<span>${esc(text)}</span>${action ? `<button class="btn btn-sm">${esc(action.label)}</button>` : ''}`;
+    if (action) $('button', el).onclick = () => { el.remove(); action.run(); };
+    $('#toasts').append(el);
+    setTimeout(() => el.remove(), action ? 9000 : 4200);
+  }
+
+  /* ---------- вход ---------- */
+  function renderLogin(msg = '') {
+    $('#layer').innerHTML = '';
+    $('#app').innerHTML = `<main class="login"><form class="glass login-card" id="loginForm" autocomplete="off">
+      <span class="logo" aria-hidden="true">Ф</span>
+      <div><p class="eyebrow">Фотопринт · единая система</p><h1>Пульт руководителя</h1></div>
+      <p class="muted">Состояние компании, причины отклонений и ответственные — в одном окне. Данные тестовые.</p>
+      <label class="field">Логин<input class="input" name="login" required autocapitalize="none" spellcheck="false"></label>
+      <label class="field">Пароль<input class="input" name="password" type="password" required></label>
+      <p class="err" role="alert">${esc(msg)}</p>
+      <button class="btn btn-primary" type="submit">Войти</button>
+      <div><p class="eyebrow" style="margin-bottom:8px">Тестовые роли</p><div class="roles">${DEMO.map(([l, n]) => `<button type="button" class="btn btn-sm" data-demo="${l}">${n}</button>`).join('')}</div></div>
+    </form></main>`;
+    const f = $('#loginForm');
+    $$('[data-demo]', f).forEach((b) => b.onclick = () => { f.login.value = b.dataset.demo; f.password.value = 'demo2026'; f.requestSubmit(); });
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = $('button[type=submit]', f);
+      btn.disabled = true;
+      try {
+        const d = await api('/api/login', { body: { login: f.login.value.trim(), password: f.password.value } });
+        S.token = d.token; S.user = d.user; store.set('fp-token', d.token); S.view = 'pulse'; S.dept = ''; S.product = '';
+        start();
+      } catch (err) { $('.err', f).textContent = err.message; btn.disabled = false; }
+    };
+    f.login.focus();
+  }
+  function logout(silent) {
+    S.token = null; S.user = null; S.pulse = null; S.cache = {}; S.chat = [];
+    store.set('fp-token', null);
+    renderLogin(silent ? 'Сеанс закончился, войдите снова' : '');
+  }
+
+  /* ---------- каркас ---------- */
+  async function start() {
+    if (!S.token) return renderLogin();
+    try { S.user = await api('/api/me'); } catch (e) { if (e.code !== 401) renderLogin(e.message); return; }
+    if (!['director', 'head', 'analyst'].includes(S.user.role)) {
+      $('#app').innerHTML = `<main class="login"><div class="glass login-card"><span class="logo">Ф</span><h1>Пульт — для руководителей</h1>
+        <p class="muted">Вы вошли как «${esc(S.user.title)}». Для операционной команды есть экран участка с очередью и отметками этапов.</p>
+        <a class="btn btn-primary" href="/t2/admin.html">Открыть экран участка</a><button class="btn" id="lo">Выйти</button></div></main>`;
+      $('#lo').onclick = () => logout();
+      return;
+    }
+    renderShell();
+    load();
+  }
+  function renderShell() {
+    const initials = S.user.name.split(' ').map((p) => p[0]).slice(0, 2).join('');
+    $('#app').innerHTML = `<div class="shell">
+      <aside class="rail glass" aria-label="Разделы">
+        <span class="logo" aria-hidden="true">Ф</span>
+        <nav class="rail-nav" id="nav"><span class="rail-pill" id="pill"></span>
+          ${VIEWS.map((v) => `<button class="rail-btn" data-view="${v.id}" aria-label="${v.name}">${v.icon}<span class="tip">${v.name}</span></button>`).join('')}
+        </nav>
+        <span class="avatar" title="${esc(S.user.name)} · ${esc(S.user.title)}">${esc(initials)}</span>
+      </aside>
+      <div class="stage">
+        <header class="topbar glass" id="topbar"></header>
+        <main class="view" id="view" tabindex="-1"></main>
+      </div>
+    </div>
+    <button class="btn btn-primary fab" id="fab">${I.spark} Помощник</button>`;
+    $('#nav').addEventListener('click', (e) => { const b = e.target.closest('[data-view]'); if (b) go(b.dataset.view); });
+    $('#nav').addEventListener('keydown', (e) => {
+      if (!['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft'].includes(e.key)) return;
+      const btns = $$('.rail-btn'); const i = btns.indexOf(document.activeElement);
+      const n = btns[(i + (e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1) + btns.length) % btns.length];
+      if (n) { n.focus(); e.preventDefault(); }
+    });
+    $('#fab').onclick = openChat;
+    renderTop(); movePill(false);
+    window.addEventListener('resize', () => movePill(false));
+  }
+  /* «Перетекающий» указатель раздела: край по ходу движения едет быстро, второй его догоняет. */
+  function movePill(animate = true) {
+    const pill = $('#pill'), nav = $('#nav'), btn = $(`.rail-btn[data-view="${S.view}"]`);
+    if (!pill || !btn) return;
+    $$('.rail-btn').forEach((b) => b.toggleAttribute('aria-current', false));
+    btn.setAttribute('aria-current', 'page');
+    const top = btn.offsetTop, bottom = nav.clientHeight - top - btn.offsetHeight;
+    const was = parseFloat(pill.style.top || '0');
+    pill.className = 'rail-pill' + (animate ? (top > was ? ' down' : ' up') : '');
+    pill.style.height = 'auto'; pill.style.top = top + 'px'; pill.style.bottom = bottom + 'px';
+  }
+  function renderTop() {
+    const v = VIEWS.find((x) => x.id === S.view), p = S.pulse;
+    const bad = p ? p.alerts.length : 0;
+    $('#topbar').innerHTML = `<div class="crumbs"><span>Фотопринт</span><i>/</i><b>${v.name}</b></div>
+      <button class="search" id="openPal" aria-label="Поиск и команды">${I.search.replace('<svg', '<svg width="17" height="17"')}<kbd>⌘K</kbd></button>
+      <span class="spacer"></span>
+      <div class="seg" role="group" aria-label="Период">${[7, 14, 30, 60].map((d) => `<button data-days="${d}" aria-pressed="${S.days === d}">${d} дн.</button>`).join('')}</div>
+      <select class="select" id="fProduct" aria-label="Продукт"><option value="">Все продукты</option>${p ? p.products.map((x) => `<option value="${x.id}" ${S.product === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('') : ''}</select>
+      <select class="select" id="fDept" aria-label="Подразделение"><option value="">Все подразделения</option>${p ? p.depts.map((x) => `<option value="${x.id}" ${S.dept === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('') : ''}</select>
+      <span class="chip live" title="Данные обновлены: дата и время"><i></i>${p ? ftime(p.asof) : 'загрузка'}</span>
+      <button class="btn btn-icon bell" id="bell" aria-label="Отклонения: ${bad}">${I.bell.replace('<svg', '<svg width="18" height="18"')}${bad ? `<b>${bad}</b>` : ''}</button>
+      <button class="btn btn-primary" id="newDec">${I.plus.replace('<svg', '<svg width="16" height="16"')} Решение</button>
+      <button class="btn btn-icon" id="logout" aria-label="Выйти (${esc(S.user.name)})" title="Выйти: ${esc(S.user.name)}, ${esc(S.user.title)}">${I.out.replace('<svg', '<svg width="18" height="18"')}</button>`;
+    $('#openPal').onclick = openPalette;
+    $$('[data-days]').forEach((b) => b.onclick = () => { S.days = +b.dataset.days; reload(); });
+    $('#fProduct').onchange = (e) => { S.product = e.target.value; reload(); };
+    $('#fDept').onchange = (e) => { S.dept = e.target.value; renderView(); };
+    $('#bell').onclick = () => { go('pulse'); setTimeout(() => { const a = $('#alerts'); if (a) a.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 60); };
+    $('#newDec').onclick = () => openDecisionForm({});
+    $('#logout').onclick = () => logout();
+  }
+  function go(view) {
+    if (!VIEWS.some((v) => v.id === view)) return;
+    S.view = view;
+    history.replaceState(null, '', `#v=${view}&d=${S.days}`);
+    movePill(true); renderTop(); renderView();
+    const m = $('#view'); if (m) window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function reload() { S.cache = {}; history.replaceState(null, '', `#v=${S.view}&d=${S.days}`); load(); }
+  async function load() {
+    S.err = null;
+    if (!S.pulse) $('#view').innerHTML = `<div class="skel" style="height:64px"></div><div class="grid2"><div class="skel" style="height:420px"></div><div class="skel" style="height:420px"></div></div>`;
+    try { S.pulse = await api('/api/pult/pulse?' + q()); } catch (e) { S.err = e; }
+    renderTop(); renderView();
+  }
+  function errorBox(e, retry = 'load') {
+    return `<div class="glass state"><h2>${e.code === 403 ? 'Нет доступа' : 'Не получилось загрузить данные'}</h2><p class="muted">${esc(e.message)}</p>
+      ${e.code === 403 ? '<p class="faint">Раздел закрыт для вашей роли. Попытка записана в журнал.</p>' : `<button class="btn btn-primary" data-act="${retry}">Повторить</button>`}</div>`;
+  }
+
+  /* ---------- графики ---------- */
+  function spark(series, st) {
+    const pts = series.map((v, i) => [i, v]).filter((p) => p[1] != null);
+    if (pts.length < 2) return '<svg class="spark"></svg>';
+    const ys = pts.map((p) => p[1]), min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
+    const X = (i) => 3 + (i / (series.length - 1)) * 102, Y = (v) => 26 - ((v - min) / span) * 22;
+    const d = pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
+    const last = pts[pts.length - 1];
+    return `<svg class="spark" viewBox="0 0 108 30" aria-hidden="true"><path d="${d}" fill="none" stroke="${COLOR[st] || '#EADFD7'}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.6" fill="${COLOR[st] || '#EADFD7'}"/></svg>`;
+  }
+  function lineChart(k) {
+    const W = 520, H = 190, L = 44, R = 12, T = 14, B = 26;
+    const vals = k.series.filter((v) => v != null).concat(k.plan != null && k.unit !== 'BYN' && k.unit !== 'чел.' ? [k.plan] : []);
+    if (vals.length < 2) return '';
+    let min = Math.min(...vals), max = Math.max(...vals); const pad = (max - min || 1) * 0.15; min -= pad; max += pad;
+    const n = k.series.length, X = (i) => L + (i / Math.max(1, n - 1)) * (W - L - R), Y = (v) => T + (1 - (v - min) / (max - min)) * (H - T - B);
+    const pts = k.series.map((v, i) => [i, v]).filter((p) => p[1] != null);
+    const path = pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
+    const area = path + ` L${X(pts[pts.length - 1][0]).toFixed(1)} ${H - B} L${X(pts[0][0]).toFixed(1)} ${H - B} Z`;
+    const ticks = [0, 1, 2, 3].map((i) => min + ((max - min) * i) / 3);
+    const showPlan = k.plan != null && k.unit !== 'BYN' && k.unit !== 'чел.';
+    const step = Math.max(1, Math.ceil(n / 6));
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Динамика показателя «${esc(k.name)}» по дням">
+      <defs><linearGradient id="ar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF7A66" stop-opacity=".38"/><stop offset="1" stop-color="#FF7A66" stop-opacity="0"/></linearGradient></defs>
+      ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="rgba(255,236,226,.08)"/><text x="${L - 8}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#8C7F78" font-family="JetBrains Mono">${fmt(t)}</text>`).join('')}
+      ${showPlan ? `<line x1="${L}" x2="${W - R}" y1="${Y(k.plan).toFixed(1)}" y2="${Y(k.plan).toFixed(1)}" stroke="#EADFD7" stroke-dasharray="5 5" opacity=".7"/><text x="${W - R}" y="${(Y(k.plan) - 6).toFixed(1)}" text-anchor="end" font-size="11" fill="#EADFD7">план ${fmt(k.plan)}</text>` : ''}
+      <path d="${area}" fill="url(#ar)"/><path d="${path}" fill="none" stroke="#FF8A76" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      ${pts.map((p) => `<circle cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="2.4" fill="#FFD9D2"><title>${k.labels[p[0]]}: ${fmt(p[1])} ${k.unit}</title></circle>`).join('')}
+      ${k.labels.map((l, i) => i % step === 0 ? `<text x="${X(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#8C7F78" font-family="JetBrains Mono">${l}</text>` : '').join('')}
+    </svg>`;
+  }
+  function bars(rows, unit, opts = {}) {
+    const max = Math.max(...rows.map((r) => Math.abs(r.value || 0)), 1e-9);
+    return `<div class="bars">${rows.map((r, i) => `<div class="bar"><span>${esc(r.name)}${r.count != null && opts.count !== false ? ` <small>· ${fmt(r.count)}</small>` : ''}</span>
+      <span class="tr"><i class="${opts.calm ? 'calm' : ''}" style="width:${Math.max(2, (Math.abs(r.value || 0) / max) * 100).toFixed(1)}%;animation-delay:${i * 40}ms"></i></span>
+      <b>${fmt(r.value)} ${esc(r.unit || unit || '')}</b></div>`).join('')}</div>`;
+  }
+
+  /* ---------- карта компании ---------- */
+  function mapSvg(p) {
+    const W = 960, H = 600, cx = 480, cy = 300, rx = 252, ry = 176;
+    const nodes = p.flow.map((f, i) => {
+      const a = (-90 + i * 45) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+      const x = cx + rx * c, y = cy + ry * s, cw = 176, ch = 66;
+      let bx, by;
+      if (c > 0.3) { bx = x + 20; by = y - ch / 2; } else if (c < -0.3) { bx = x - 20 - cw; by = y - ch / 2; } else { bx = x - cw / 2; by = s < 0 ? y - 22 - ch : y + 22; }
+      return Object.assign({}, f, { x, y, bx, by, cw, ch, a });
+    });
+    const ring = nodes.map((n, i) => (i ? 'L' : 'M') + n.x.toFixed(1) + ' ' + n.y.toFixed(1)).join(' ') + ' Z';
+    const twigs = (n, i) => [-0.34, -0.17, 0, 0.17, 0.34].map((o, j) => {
+      const len = 34 + ((i * 7 + j * 13) % 22), a = n.a + Math.PI + o;
+      const x2 = n.x + Math.cos(a) * len, y2 = n.y + Math.sin(a) * len;
+      return `<line class="twig" x1="${n.x.toFixed(1)}" y1="${n.y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${COLOR[n.status]}"/><circle cx="${x2.toFixed(1)}" cy="${y2.toFixed(1)}" r="${j === 2 ? 2.6 : 1.8}" fill="${COLOR[n.status]}" opacity=".75"/>`;
+    }).join('');
+    const coreColor = COLOR[p.pulse.status];
+    return `<svg id="map" viewBox="0 0 ${W} ${H}" role="group" aria-label="Карта компании: сквозной поток заказа">
+      <defs><radialGradient id="core" cx="50%" cy="45%" r="60%"><stop offset="0" stop-color="#FF8A76" stop-opacity=".55"/><stop offset="60%" stop-color="#B32A2E" stop-opacity=".22"/><stop offset="100%" stop-color="#B32A2E" stop-opacity="0"/></radialGradient></defs>
+      <path class="ring" d="${ring}"/>
+      ${nodes.map((n) => `<path class="spoke" d="M${cx} ${cy} Q${((cx + n.x) / 2 + Math.sin(n.a) * 18).toFixed(1)} ${((cy + n.y) / 2 - Math.cos(n.a) * 18).toFixed(1)} ${n.x.toFixed(1)} ${n.y.toFixed(1)}" stroke="${COLOR[n.status]}"/>`).join('')}
+      ${nodes.map(twigs).join('')}
+      <circle cx="${cx}" cy="${cy}" r="118" fill="url(#core)"/>
+      <circle cx="${cx}" cy="${cy}" r="66" fill="rgba(20,12,11,.72)" stroke="${coreColor}" stroke-width="2"/>
+      <circle cx="${cx}" cy="${cy}" r="76" fill="none" stroke="${coreColor}" stroke-width="1" opacity=".35"/>
+      <text class="core-t" x="${cx}" y="${cy - 22}" text-anchor="middle">ПУЛЬС</text>
+      <text class="core-v" x="${cx}" y="${cy + 12}" text-anchor="middle">${p.pulse.critical + p.pulse.warn}</text>
+      <text class="core-s" x="${cx}" y="${cy + 34}" text-anchor="middle" fill="${coreColor}">${p.pulse.critical ? 'отклонений' : p.pulse.warn ? 'под вниманием' : 'всё в норме'}</text>
+      ${nodes.map((n) => `<g class="node" tabindex="0" role="button" data-node="${n.kpi}" aria-label="${esc(n.name)}: ${WORD[n.status]}. ${esc(n.lines.join('. '))}">
+        <rect x="${n.bx.toFixed(1)}" y="${n.by.toFixed(1)}" width="${n.cw}" height="${n.ch}" rx="14"/>
+        <text class="nm" x="${(n.bx + 14).toFixed(1)}" y="${(n.by + 24).toFixed(1)}">${esc(n.name)}</text>
+        ${n.locked ? `<text class="ln" x="${(n.bx + 14).toFixed(1)}" y="${(n.by + 44).toFixed(1)}">${WORD[n.status]} · детали закрыты</text>`
+          : n.lines.slice(0, 2).map((l, j) => `<text class="ln" x="${(n.bx + 14).toFixed(1)}" y="${(n.by + 42 + j * 16).toFixed(1)}">${esc(l.length > 27 ? l.slice(0, 26) + '…' : l)}</text>`).join('')}
+        <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="15" fill="${COLOR[n.status]}"/><circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="21" fill="none" stroke="${COLOR[n.status]}" opacity=".35"/>
+        <text class="no" x="${n.x.toFixed(1)}" y="${(n.y + 4).toFixed(1)}" text-anchor="middle">${n.n}</text></g>`).join('')}
+    </svg>
+    <div class="flow-list">${p.flow.map((n) => `<button class="glass-flat flow-item" data-node="${n.kpi}"><span class="no" style="background:${COLOR[n.status]}">${n.n}</span><span><b>${esc(n.name)}</b> · <span class="st-${n.status}">${WORD[n.status]}</span><small>${esc(n.locked ? 'детали закрыты для вашей роли' : n.lines.join(' · '))}</small></span></button>`).join('')}</div>`;
+  }
+
+  /* ---------- плитки и отклонения ---------- */
+  function kpiTile(k) {
+    if (k.locked) return `<div class="glass-flat kpi locked" aria-label="${esc(k.name)}: ${WORD[k.status]}, значение закрыто"><div class="kpi-top"><span class="kpi-name">${esc(k.name)}</span>${chip(k.status)}</div>
+      <div class="lock-note">${I.lock}<span>${esc(k.dept_name)} — значения закрыты для вашей роли</span></div></div>`;
+    const d = k.prev != null && k.value != null ? k.value - k.prev : null;
+    const good = d == null ? '' : (d * k.dir >= 0 ? 'st-ok' : 'st-bad');
+    return `<button class="glass-flat kpi is-${k.status}" data-kpi="${k.id}"><div class="kpi-top"><span class="kpi-name">${esc(k.name)}</span>${chip(k.status)}</div>
+      <div class="kpi-val"><b class="num">${fmt(k.value)}</b><span>${esc(k.unit)}</span></div>
+      <div class="kpi-meta">план ${fmt(k.plan)}${d != null ? ` · <span class="${good}">${d > 0 ? '+' : '−'}${fmt(Math.abs(d))}</span> к прошлому` : ''}</div>
+      <div class="kpi-foot"><span class="kpi-fc">прогноз ${fmt(k.forecast)}</span>${spark(k.series, k.status)}</div></button>`;
+  }
+  const kpisOf = (p) => p.kpis.filter((k) => !S.dept || k.dept === S.dept);
+  function alertCard(a) {
+    return `<article class="glass-flat alert ${a.level}"><div class="row">${chip(a.level)}<span class="who">${esc(a.dept_name)}</span></div>
+      <h3>${esc(a.title)}</h3><p>${esc(a.cause)}</p><p class="who">Отвечает: ${esc(a.owner)} · ${esc(a.context)}</p>
+      <div class="row"><button class="btn btn-sm" data-kpi="${a.kpi}" data-by="${a.by}">К причине</button><button class="btn btn-sm btn-primary" data-decide="${a.kpi}">Оформить решение</button></div></article>`;
+  }
+
+  /* ---------- разделы ---------- */
+  const views = {
+    pulse(p) {
+      const ks = kpisOf(p), al = p.alerts.filter((a) => !S.dept || a.dept === S.dept);
+      const lead = p.pulse.critical ? `Из ${p.pulse.total} показателей ${p.pulse.critical} требуют решения, ещё ${p.pulse.warn} — под вниманием. Щёлкните узел карты или показатель, чтобы дойти до причины.`
+        : 'Критических отклонений нет. Щёлкните показатель, чтобы увидеть динамику и формулу.';
+      return `<header class="page-head"><div><h1>Пульс компании</h1><p class="lead">${lead}</p></div></header>
+        <section class="pulse-grid">
+          <div class="glass map-panel"><header><h2 class="sec-title">Карта компании</h2><span class="faint" style="font-size:13px">сквозной поток заказа</span>
+            <div class="legend"><span><i style="background:var(--ok)"></i>в норме</span><span><i style="background:var(--warn)"></i>внимание</span><span><i style="background:var(--bad)"></i>плохо</span></div></header>${mapSvg(p)}</div>
+          <div class="alerts" id="alerts"><h2 class="sec-title">Требует решения <span class="count">${al.length}</span></h2>
+            ${al.length ? al.map(alertCard).join('') : '<div class="glass-flat empty">Отклонений по доступным вам показателям нет.</div>'}</div>
+        </section>
+        <section><h2 class="sec-title" style="margin-bottom:12px">Показатели <span class="count">${ks.length}</span></h2><div class="kpi-grid">${ks.map(kpiTile).join('')}</div>
+          <p class="src">Период: ${fdate(p.period.from)} — ${fdate(p.period.to)}. Прогноз — на следующий такой же период по движению последних двух недель. У каждого показателя внутри — формула, источник и время обновления.</p></section>`;
+    },
+    async sales(p) {
+      const own = p.kpis.filter((k) => k.dept === 'sales');
+      const open = own.some((k) => !k.locked);
+      let body = '';
+      if (open) {
+        const [steps, prod, chan, rep] = await Promise.all([drill('app_conv', 'step'), drill('revenue', 'product'), drill('revenue', 'channel'), drill('repeat', 'client')]);
+        const max = Math.max(...steps.rows.map((r) => r.count), 1);
+        body = `<section class="grid2">
+          <div class="glass panel"><header><h2>Воронка приложения</h2><span class="spacer"></span><button class="btn btn-sm" data-kpi="app_conv" data-by="step">Подробнее</button></header>
+            <div class="funnel">${steps.rows.map((r, i) => `<div class="fstep"><b>${fmt(r.count)}</b><div class="col" style="height:${Math.max(4, (r.count / max) * 130).toFixed(0)}px;animation-delay:${i * 60}ms"></div><span>${esc(r.name)}</span>
+              <small class="${r.pass != null && r.pass_prev != null && r.pass < r.pass_prev - 4 ? 'drop' : ''}">${r.pass != null ? 'проходит ' + fmt(r.pass) + ' %' + (r.pass_prev != null ? ' · было ' + fmt(r.pass_prev) : '') : 'вход'}</small></div>`).join('')}</div>
+            ${steps.note ? `<p class="note" style="margin-top:14px">${esc(steps.note)}</p>` : ''}<p class="src">Источник: ${esc(steps.source)}</p></div>
+          <div class="glass panel"><header><h2>Оборот по продуктам</h2><span class="spacer"></span><button class="btn btn-sm" data-kpi="revenue" data-by="product">Подробнее</button></header>${bars(prod.rows, 'BYN')}
+            ${prod.note ? `<p class="note" style="margin-top:14px">${esc(prod.note)}</p>` : ''}</div>
+          <div class="glass panel"><header><h2>Оборот по каналам</h2></header>${bars(chan.rows, 'BYN', { calm: true })}<p class="src">Источник: ${esc(chan.source)}</p></div>
+          <div class="glass panel"><header><h2>Повторные покупки по типу клиента</h2></header>${bars(rep.rows, '%', { calm: true })}${rep.note ? `<p class="note" style="margin-top:14px">${esc(rep.note)}</p>` : ''}</div>
+        </section>`;
       }
-    } catch (e) {
-      btn.disabled = false; btn.textContent = 'Оформить и отправить ответственному';
-      toast('Не удалось сохранить: сервер не отвечает');
-    }
+      return `<header class="page-head"><div><h1>Продажи и клиент</h1><p class="lead">Воронка, конверсия, средний чек, повторные покупки, каналы и сегменты.</p></div></header>
+        <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${body}`;
+    },
+    async production(p) {
+      const own = p.kpis.filter((k) => k.dept === 'production' || k.dept === 'logistics');
+      const open = p.kpis.some((k) => k.dept === 'production' && !k.locked);
+      let body = '';
+      if (open) {
+        const [st, rs, fc] = await Promise.all([drill('on_time', 'stage'), drill('defect', 'reason'), cached('forecast', '/api/pult/forecast')]);
+        const hot = st.rows.reduce((a, b) => (b.over > a.over ? b : a), st.rows[0]);
+        body = `<section class="glass panel"><header><h2>Этапы производства</h2><span class="faint" style="font-size:13px">медиана времени на этапе и доля заказов, ждущих больше двух норм</span></header>
+            <div class="stages">${st.rows.map((r) => `<div class="glass-flat stg ${r === hot && r.over > 10 ? 'hot' : ''}"><h3>${esc(r.name)}</h3><span class="big">${fmt(r.value)} ч</span>
+              <small>норма ${fmt(r.norm)} ч · было ${fmt(r.prev)} ч</small><small class="${r.over > 10 ? 'st-bad' : ''}">ждут дольше двух норм: ${fmt(r.over)} %</small>
+              <small>людей: ${esc(r.staff)}${r.vacancies ? ` · вакансий ${r.vacancies}` : ''}${r.absent ? ` · отсутствуют ${r.absent}` : ''}</small></div>`).join('')}</div>
+            ${st.note ? `<p class="note" style="margin-top:14px">${esc(st.note)}</p>` : ''}<p class="src">Источник: ${esc(st.source)} · HR: штат и вакансии</p></section>
+          <section class="grid2">
+            <div class="glass panel"><header><h2>Спрос и мощность на 6 недель</h2>${fc.deficit_week ? `<span class="chip chip-bad"><i></i>дефицит с ${fdate(fc.deficit_week)}</span>` : chip('ok')}</header>${weeksChart(fc)}
+              <p class="note" style="margin-top:12px">${fc.deficit_week ? `С недели ${fdate(fc.deficit_week)} спрос превысит мощность. Узкое место — «${esc(fc.bottleneck)}»: если закрыть вакансии, мощность вернётся к плановой.` : 'Мощности хватает на все шесть недель.'}</p>
+              <p class="src">${esc(fc.formula)} Источник: ${esc(fc.source)}</p></div>
+            <div class="glass panel"><header><h2>Причины брака</h2><span class="spacer"></span><button class="btn btn-sm" data-kpi="defect" data-by="reason">Подробнее</button></header>${rs.rows.length ? bars(rs.rows, '% брака') : '<p class="empty">Брака за период нет.</p>'}
+              ${rs.note ? `<p class="note" style="margin-top:14px">${esc(rs.note)}</p>` : ''}</div>
+          </section>
+          <section class="glass panel"><header><h2>Заказы, сорвавшие срок</h2><span class="faint" style="font-size:13px">самые долгие за период</span></header>
+            <div class="scroll-x"><table class="tbl"><thead><tr><th>Заказ</th><th>Продукт</th><th>Где задержался</th><th>Брак</th><th class="n">Часов до ОТК</th></tr></thead>
+            <tbody>${st.orders.map((o) => `<tr><td class="num">${esc(o.id)}</td><td>${esc(o.product)}</td><td>${esc(o.stage)}</td><td>${esc(o.defect || '—')}</td><td class="n">${fmt(o.hours)}</td></tr>`).join('') || '<tr><td colspan="5" class="faint">Таких заказов нет</td></tr>'}</tbody></table></div></section>`;
+      }
+      return `<header class="page-head"><div><h1>Производство и качество</h1><p class="lead">План и факт выпуска, очередь, время изготовления, загрузка, брак и перепечатка, доставка.</p></div></header>
+        <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${body}`;
+    },
+    async finance(p) {
+      const f = await cached('finance', '/api/pult/finance');
+      const own = p.kpis.filter((k) => k.dept === 'finance' || k.dept === 'hr');
+      const months = f.pnl ? [...new Set(f.pnl.map((r) => r.month))] : [];
+      const mname = (m) => ({ '09': 'сентябрь', 10: 'октябрь', 11: 'ноябрь' }[m.slice(5)] || m);
+      const fin = f.locked_fin ? `<div class="glass panel"><header><h2>Доходы и расходы</h2></header><div class="lock-note">${I.lock}<span>Финансовые данные закрыты для вашей роли: их видят директор, руководитель финансов и аналитик.</span></div></div>`
+        : `<div class="glass panel"><header><h2>Доходы и расходы: план и факт</h2><span class="faint" style="font-size:13px">BYN</span></header><div class="scroll-x"><table class="tbl"><thead><tr><th>Статья</th>${months.map((m) => `<th class="n">${mname(m)}: план</th><th class="n">факт</th><th class="n">откл.</th>`).join('')}</tr></thead><tbody>
+            ${[...new Set(f.pnl.map((r) => r.article))].map((a) => `<tr><td>${esc(a)}</td>${months.map((m) => { const r = f.pnl.find((x) => x.month === m && x.article === a); const d = 100 * (r.fact - r.plan) / r.plan; const bad = (r.kind === 'доход' ? -d : d) > 3;
+              return `<td class="n">${fmt(r.plan)}</td><td class="n">${fmt(r.fact)}</td><td class="n ${bad ? 'st-bad' : 'faint'}">${d > 0 ? '+' : '−'}${fmt(Math.abs(d))} %</td>`; }).join('')}</tr>`).join('')}
+            <tr><td><b>Движение денег: поступления</b></td>${f.cash.map((c) => `<td class="n">${fmt(c.inflow_plan)}</td><td class="n">${fmt(c.inflow_fact)}</td><td class="n faint">${fmt(100 * (c.inflow_fact - c.inflow_plan) / c.inflow_plan)} %</td>`).join('')}</tr>
+            <tr><td><b>Движение денег: выплаты</b></td>${f.cash.map((c) => `<td class="n">${fmt(c.outflow_plan)}</td><td class="n">${fmt(c.outflow_fact)}</td><td class="n faint">+${fmt(100 * (c.outflow_fact - c.outflow_plan) / c.outflow_plan)} %</td>`).join('')}</tr>
+          </tbody></table></div><p class="src">Источник: ${esc(f.source)}, обновлено ${ftime(f.synced)}. ${esc(f.fin_note)}. Ноябрь — с начала месяца.</p></div>`;
+      const staff = `<div class="glass panel"><header><h2>Штат: работает и по плану</h2></header><div class="bars">${f.staff.flatMap((d) => d.sections && f.staff.length === 1 ? d.sections : [d]).map((d) => `<div class="bar"><span>${esc(d.name)}</span><span class="tr"><i class="${d.fact / d.plan < 0.93 ? '' : 'calm'}" style="width:${(100 * d.fact / d.plan).toFixed(1)}%"></i></span><b>${d.fact} из ${d.plan}</b></div>`).join('')}</div>
+          <p class="src">Источник: ${esc(f.hr_source)}, обновлено ${ftime(f.hr_synced)}. Имён и зарплат здесь нет.</p></div>`;
+      const vac = `<div class="glass panel"><header><h2>Вакансии</h2><span class="cnt">${f.vacancies.length}</span></header>
+          <div class="scroll-x"><table class="tbl"><thead><tr><th>Должность</th><th>Где</th><th class="n">Открыта, дней</th></tr></thead><tbody>${f.vacancies.map((v) => `<tr><td>${esc(v.title)}</td><td>${esc(v.where)}</td><td class="n ${v.days > 14 ? 'st-bad' : ''}">${v.days}</td></tr>`).join('') || '<tr><td colspan="3" class="faint">Открытых вакансий нет</td></tr>'}</tbody></table></div>
+          <h2 style="font-size:15px;margin:16px 0 8px">Отсутствуют сегодня</h2><div class="bars">${f.absences.map((a) => `<div class="bar"><span>${esc(a.where)}</span><span class="faint">${esc(a.kind)}</span><b>${a.people} чел.</b></div>`).join('') || '<p class="empty">Все на месте.</p>'}</div></div>`;
+      return `<header class="page-head"><div><h1>Финансы и люди</h1><p class="lead">План и факт доходов и расходов, движение денег, себестоимость и маржа, штат, вакансии и отсутствия.</p></div></header>
+        <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${fin}<section class="grid2">${staff}${vac}</section>`;
+    },
+    async decisions() {
+      const list = await cached('decisions', '/api/pult/decisions');
+      const overdue = list.filter((d) => d.overdue).length;
+      return `<header class="page-head"><div><h1>Реестр решений</h1><p class="lead">Каждое решение — проблема, причина, действие, владелец и срок. Закрыть можно только с проверкой: что изменилось после него.${overdue ? ` Просрочено: ${overdue}.` : ''}</p></div>
+          <span class="spacer"></span><button class="btn btn-primary" data-act="newDecision">${I.plus.replace('<svg', '<svg width="16" height="16"')} Новое решение</button></header>
+        <div class="board">${STATUSES.map((s) => { const items = list.filter((d) => d.status === s);
+          return `<section class="glass col" aria-label="${s}"><header>${s[0].toUpperCase() + s.slice(1)} <span class="cnt">${items.length}</span></header>
+            ${items.map((d) => `<button class="glass-flat card" data-decision="${d.id}"><h3>${esc(d.title)}</h3><div class="meta"><span>${esc(d.owner)}</span><span>·</span><span class="${d.overdue ? 'st-bad' : ''}">срок ${fdate(d.due)}${d.overdue ? ' — просрочено' : ''}</span></div>
+              <div class="meta"><span class="chip ${d.priority === 'высокий' ? 'chip-bad' : ''}">${esc(d.priority)}</span><span class="faint">${esc(d.id)}</span></div></button>`).join('') || '<p class="empty">Пусто</p>'}</section>`; }).join('')}</div>`;
+    },
+    async data() {
+      let ql = null, qerr = null;
+      if (['director', 'analyst'].includes(S.user.role)) { try { ql = await cached('quality', '/api/pult/quality'); } catch (e) { qerr = e; } }
+      const audit = await api('/api/pult/audit');
+      const src = ql ? `<section class="glass panel"><header><h2>Источники данных</h2><span class="faint" style="font-size:13px">пять систем связаны по номеру заказа и клиента</span></header>
+          <div class="scroll-x"><table class="tbl"><thead><tr><th>Система</th><th>Обновлено</th><th>Свежесть</th><th class="n">Записей</th><th class="n">Пропуски</th><th class="n">Дубли</th></tr></thead><tbody>
+          ${ql.sources.map((s) => `<tr><td>${esc(s.system)}</td><td class="num">${ftime(s.synced)}</td><td>${chip(s.status)} <span class="faint">${fmt(s.age_h)} ч назад</span></td><td class="n">${fmt(s.rows)} <span class="faint">${esc(s.what)}</span></td>
+            <td class="n ${s.gaps ? 'st-warn' : ''}">${s.gaps}${s.gap_note && s.gaps ? ` <span class="faint">${esc(s.gap_note)}</span>` : ''}</td><td class="n ${s.dups ? 'st-warn' : ''}">${s.dups}</td></tr>`).join('')}</tbody></table></div></section>
+        <section class="glass panel"><header><h2>Сверка оборота: производство и учёт</h2></header><div class="scroll-x"><table class="tbl"><thead><tr><th>Месяц</th><th class="n">ERP, BYN</th><th class="n">1С, BYN</th><th class="n">Расхождение</th><th>Итог</th></tr></thead><tbody>
+          ${ql.reconciliation.map((r) => `<tr><td>${esc(r.month)}</td><td class="n">${fmt(r.erp)}</td><td class="n">${fmt(r.fin)}</td><td class="n ${r.diff ? 'st-warn' : ''}">${fmt(r.diff)}</td><td>${r.status === 'ok' ? chip('ok') : '<span class="chip chip-warn"><i></i>расходится</span>'}</td></tr>`).join('')}</tbody></table></div>
+          <p class="note" style="margin-top:12px">${esc(ql.note)} Заказы: ${ql.unposted.map(esc).join(', ')}.</p></section>`
+        : `<section class="glass panel"><header><h2>Источники данных</h2></header><div class="lock-note">${I.lock}<span>${qerr ? esc(qerr.message) : 'Качество данных и сверку видят директор и аналитик.'}</span></div></section>`;
+      return `<header class="page-head"><div><h1>Данные и журнал</h1><p class="lead">Насколько можно верить цифрам и кто что менял: пользователь, время, действие, объект, результат.</p></div></header>${src}
+        <section class="glass panel"><header><h2>Журнал действий</h2><span class="faint" style="font-size:13px">${S.user.role === 'head' ? 'ваши действия и решения вашего подразделения' : 'все пользователи'}</span></header>
+          <div class="scroll-x"><table class="tbl"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Результат</th><th>Подробности</th></tr></thead><tbody>
+          ${audit.slice(0, 60).map((a) => `<tr><td class="num">${ftime(a.ts)}</td><td>${esc(a.who)}</td><td>${esc(a.action)}</td><td class="num">${esc(a.object || '—')}</td><td class="${a.result === 'отказ' ? 'st-bad' : ''}">${esc(a.result || 'ok')}</td><td class="muted">${esc(a.detail || '')}</td></tr>`).join('') || '<tr><td colspan="6" class="faint">Записей пока нет</td></tr>'}</tbody></table></div></section>`;
+    },
+  };
+  function weeksChart(fc) {
+    const W = 520, H = 210, L = 40, R = 10, T = 16, B = 30, n = fc.weeks.length;
+    const max = Math.max(...fc.weeks.map((w) => Math.max(w.demand, w.capacity, w.capacity_plan || 0))) * 1.1;
+    const bw = (W - L - R) / n, Y = (v) => T + (1 - v / max) * (H - T - B);
+    const line = (key) => fc.weeks.map((w, i) => { const v = w[key] || w.capacity; return `${i ? 'L' : 'M'}${(L + i * bw).toFixed(1)} ${Y(v).toFixed(1)} L${(L + (i + 1) * bw).toFixed(1)} ${Y(v).toFixed(1)}`; }).join(' ');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Спрос и мощность по неделям">
+      ${[0, 0.5, 1].map((k) => `<line x1="${L}" x2="${W - R}" y1="${Y(max * k / 1.1).toFixed(1)}" y2="${Y(max * k / 1.1).toFixed(1)}" stroke="rgba(255,236,226,.08)"/><text x="${L - 6}" y="${(Y(max * k / 1.1) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#8C7F78" font-family="JetBrains Mono">${fmt(max * k / 1.1)}</text>`).join('')}
+      ${fc.weeks.map((w, i) => { const over = !w.fact && w.demand > w.capacity; return `<rect x="${(L + i * bw + 5).toFixed(1)}" y="${Y(w.demand).toFixed(1)}" width="${(bw - 10).toFixed(1)}" height="${(H - B - Y(w.demand)).toFixed(1)}" rx="5" fill="${over ? '#FF6464' : w.fact ? '#EADFD7' : '#FF8A76'}" opacity="${w.fact ? 0.5 : 0.85}"><title>Неделя с ${fdate(w.week)}: спрос ${w.demand}, мощность ${w.capacity}</title></rect>
+        <text x="${(L + i * bw + bw / 2).toFixed(1)}" y="${H - 10}" text-anchor="middle" font-size="10.5" fill="${w.week === fc.deficit_week ? '#FF6464' : '#8C7F78'}" font-family="JetBrains Mono">${fdate(w.week)}</text>`; }).join('')}
+      <path d="${line('capacity_plan')}" fill="none" stroke="#6FE0A8" stroke-width="1.6" stroke-dasharray="5 5" opacity=".8"/>
+      <path d="${line('capacity')}" fill="none" stroke="#FFF8F2" stroke-width="2"/>
+      <text x="${W - R}" y="${T - 2}" text-anchor="end" font-size="11" fill="#BDAFA6">столбики — спрос (светлые — факт) · белая линия — мощность сейчас · пунктир — после закрытия вакансий</text>
+    </svg>`;
   }
-  function tgText(d, html) {
-    const b = (s) => html ? '<b>' + esc(s) + '</b>' : s;
-    return b('Решение №' + d.number + ' по отклонению') + '\nот директора: Андрей Ковалёв\n\n' +
-      b('Что сделать: ') + esc(d.action) + '\n' + b('Почему: ') + esc(d.cause) + '\n' + b('Срок: ') + dateRu(d.due) + '\n' +
-      b('Как проверим: ') + esc(d.metric) + ' — сейчас ' + esc(d.baseline || '—') + ', цель ' + esc(d.target || '—');
+  async function renderView() {
+    const el = $('#view'); if (!el) return;
+    const my = ++S.seq;
+    if (S.err) { el.innerHTML = errorBox(S.err); return; }
+    if (!S.pulse) return;
+    try {
+      const html = await views[S.view](S.pulse);
+      if (my !== S.seq) return;
+      el.innerHTML = html;
+      el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+    } catch (e) { if (my === S.seq) el.innerHTML = errorBox(e, 'rerender'); }
   }
-  function renderSent(d) {
-    const p = person(d.owner);
-    $('#modal').innerHTML = `<p class="eyebrow">Готово</p><h2 id="modal-title">Решение №${d.number} оформлено и отправлено</h2>
-      <div class="sent">
-        <div class="sent-info">
-          <p>Ответственный — <b>${esc(p.name)}</b>, ${esc(p.role.toLowerCase())}. Справа — как решение выглядит в Telegram-боте компании. Нажмите кнопку за ответственного — статус сразу появится в журнале.</p>
-          <p>Задача заведена в общий список: её увидит помощник руководителя на ближайшей планёрке (Трек 3).</p>
-          <p class="faint small" id="tg-note">${state.health && state.health.telegram ? 'Отправляю в Telegram…' : 'Telegram на этом ноутбуке не подключён — показываем макет сообщения.'}</p>
-        </div>
-        <div class="tg" id="tg">
-          <div class="tg-head"><span class="ai-ava" style="width:24px;height:24px;font-size:11px">ИИ</span>Помощник · бот компании</div>
-          <div class="tg-msg">${tgText(d, true)}</div>
-          <div class="tg-btns">
-            <button class="tg-btn" data-st="accepted" data-id="${d.id}">Принято</button>
-            <button class="tg-btn" data-st="in_progress" data-id="${d.id}">В работе</button>
-            <button class="tg-btn" data-st="help" data-id="${d.id}">Нужна помощь</button>
-          </div>
-        </div>
+
+  /* ---------- слой: панели и окна ---------- */
+  let lastFocus = null;
+  function openLayer(html, onClose) {
+    lastFocus = document.activeElement;
+    const L = $('#layer');
+    L.innerHTML = `<div class="scrim" data-act="closeLayer"></div>${html}`;
+    L._onClose = onClose;
+    const f = $('[autofocus], input, textarea, select, button:not([data-act="closeLayer"])', L); if (f) f.focus();
+  }
+  function closeLayer() { const L = $('#layer'); L.innerHTML = ''; if (lastFocus && document.contains(lastFocus)) lastFocus.focus(); }
+
+  async function openKpi(id, by) {
+    const k = S.pulse.kpis.find((x) => x.id === id);
+    if (!k) return;
+    if (k.locked) { toast('Показатель закрыт для вашей роли'); return; }
+    const dim = by && k.dims.some((d) => d.id === by) ? by : k.dims[0].id;
+    openLayer(`<aside class="drawer glass" role="dialog" aria-modal="true" aria-label="${esc(k.name)}">
+      <header><div style="flex:1"><p class="eyebrow">${esc(k.dept_name)}</p><h2>${esc(k.name)}</h2></div>${chip(k.status)}<button class="btn btn-icon btn-ghost" data-act="closeLayer" aria-label="Закрыть">${I.close.replace('<svg', '<svg width="18" height="18"')}</button></header>
+      <div class="drawer-body">
+        <div class="facts"><div class="fact"><small>Сейчас</small><b>${fmt(k.value)}</b> <span class="faint">${esc(k.unit)}</span></div><div class="fact"><small>План</small><b>${fmt(k.plan)}</b></div>
+          <div class="fact"><small>Прошлый период</small><b>${fmt(k.prev)}</b></div><div class="fact"><small>Прогноз</small><b>${fmt(k.forecast)}</b></div></div>
+        ${lineChart(k)}
+        <div><p class="eyebrow" style="margin-bottom:8px">От показателя к причине</p><div class="tabs" id="dims">${k.dims.map((d) => `<button data-dim="${d.id}" aria-pressed="${d.id === dim}">${esc(d.name)}</button>`).join('')}</div></div>
+        <div id="drill"><div class="skel"></div></div>
+        <dl class="dl"><dt>Как считается</dt><dd>${esc(k.formula)}</dd><dt>Источник</dt><dd>${esc(k.source)}</dd><dt>Обновлено</dt><dd class="num">${ftime(k.updated)}</dd>${k.extra ? `<dt>Ещё</dt><dd>${esc(k.extra)}</dd>` : ''}</dl>
       </div>
-      <div class="modal-foot"><button class="btn" data-close-modal>Закрыть</button><button class="btn btn-primary" data-to-journal>К журналу решений</button></div>`;
-  }
-  const ST = { new: 'Новое', accepted: 'Принято', in_progress: 'В работе', help: 'Нужна помощь', done: 'Выполнено', overdue: 'Просрочено' };
-  const STC = { new: 'st-new', accepted: 'chip-accent', in_progress: 'chip-accent', help: 'chip-warn', done: 'chip-ok', overdue: 'chip-bad' };
-  const isLate = (d) => d.status !== 'done' && (d.status === 'overdue' || (d.due && d.due < TODAY));
-  const statusKey = (d) => isLate(d) ? 'overdue' : (d.status || 'new');
-  const statusLabel = (d) => ST[statusKey(d)].toLowerCase();
-
-  async function setStatus(id, st, btn) {
-    const d = state.decisions.find((x) => x.id === id);
-    if (!d) return;
-    const who = person(d.owner).name;
-    const hist = (d.history || []).concat([{ ts: nowIso(), text: who + ': «' + ST[st] + '»' }]);
-    await api.update('decisions', id, { status: st, history: hist });
-    const tasks = await api.list('tasks');
-    const t = tasks.find((x) => x.decision === id);
-    if (t) await api.update('tasks', t.id, { status: st });
-    if (btn) {
-      btn.closest('.tg-btns').querySelectorAll('.tg-btn').forEach((b) => b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'));
-      const tg = $('#tg');
-      tg.insertAdjacentHTML('beforeend', `<div class="tg-msg out">${esc(ST[st])}</div><div class="tg-msg">${st === 'help' ? 'Передала директору: нужна помощь по решению №' + d.number + '. Он увидит это в пульте.' : 'Записала. Директор видит статус в пульте, напомню за день до срока.'}</div>`);
-    }
-    state.newId = id;
-    await loadJournal();
+      <footer>${k.status !== 'ok' ? `<button class="btn btn-primary" data-decide="${k.id}">Оформить решение</button>` : ''}<button class="btn" data-act="closeLayer">Закрыть</button></footer></aside>`);
+    const show = async (d) => {
+      $$('#dims button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.dim === d));
+      const box = $('#drill'); if (!box) return;
+      box.innerHTML = '<div class="skel"></div>';
+      try {
+        const r = await drill(id, d);
+        if (!$('#drill')) return;
+        S.lastDrill = r;
+        const rows = d === 'day' ? r.rows.slice(-14) : r.rows;
+        box.innerHTML = `${r.note ? `<p class="note" style="margin-bottom:12px">${esc(r.note)}</p>` : ''}${bars(rows, r.unit === 'BYN' ? 'BYN' : r.unit)}
+          ${r.orders && r.orders.length ? `<p class="eyebrow" style="margin:16px 0 6px">Заказы, сорвавшие срок</p><table class="tbl"><tbody>${r.orders.slice(0, 5).map((o) => `<tr><td class="num">${esc(o.id)}</td><td>${esc(o.product)}</td><td>${esc(o.stage)}</td><td class="n">${fmt(o.hours)} ч</td></tr>`).join('')}</tbody></table>` : ''}`;
+      } catch (e) { box.innerHTML = `<p class="note">${esc(e.message)}</p>`; }
+    };
+    $('#dims').onclick = (e) => { const b = e.target.closest('[data-dim]'); if (b) show(b.dataset.dim); };
+    show(dim);
   }
 
-  /* ---------- журнал решений ---------- */
-  const METRIC_NOW = { headcount: () => ['Штат', last(S.headcount.fact) + ' чел'], materials: () => ['Материальные затраты', fmt.n(CF.materials) + ' BYN'] };
-  async function loadJournal() {
-    state.decisions = await api.list('decisions');
-    renderJournal();
-  }
-  function renderJournal() {
-    const all = state.decisions.slice();
-    all.forEach((d, i) => { if (!d.number) d.number = i + 1; });
-    const list = all.slice().reverse();
-    const late = list.filter(isLate).length;
-    $('#journal-count').textContent = list.length + ' ' + plural(list.length, 'решение', 'решения', 'решений') + (late ? ' · просрочено ' + late : '');
-    if (!list.length) { $('#journal').innerHTML = '<p class="empty">Решений пока нет. Пройдите от отклонения до причины и оформите первое.</p>'; return; }
-    $('#journal').innerHTML = `<div class="jr">${list.map((d) => {
-      const sk = statusKey(d);
-      let ctl;
-      if (METRIC_NOW[d.metric]) { const [l, v] = METRIC_NOW[d.metric](); ctl = esc(l) + ': сейчас <b>' + esc(v) + '</b>'; }
-      else ctl = esc(d.metric || 'Метрика') + ': было <b>' + esc(d.baseline || '—') + '</b> → цель <b>' + esc(d.target || '—') + '</b>';
-      const open = state.openRow === d.id;
-      return `<div class="jr-item ${isLate(d) ? 'is-late' : ''} ${state.newId === d.id ? 'is-new' : ''}">
-        <button class="jr-row" data-row="${d.id}" aria-expanded="${open}">
-          <div><div class="t">№${d.number} · ${esc(d.title)}</div><div class="sub">${esc(d.deviation || '')}</div><div class="ctl">${ctl}</div></div>
-          <div class="who">${esc(person(d.owner).name)}<div class="faint small">${esc(person(d.owner).role)}</div></div>
-          <div class="due ${isLate(d) ? 'late' : ''}">${d.due ? d.due.slice(8, 10) + '.' + d.due.slice(5, 7) : '—'}</div>
-          <div class="stt"><span class="chip ${STC[sk]}">${ST[sk]}</span><div class="faint small" style="margin-top:4px">${d.source === 't1' ? 'из пульта' : 'с планёрки'}</div></div>
-        </button>
-        ${open ? `<div class="jr-details">
-          <ul class="hist">${(d.history || []).map((h) => `<li><time>${esc(fmt.dt(h.ts))}</time><span>${esc(h.text)}</span></li>`).join('')}
-            ${d.effect && d.effect !== '—' ? `<li><time>эффект</time><span>${esc(d.effect)}</span></li>` : ''}</ul>
-          <div class="jr-actions">
-            ${d.node && NODES[d.node] ? `<button class="btn btn-sm" data-open="${d.node}">Открыть причину</button>` : ''}
-            ${d.status !== 'done' ? `<button class="btn btn-sm" data-done="${d.id}">Выполнено</button>` : ''}
-            <button class="btn btn-sm" data-print="${d.id}">Печать бланка</button>
-          </div></div>` : ''}
-      </div>`;
-    }).join('')}</div>`;
-    state.newId = null;
-  }
-  function plural(n, a, b, c) { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20) ? b : c; }
-  async function markDone(id) {
-    const d = state.decisions.find((x) => x.id === id);
-    await api.update('decisions', id, { status: 'done', history: (d.history || []).concat([{ ts: nowIso(), text: 'Отмечено выполненным в пульте' }]) });
-    const t = (await api.list('tasks')).find((x) => x.decision === id);
-    if (t) await api.update('tasks', t.id, { status: 'done' });
-    await loadJournal();
-    toast('Решение №' + d.number + ' выполнено — пульт продолжит следить за метрикой');
-  }
-  function printDecision(id) {
-    const d = state.decisions.find((x) => x.id === id);
-    const p = person(d.owner);
-    const row = (k, v) => `<tr><td>${esc(k)}</td><td>${esc(v || '—')}</td></tr>`;
-    $('#print-sheet').innerHTML = `<p>${esc(C.name)} · ${esc(C.about)} (демо)</p><h1>Решение №${d.number} по отклонению</h1>
-      <table>${row('Дата', d.ts ? fmt.date(d.ts) : '')}${row('Отклонение', d.deviation)}${row('Причина', d.cause)}${row('Что делаем', d.action)}
-      ${row('Ответственный', p.name + (p.role ? ', ' + p.role : ''))}${row('Срок', dateRu(d.due))}${row('Метрика контроля', (d.metric || '') + (d.baseline ? ': было ' + d.baseline : '') + (d.target ? ', цель ' + d.target : ''))}
-      ${row('Ожидаемый эффект', d.effect)}${row('Статус', ST[statusKey(d)])}</table>
-      <div class="sign"><span>Директор ____________ А. Ковалёв</span><span>Ознакомлен ____________ ${esc(p.name)}</span></div>`;
-    window.print();
+  async function openDecisionForm(pre) {
+    let people = [];
+    try { people = await cached('people', '/api/pult/people'); } catch (e) { toast(e.message); return; }
+    const k = pre.kpi ? S.pulse.kpis.find((x) => x.id === pre.kpi) : null;
+    const a = pre.kpi ? S.pulse.alerts.find((x) => x.kpi === pre.kpi) : null;
+    const due = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+    const draft = Object.assign({ title: k ? 'Вернуть в норму: ' + k.name.toLowerCase() : '', problem: a ? a.title : '', impact: a ? a.context : '', cause: a ? a.cause : '', action: '',
+      owner_id: a ? a.owner_id : (S.user.role === 'head' ? S.user.id : ''), due, priority: a && a.level === 'bad' ? 'высокий' : 'средний' }, S.draft || {});
+    const key = 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    const form = () => `<div class="modal glass" role="dialog" aria-modal="true" aria-label="Новое решение"><header><div style="flex:1"><p class="eyebrow">${k ? esc(k.name) + ' · ' + esc(k.dept_name) : 'Реестр решений'}</p><h2>Новое решение</h2></div>
+        <button class="btn btn-icon btn-ghost" data-act="closeLayer" aria-label="Закрыть">${I.close.replace('<svg', '<svg width="18" height="18"')}</button></header>
+      <form class="modal-body" id="decForm">
+        <label class="field">Что решаем<input class="input" name="title" required maxlength="160" value="${esc(draft.title)}" autofocus></label>
+        <label class="field">Проблема<textarea class="textarea" name="problem" required>${esc(draft.problem)}</textarea></label>
+        <div class="frow"><label class="field">Влияние<textarea class="textarea" name="impact">${esc(draft.impact)}</textarea></label><label class="field">Причина<textarea class="textarea" name="cause" required>${esc(draft.cause)}</textarea></label></div>
+        <label class="field">Действие — что именно сделать<textarea class="textarea" name="action" required placeholder="Например: до 15.11 вывести двух сборщиков из резерва">${esc(draft.action)}</textarea></label>
+        <div class="frow"><label class="field">Владелец<select class="select" name="owner_id" required><option value="">Выберите</option>${people.map((u) => `<option value="${u.id}" ${u.id === draft.owner_id ? 'selected' : ''}>${esc(u.name)} — ${esc(u.title)}</option>`).join('')}</select></label>
+          <label class="field">Срок<input class="input" type="date" name="due" required value="${esc(draft.due)}"></label></div>
+        <label class="field">Приоритет<select class="select" name="priority">${['высокий', 'средний', 'низкий'].map((x) => `<option ${x === draft.priority ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+        <p class="err" role="alert"></p>
+      </form><footer><button class="btn" data-act="closeLayer">Отмена</button><button class="btn btn-primary" id="toPreview">Проверить перед сохранением</button></footer></div>`;
+    const read = () => { const f = $('#decForm'); const o = {}; ['title', 'problem', 'impact', 'cause', 'action', 'owner_id', 'due', 'priority'].forEach((n) => o[n] = f[n].value.trim()); return o; };
+    const stepForm = () => {
+      openLayer(form());
+      $('#decForm').oninput = () => { S.draft = read(); };
+      $('#toPreview').onclick = () => {
+        const f = $('#decForm'); if (!f.reportValidity()) return;
+        Object.assign(draft, read()); S.draft = draft; stepPreview();
+      };
+    };
+    const stepPreview = () => {
+      const owner = people.find((u) => u.id === draft.owner_id) || {};
+      openLayer(`<div class="modal glass" role="dialog" aria-modal="true" aria-label="Проверка решения"><header><div style="flex:1"><p class="eyebrow">Проверьте перед сохранением</p><h2>${esc(draft.title)}</h2></div></header>
+        <div class="modal-body"><dl class="dl"><dt>Проблема</dt><dd>${esc(draft.problem)}</dd><dt>Влияние</dt><dd>${esc(draft.impact || '—')}</dd><dt>Причина</dt><dd>${esc(draft.cause)}</dd><dt>Действие</dt><dd>${esc(draft.action)}</dd>
+          <dt>Владелец</dt><dd>${esc(owner.name)} — ${esc(owner.title)}</dd><dt>Срок</dt><dd>${fdate(draft.due)}.${draft.due.slice(0, 4)}</dd><dt>Приоритет</dt><dd>${esc(draft.priority)}</dd>
+          ${k ? `<dt>Проверим по</dt><dd>${esc(k.name)}: сейчас ${fmt(k.value)} ${esc(k.unit)}, план ${fmt(k.plan)}</dd>` : ''}</dl>
+          <p class="note">После сохранения решение появится в реестре у владельца и попадёт в журнал действий. До этого ничего не записано.</p><p class="err" role="alert"></p></div>
+        <footer><button class="btn" id="back">Назад к правке</button><button class="btn btn-primary" id="save">Сохранить решение</button></footer></div>`);
+      $('#back').onclick = stepForm;
+      $('#save').onclick = async (e) => {
+        e.target.disabled = true;
+        try {
+          const d = await api('/api/pult/decisions', { body: Object.assign({}, draft, { key, kpi: k ? k.id : '', kpi_start: k ? k.value : null, dept: k ? k.dept : '' }) });
+          S.draft = null; delete S.cache['decisions|' + q()]; closeLayer();
+          toast(`Решение ${d.id} сохранено и назначено: ${d.owner}`, { label: 'Открыть реестр', run: () => go('decisions') });
+          if (S.view === 'decisions') renderView();
+        } catch (err) { $('.modal .err').textContent = err.message + (err.code === 0 ? ' Повторное нажатие не создаст второе решение.' : ''); e.target.disabled = false; }
+      };
+    };
+    stepForm();
   }
 
-  /* ---------- векторный анализ структуры затрат ---------- */
-  function shares(o) { const ids = C.costs.items.map((i) => i.id); const t = ids.reduce((s, k) => s + o[k], 0); return ids.map((k) => o[k] / t * 100); }
-  function vecCalc(a, b) {
-    const sa = shares(a), sb = shares(b);
-    const dot = sa.reduce((s, v, i) => s + v * sb[i], 0);
-    const la = Math.sqrt(sa.reduce((s, v) => s + v * v, 0)), lb = Math.sqrt(sb.reduce((s, v) => s + v * v, 0));
-    const cos = Math.min(1, dot / (la * lb));
-    const deg = Math.acos(cos) * 180 / Math.PI;
-    const d = sb.map((v, i) => v - sa[i]);
-    const d2 = d.reduce((s, v) => s + v * v, 0) || 1;
-    return { sa, sb, dot, la, lb, cos, deg, d, contrib: d.map((v) => v * v / d2 * 100) };
-  }
-  const THR = Math.acos(0.9) * 180 / Math.PI; // 25,8°
-  function renderVector() {
-    const pairs = { prev: ['Сентябрь → октябрь', CS, CF], plan: ['План → факт октября', CP, CF] };
-    const [label, a, b] = pairs[state.vecMode];
-    const v = vecCalc(a, b);
-    const names = ['Материалы', 'Оплата труда', 'Отчисления', 'Аренда, амортизация', 'Прочие'];
-    const mx = Math.max.apply(null, v.d.map(Math.abs)) || 1;
-    const iMax = v.d.indexOf(Math.max.apply(null, v.d)), iMin = v.d.indexOf(Math.min.apply(null, v.d));
-    const sig = v.cos < 0.9;
-    const scale = 30;
-    $('#vector').innerHTML = `<div class="vec-head"><div><p class="eyebrow">Финансы · метод из научной работы команды</p><h2 class="h2" id="vector-title">Векторный анализ структуры затрат</h2></div>
-        <div class="tabs" role="tablist" aria-label="Что сравнить"><button class="tab" role="tab" data-vec="prev" aria-selected="${state.vecMode === 'prev'}">сен → окт</button><button class="tab" role="tab" data-vec="plan" aria-selected="${state.vecMode === 'plan'}">план → факт</button></div></div>
-      <p class="muted small" style="margin-top:8px">Доли пяти статей — это вектор. Угол между векторами двух периодов одним числом показывает, насколько изменилась структура затрат.</p>
-      <div class="vec-stats">
-        <div class="vec-stat"><div class="k">Угол φ</div><div class="v">${fmt.n1(v.deg)}°</div></div>
-        <div class="vec-stat"><div class="k">cos φ</div><div class="v">${v.cos.toFixed(4).replace('.', ',')}</div></div>
-        <div class="vec-stat"><div class="k">Больше всех выросла</div><div class="v txt">${names[iMax]} ${fmt.signed(v.d[iMax], 1)}</div></div>
-      </div>
-      <div class="gauge" aria-label="Угол ${fmt.n1(v.deg)} градуса при пороге ${fmt.n1(THR)}">
-        <div class="gauge-track"><span class="gauge-thr" style="left:${(THR / scale * 100).toFixed(1)}%"></span><span class="gauge-mark" style="left:${Math.min(100, v.deg / scale * 100).toFixed(1)}%"></span></div>
-        <div class="gauge-scale"><span>0°</span><span>существенно, если φ > ${fmt.n1(THR)}° (cos < 0,9)</span><span>${scale}°</span></div>
-      </div>
-      <div class="dv"><div class="dv-row dv-head"><span>Статья</span><span style="text-align:center">сдвиг доли, п.п.</span><span class="num">Δ</span><span class="num">вклад</span></div>
-        ${v.d.map((x, i) => `<div class="dv-row"><span class="name" title="${esc(C.costs.items[i].name)}">${names[i]}</span><span class="dv-bar"><i class="${x >= 0 ? 'pos' : 'neg'}" style="width:${(Math.abs(x) / mx * 50).toFixed(1)}%"></i></span><span class="num">${fmt.signed(x, 1)}</span><span class="num faint">${fmt.n(v.contrib[i])} %</span></div>`).join('')}
-      </div>
-      <div class="ai-note" style="margin-top:14px"><div class="ai-ava">ИИ</div><div class="ai-body"><p>${sig ? 'Структура затрат изменилась существенно' : 'Структура затрат почти не изменилась'}: φ = ${fmt.n1(v.deg)}° при пороге ${fmt.n1(THR)}°. ${sig ? '' : 'Значит, деньги потеряны не на ценах закупки и не на аренде, а в процессах: объём (закрытый салон) и потери (брак, сверхурочные).'} Внутри — сдвиг ${v.d[iMin] < 0 ? 'от статьи «' + names[iMin].toLowerCase() + '»' : ''} к статье «${names[iMax].toLowerCase()}» (${fmt.signed(v.d[iMax], 1)} п.п.)${iMax === 1 ? ' — это сверхурочные цеха.' : '.'}</p>
-        ${iMax === 1 ? '<p style="margin-top:8px"><button class="btn btn-sm" data-open="overtime">Открыть сверхурочные →</button></p>' : ''}</div></div>
-      <p class="formula">cos φ = a·b / (|a|·|b|) = ${fmt.n1(v.dot)} / (${fmt.n1(v.la)} · ${fmt.n1(v.lb)}) = ${v.cos.toFixed(4).replace('.', ',')} · ${esc(label)}</p>`;
+  async function openDecision(id) {
+    let list;
+    try { list = await cached('decisions', '/api/pult/decisions'); } catch (e) { toast(e.message); return; }
+    const d = list.find((x) => x.id === id); if (!d) return;
+    const k = d.kpi ? S.pulse.kpis.find((x) => x.id === d.kpi) : null;
+    openLayer(`<aside class="drawer glass" role="dialog" aria-modal="true" aria-label="Решение ${esc(d.id)}">
+      <header><div style="flex:1"><p class="eyebrow">${esc(d.id)} · ${esc(d.status)}${d.overdue ? ' · <span class="st-bad">просрочено</span>' : ''}</p><h2>${esc(d.title)}</h2></div><button class="btn btn-icon btn-ghost" data-act="closeLayer" aria-label="Закрыть">${I.close.replace('<svg', '<svg width="18" height="18"')}</button></header>
+      <div class="drawer-body">
+        <dl class="dl"><dt>Проблема</dt><dd>${esc(d.problem)}</dd><dt>Влияние</dt><dd>${esc(d.impact || '—')}</dd><dt>Причина</dt><dd>${esc(d.cause)}</dd><dt>Действие</dt><dd>${esc(d.action)}</dd>
+          <dt>Владелец</dt><dd>${esc(d.owner)}</dd><dt>Срок</dt><dd class="${d.overdue ? 'st-bad' : ''}">${fdate(d.due)}.${(d.due || '').slice(0, 4)}</dd><dt>Приоритет</dt><dd>${esc(d.priority)}</dd><dt>Автор</dt><dd>${esc(d.author || '—')}</dd>
+          ${d.effect ? `<dt>Результат</dt><dd>${esc(d.effect)}</dd>` : ''}</dl>
+        ${k && !k.locked ? `<div class="note"><b>Повторная проверка.</b> ${esc(k.name)}: ${d.kpi_start != null ? 'при создании ' + fmt(d.kpi_start) + ' → ' : ''}сейчас ${fmt(k.value)} ${esc(k.unit)}, план ${fmt(k.plan)}. ${chip(k.status)}</div>` : ''}
+        <form id="updForm" style="display:flex;flex-direction:column;gap:12px">
+          <div class="frow"><label class="field">Статус<select class="select" name="status">${STATUSES.map((s) => `<option ${s === d.status ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+            <label class="field">Срок<input class="input" type="date" name="due" value="${esc(d.due)}"></label></div>
+          <label class="field">Комментарий<textarea class="textarea" name="comment" placeholder="Что сделано или почему сдвигаем"></textarea></label>
+          <label class="field">Что изменилось после решения (нужно, чтобы закрыть)<textarea class="textarea" name="effect" placeholder="Например: заказы в срок 91 % → 96 %">${esc(d.effect || '')}</textarea></label>
+          <p class="err" role="alert"></p>
+        </form>
+        <div><p class="eyebrow" style="margin-bottom:8px">История изменений</p><ul class="hist">${(d.history || []).slice().reverse().map((h) => `<li><time>${ftime(h.ts)}</time><span><b>${esc(h.who)}</b> — ${esc(h.change)}</span></li>`).join('')}</ul></div>
+      </div><footer><button class="btn btn-primary" id="updSave">Сохранить изменения</button><button class="btn" data-act="closeLayer">Закрыть</button></footer></aside>`);
+    $('#updSave').onclick = async (e) => {
+      const f = $('#updForm'); e.target.disabled = true;
+      try {
+        await api('/api/pult/decisions/' + id, { body: { status: f.status.value, due: f.due.value, comment: f.comment.value, effect: f.effect.value } });
+        delete S.cache['decisions|' + q()]; closeLayer(); toast('Изменения сохранены и записаны в историю');
+        if (S.view === 'decisions') renderView();
+      } catch (err) { $('.err', f).textContent = err.message; e.target.disabled = false; }
+    };
   }
 
-  /* ---------- статус ИИ ---------- */
-  async function renderHealth() {
-    const h = await api.health();
-    state.health = h;
-    const el = $('#ai-status');
-    const map = { cloud: 'ИИ: DeepSeek', local: 'ИИ: локальная модель', off: 'ИИ: встроенная логика' };
-    el.innerHTML = '<span class="dot"></span>' + esc(h.ok ? (map[h.mode] || 'ИИ') : 'Сервер не отвечает');
-    el.classList.toggle('on', h.ok && h.mode !== 'off');
-    el.title = h.ok && h.mode === 'cloud' ? 'Перед отправкой в модель ФИО, телефоны и суммы заменяются метками' : '';
+  /* ---------- поиск и команды ---------- */
+  async function openPalette() {
+    let decs = [];
+    try { decs = await cached('decisions', '/api/pult/decisions'); } catch (e) { /* без решений */ }
+    const items = [
+      ...VIEWS.map((v) => ({ t: v.name, s: 'раздел', run: () => go(v.id) })),
+      ...S.pulse.kpis.filter((k) => !k.locked).map((k) => ({ t: k.name, s: `показатель · ${fmt(k.value)} ${k.unit}`, run: () => openKpi(k.id) })),
+      ...decs.map((d) => ({ t: d.title, s: `решение ${d.id} · ${d.status}`, run: () => openDecision(d.id) })),
+      { t: 'Новое решение', s: 'действие', run: () => openDecisionForm({}) },
+      { t: 'Спросить помощника', s: 'действие', run: openChat },
+      { t: 'Выйти', s: 'действие', run: () => logout() },
+    ];
+    lastFocus = document.activeElement;
+    $('#layer').innerHTML = `<div class="scrim" data-act="closeLayer"></div><div class="palette glass" role="dialog" aria-modal="true" aria-label="Поиск и команды">
+      <input id="palIn" placeholder="Раздел, показатель или решение" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="palList"><ul id="palList" role="listbox"></ul></div>`;
+    let sel = 0, shown = items;
+    const draw = () => { $('#palList').innerHTML = shown.slice(0, 40).map((x, i) => `<li role="option" aria-selected="${i === sel}" data-i="${i}">${esc(x.t)}<small>${esc(x.s)}</small></li>`).join('') || '<li class="faint">Ничего не нашлось</li>';
+      const cur = $('#palList [aria-selected="true"]'); if (cur) cur.scrollIntoView({ block: 'nearest' }); };
+    const inp = $('#palIn');
+    inp.oninput = () => { const s = inp.value.trim().toLowerCase(); shown = items.filter((x) => (x.t + ' ' + x.s).toLowerCase().includes(s)); sel = 0; draw(); };
+    inp.onkeydown = (e) => {
+      if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, Math.min(shown.length, 40) - 1); draw(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); draw(); e.preventDefault(); }
+      else if (e.key === 'Enter' && shown[sel]) { const x = shown[sel]; closeLayer(); x.run(); }
+    };
+    $('#palList').onclick = (e) => { const li = e.target.closest('[data-i]'); if (li) { const x = shown[+li.dataset.i]; closeLayer(); x.run(); } };
+    draw(); inp.focus();
   }
 
-  /* ---------- события ---------- */
+  /* ---------- помощник ---------- */
+  function openChat() {
+    if ($('#chat')) { $('#chatIn').focus(); return; }
+    const quick = ['Что требует решения сегодня?', 'Почему упали заказы в срок?', 'Какие решения просрочены?'];
+    const box = document.createElement('section');
+    box.className = 'chat glass'; box.id = 'chat'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Помощник');
+    box.innerHTML = `<header>${I.spark.replace('<svg', '<svg width="20" height="20"')}<div style="flex:1"><h2>Помощник</h2><p class="faint" style="font-size:12.5px">Отвечает только по данным, доступным роли «${esc(S.user.title)}»</p></div>
+        <button class="btn btn-icon btn-ghost" id="chatX" aria-label="Закрыть помощника">${I.close.replace('<svg', '<svg width="18" height="18"')}</button></header>
+      <div class="chat-log" id="chatLog" aria-live="polite"></div><div class="quick">${quick.map((x) => `<button class="btn btn-sm" data-q="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+      <form id="chatForm"><input class="input" id="chatIn" placeholder="Спросите о показателях и решениях" autocomplete="off" maxlength="500"><button class="btn btn-primary btn-icon" aria-label="Отправить">${I.send.replace('<svg', '<svg width="18" height="18"')}</button></form>`;
+    document.body.append(box);
+    $('#fab').classList.add('hidden');
+    const log = $('#chatLog');
+    const draw = () => { log.innerHTML = S.chat.map((m) => `<div class="msg ${m.me ? 'me' : 'ai'}${m.wait ? ' typing' : ''}">${esc(m.text)}${m.meta ? `<small>${esc(m.meta)}</small>` : ''}</div>`).join('') || '<p class="faint" style="font-size:13.5px">Имена, телефоны и суммы заменяются метками до отправки в модель. Действий помощник сам не совершает — только подсказывает.</p>'; log.scrollTop = log.scrollHeight; };
+    const ask = async (text) => {
+      text = text.trim(); if (!text) return;
+      S.chat.push({ me: true, text }); const wait = { text: 'Смотрю данные', wait: true }; S.chat.push(wait); draw();
+      try {
+        const r = await api('/api/pult/ask', { body: { question: text, days: S.days, product: S.product } });
+        wait.wait = false; wait.text = r.text;
+        wait.meta = `${r.provider}${r.masked ? ` · замаскировано значений: ${r.masked}` : ''} · данные на ${ftime(r.asof)} · источники: ${r.sources.join('; ')}`;
+      } catch (e) { wait.wait = false; wait.text = e.message; }
+      draw();
+    };
+    $('#chatForm').onsubmit = (e) => { e.preventDefault(); const i = $('#chatIn'); const v = i.value; i.value = ''; ask(v); };
+    box.onclick = (e) => { const b = e.target.closest('[data-q]'); if (b) ask(b.dataset.q); };
+    $('#chatX').onclick = () => { box.remove(); $('#fab').classList.remove('hidden'); $('#fab').focus(); };
+    draw(); $('#chatIn').focus();
+  }
+
+  /* ---------- общие нажатия ---------- */
   document.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-open],[data-go],[data-crumb],[data-explain],[data-decide],[data-close-modal],[data-st],[data-to-journal],[data-row],[data-done],[data-print],[data-vec],[data-mode]');
+    const t = e.target.closest('[data-act],[data-kpi],[data-decide],[data-decision],[data-node]');
     if (!t) return;
-    const ds = t.dataset;
-    if (ds.mode) { state.mode = ds.mode; document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-selected', b === t ? 'true' : 'false')); renderHero(); renderBlocks(); }
-    else if (ds.open) { closeModal(); openPath(ds.open); }
-    else if (ds.go) go(ds.go);
-    else if (ds.crumb) { state.stack = state.stack.slice(0, +ds.crumb + 1); renderNode(); }
-    else if (ds.explain) explain(ds.explain);
-    else if (ds.decide !== undefined) openDecision(+ds.decide);
-    else if (ds.closeModal !== undefined) closeModal();
-    else if (ds.st) setStatus(ds.id, ds.st, t);
-    else if (ds.toJournal !== undefined) { closeModal(); closeDrawer(); document.querySelector('.journal').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-    else if (ds.row) { state.openRow = state.openRow === ds.row ? null : ds.row; renderJournal(); }
-    else if (ds.done) markDone(ds.done);
-    else if (ds.print) printDecision(ds.print);
-    else if (ds.vec) { state.vecMode = ds.vec; renderVector(); }
+    if (t.dataset.act === 'closeLayer') return closeLayer();
+    if (t.dataset.act === 'load') return load();
+    if (t.dataset.act === 'rerender') return renderView();
+    if (t.dataset.act === 'newDecision') return openDecisionForm({});
+    if (t.dataset.decide) return openDecisionForm({ kpi: t.dataset.decide });
+    if (t.dataset.decision) return openDecision(t.dataset.decision);
+    if (t.dataset.kpi) return openKpi(t.dataset.kpi, t.dataset.by);
+    if (t.dataset.node) return openKpi(t.dataset.node);
   });
-  $('#hero-go').addEventListener('click', () => openPath('profit'));
-  $('#back').addEventListener('click', back);
-  $('#close').addEventListener('click', closeDrawer);
-  $('#drawer-back').addEventListener('click', closeDrawer);
-  $('#modal-back').addEventListener('click', (e) => { if (e.target.id === 'modal-back') closeModal(); });
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    if (!$('#modal-back').classList.contains('hidden')) closeModal();
-    else if ($('#drawer').classList.contains('open')) closeDrawer();
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && S.pulse) { e.preventDefault(); openPalette(); return; }
+    if (e.key === 'Escape') { if ($('#layer').innerHTML) closeLayer(); else if ($('#chat')) $('#chatX').click(); return; }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#map .node')) { e.preventDefault(); openKpi(e.target.dataset.node); }
   });
+  window.addEventListener('offline', () => toast('Нет сети. Данные на экране могли устареть, введённое в формах сохранено.'));
+  window.addEventListener('online', () => toast('Сеть вернулась', { label: 'Обновить данные', run: reload }));
 
-  /* ---------- старт ---------- */
-  renderHero();
-  renderBlocks();
-  renderVector();
-  renderHealth();
-  loadJournal();
-  pollOrders();
-  setInterval(pollOrders, 5000);
-  setInterval(loadJournal, 15000); // статусы могут менять в Треке 3 и в боте
-  // ссылка на узел для показа: /t1/#root_gallery, /t1/#profit
-  const h = decodeURIComponent(location.hash.slice(1));
-  if (NODES[h]) openPath(h);
-  window.PULT = { openPath, NODES, state }; // для демо и отладки
+  start();
 })();

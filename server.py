@@ -260,13 +260,15 @@ def ask_model(system: str, user: str, want_json: bool, max_tokens: int) -> dict:
 
 # ---------- модули участников ----------
 # Лёша: assistant_api.py — адреса /api/assistant/...; Никита: app_api.py — адреса /api/app/...
+# Пульт: pult_api.py — /api/pult/..., /api/context, /api/events.
 # Модуль объявляет handle(handler, method, path, core) -> bool (True — запрос обработан).
 # handler._json(obj, code) — ответ; handler._body() — JSON из тела; handler.rfile — сырые данные (файлы).
 CORE = types.SimpleNamespace(ask_model=ask_model, mask=mask, unmask=unmask, audit=audit, load=_load, save=_save,
                              lock=LOCK, now=_now, user=current_user, can_see=can_see, collections=COLLECTIONS,
                              root=ROOT, data=DATA)
 MODULES = []
-for _prefix, _name in (("/api/assistant/", "assistant_api"), ("/api/app/", "app_api")):
+for _prefix, _name in (("/api/assistant/", "assistant_api"), ("/api/app/", "app_api"),
+                       ("/api/pult/", "pult_api"), ("/api/context", "pult_api"), ("/api/events", "pult_api")):
     if (ROOT / (_name + ".py")).exists():
         MODULES.append((_prefix, __import__(_name)))
 
