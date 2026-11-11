@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>picPac · печать с телефона</title>
+<meta name="description" content="От фото в галерее до оформленного заказа за минуту: приложение отбирает удачные кадры, кадрирует под формат и считает цену.">
+<meta name="theme-color" content="#FFFFFF">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Печать">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="/t2/manifest.webmanifest">
+<link rel="icon" href="/t2/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/t2/icon-192.png">
+<link rel="stylesheet" href="/shared/fonts/fonts.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<link rel="stylesheet" href="/t2/style.css">
+</head>
+<body>
+<div class="stage">
+  <aside class="side side-left" aria-label="Шаги заказа">
+    <span class="chip chip-accent">Трек 2 · мобильный канал заказа</span>
+    <h1>Печать с телефона</h1>
+    <p class="lead">Путь от фотографий в галерее до оформленного заказа — без регистрации, редактора и Snapseed.</p>
+    <ol class="steps" id="sideSteps">
+      <li data-s="0"><div><b>Выбрать фото</b><span>Из галереи телефона, в любом браузере и в Telegram</span></div></li>
+      <li data-s="1"><div><b>Проверка кадров</b><span>Размытые, дубли, тёмные — отсеяны прямо на телефоне</span></div></li>
+      <li data-s="2"><div><b>Формат</b><span>Кадрирует 3:4 → 2:3 сама и честно говорит, хватит ли пикселей</span></div></li>
+      <li data-s="3"><div><b>Корзина</b><span>Самовывоз из салона или доставка, оплата при получении</span></div></li>
+      <li data-s="4"><div><b>Готово</b><span>Статус в реальном времени; заказ сразу на пульте руководителя (Т1)</span></div></li>
+    </ol>
+  </aside>
+
+  <div class="phone">
+    <div class="app in-frame" id="app">
+      <header class="app-head" id="head"></header>
+      <main class="screen" id="screen"></main>
+      <footer class="actionbar" id="bar"></footer>
+    </div>
+  </div>
+
+  <aside class="side side-right" aria-label="Метрика и боли">
+    <div class="metric">
+      <span class="eyebrow">Время до заказа</span>
+      <div class="big" id="sideTimer" style="color:var(--ink3)">0:00</div>
+      <p id="sideTimerNote">Отсчёт пойдёт, когда выберете фото</p>
+    </div>
+    <div class="pains">
+      <h3>Что мешает заказать сейчас</h3>
+      <ul>
+        <li><b>Загрузка</b> — FAQ просит перейти в браузер Google Chrome</li>
+        <li><b>Кадрирование</b> — фото с телефона 3:4, печать 10×15 — 2:3: советуют обрезать в Snapseed</li>
+        <li><b>Качество</b> — «поменяйте разрешение на 300 DPI в редакторе» вместо понятного ответа</li>
+        <li><b>Ожидание</b> — самовывоза нет, 4–7 дней доставки</li>
+        <li><b>Шаги</b> — продукт → загрузка → редактор → корзина → доставка → оплата</li>
+      </ul>
+      <p class="src">По страницам picpac.by: FAQ, «Фотопечать», «Доставка и оплата»</p>
+    </div>
+    <div class="side-links">
+      <a class="btn btn-sm" href="/t2/admin.html" target="_blank" rel="noopener">Экран салона →</a>
+      <a class="btn btn-sm btn-ghost" href="/">Все треки</a>
+    </div>
+  </aside>
+</div>
+
+<input type="file" id="file" class="file-input" accept="image/*" multiple>
+<script src="/shared/company.js"></script>
+<script src="/shared/api.js"></script>
+<script src="/t2/app.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js" async onload="window.__tgReady && window.__tgReady()"></script>
+</body>
+</html>

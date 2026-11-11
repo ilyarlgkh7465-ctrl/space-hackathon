@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Фотопринт · единая система</title>
+<link rel="stylesheet" href="/shared/fonts/fonts.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<style>
+  main { max-width: 1080px; margin: 0 auto; padding: 40px 20px 60px; }
+  .hero h1 { font-size: clamp(28px, 4vw, 40px); line-height: 1.15; font-weight: 600; letter-spacing: -.02em; max-width: 760px; }
+  .hero p { margin-top: 12px; font-size: 17px; color: var(--ink2); max-width: 680px; }
+  .tracks { margin-top: 32px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .track { display: flex; flex-direction: column; gap: 10px; text-decoration: none; color: inherit; transition: transform .15s var(--ease), box-shadow .15s; }
+  .track:hover { transform: translateY(-2px); box-shadow: var(--pop); }
+  .track .chip { align-self: flex-start; }
+  .track h2 { font-size: 19px; font-weight: 600; }
+  .track p { color: var(--ink2); font-size: 14.5px; flex: 1; }
+  .track .go { color: var(--accent-ink); font-weight: 500; font-size: 14px; }
+  .flow { margin-top: 28px; display: grid; grid-template-columns: repeat(5, auto); align-items: center; gap: 10px; justify-content: start; font-size: 14px; color: var(--ink2); }
+  .flow b { color: var(--ink); font-weight: 500; }
+  .foot { margin-top: 36px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  @media (max-width: 860px) { .tracks { grid-template-columns: 1fr; } .flow { grid-template-columns: 1fr; } .flow .arr { display: none; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-dot">Ф</span>Фотопринт <small>единая система</small></a>
+  <span class="spacer"></span>
+  <span class="demo-badge">Демо-компания «Проявка» · данные выдуманы</span>
+</header>
+<main>
+  <section class="hero">
+    <p class="eyebrow">Три трека — одна система</p>
+    <h1>Клиент заказывает с телефона, руководитель видит причину отклонения, решение уходит исполнителю и проверяется на встрече</h1>
+    <p>Пульт руководителя, приложение picPac и ИИ-помощник работают на одном сервере, с одними ролями и одним слоем событий.</p>
+  </section>
+
+  <div class="tracks">
+    <a class="card track" href="/t1/">
+      <span class="chip chip-accent">Трек 1</span>
+      <h2>Пульт причин</h2>
+      <p>Финансы, клиенты, производство и кадры на одном экране. Щелчок по отклонению — и путь до причины, затем решение с ответственным и сроком.</p>
+      <span class="go">Открыть →</span>
+    </a>
+    <a class="card track" href="/t2/">
+      <span class="chip chip-accent">Трек 2</span>
+      <h2>Печать с телефона</h2>
+      <p>От фото в галерее до оформленного заказа за минуту: приложение само отбирает удачные кадры, проверяет качество под формат и считает цену.</p>
+      <span class="go">Открыть →</span>
+    </a>
+    <a class="card track" href="/t3/">
+      <span class="chip chip-accent">Трек 3</span>
+      <h2>Помощник руководителя</h2>
+      <p>Готовит встречу, ведёт протокол, раздаёт задачи и собирает итоги. Документы не уходят наружу: маскирование, роли, журнал, локальная модель.</p>
+      <span class="go">Открыть →</span>
+    </a>
+  </div>
+
+  <div class="flow" aria-label="Как связаны треки">
+    <span><b>Заказ с телефона</b> (Т2)</span><span class="arr">→</span>
+    <span><b>Отклонение и причина</b> (Т1)</span><span class="arr">→</span>
+    <span><b>Решение на встрече и контроль</b> (Т3)</span>
+  </div>
+
+  <div class="foot">
+    <button class="btn btn-sm" id="reset">Сбросить демо-данные</button>
+    <span class="faint" id="ai">Проверяю ИИ…</span>
+  </div>
+</main>
+<script src="/shared/company.js"></script>
+<script src="/shared/api.js"></script>
+<script>
+  api.health().then((h) => {
+    const m = { cloud: 'ИИ: облако (' + (h.cloud_model || '') + ')', local: 'ИИ: локальная модель', off: 'ИИ выключен — работает встроенная логика' };
+    document.getElementById('ai').textContent = m[h.mode] || 'Сервер не отвечает';
+  });
+  document.getElementById('reset').onclick = async () => { await api.reset(); toast('Демо-данные восстановлены'); };
+</script>
+</body>
+</html>

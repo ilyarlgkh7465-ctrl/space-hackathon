@@ -1,0 +1,114 @@
+[
+ {
+  "id": "u-dir",
+  "login": "director",
+  "name": "Орлова А. В.",
+  "title": "Директор",
+  "role": "director",
+  "dept": "all",
+  "level": 1,
+  "password": "demo2026"
+ },
+ {
+  "id": "u-prod",
+  "login": "production",
+  "name": "Гринь Д. А.",
+  "title": "Руководитель производства",
+  "role": "head",
+  "dept": "production",
+  "level": 2,
+  "password": "demo2026"
+ },
+ {
+  "id": "u-sales",
+  "login": "sales",
+  "name": "Белая М. С.",
+  "title": "Руководитель продаж и маркетинга",
+  "role": "head",
+  "dept": "sales",
+  "level": 2,
+  "password": "demo2026"
+ },
+ {
+  "id": "u-sup",
+  "login": "support",
+  "name": "Климович Е. П.",
+  "title": "Руководитель поддержки клиентов",
+  "role": "head",
+  "dept": "support",
+  "level": 2,
+  "password": "demo2026"
+ },
+ {
+  "id": "u-log",
+  "login": "logistics",
+  "name": "Савчук И. Н.",
+  "title": "Руководитель логистики",
+  "role": "head",
+  "dept": "logistics",
+  "level": 2,
+  "password": "demo2026"
+ },
+ {
+  "id": "u-fin",
+  "login": "finance",
+  "name": "Лозовая Т. К.",
+  "title": "Руководитель финансов",
+  "role": "head",
+  "dept": "finance",
+  "level": 2,
+  "password": "demo2026"
+ },
+ {
+  "id": "u-hr",
+  "login": "hr",
+  "name": "Рудая О. В.",
+  "title": "Руководитель по персоналу",
+  "role": "head",
+  "dept": "hr",
+  "level": 2,
+  "password": "demo2026"
+ },
+ {
+  "id": "u-op1",
+  "login": "operator",
+  "name": "Жук П. С.",
+  "title": "Мастер участка сборки",
+  "role": "operator",
+  "dept": "production",
+  "level": 3,
+  "stage": "binding",
+  "password": "demo2026"
+ },
+ {
+  "id": "u-op2",
+  "login": "quality",
+  "name": "Сокол В. Р.",
+  "title": "Контролёр качества",
+  "role": "operator",
+  "dept": "production",
+  "level": 3,
+  "stage": "quality",
+  "password": "demo2026"
+ },
+ {
+  "id": "u-an",
+  "login": "analyst",
+  "name": "Ветров Н. Л.",
+  "title": "Аналитик-администратор",
+  "role": "analyst",
+  "dept": "all",
+  "level": 2,
+  "password": "demo2026"
+ },
+ {
+  "id": "u-cl",
+  "login": "client",
+  "name": "Тестовый клиент",
+  "title": "Клиент picPac",
+  "role": "customer",
+  "dept": "",
+  "level": 0,
+  "password": "demo2026"
+ }
+]
