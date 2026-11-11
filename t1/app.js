@@ -16,6 +16,8 @@
     sales: ic('<path d="M4 5h2l2.2 10h9.6L20 8H7.2"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/>'),
     production: ic('<path d="M3 20V9l6 4V9l6 4V5h6v15z"/><path d="M8 17h2M13 17h2"/>'),
     finance: ic('<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18M16 15h2"/>'),
+    people: ic('<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.4 3-5 6-5s5.4 1.6 6 5"/><path d="M16 5.2a3 3 0 010 5.6M17.5 14.3c1.9.6 3.1 2.1 3.5 4.7"/>'),
+    report: ic('<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>'),
     decisions: ic('<rect x="3" y="4" width="5" height="16" rx="1.6"/><rect x="9.5" y="4" width="5" height="10" rx="1.6"/><rect x="16" y="4" width="5" height="13" rx="1.6"/>'),
     data: ic('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
     search: ic('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>'),
@@ -31,12 +33,16 @@
     { id: 'pulse', name: 'Пульс компании', icon: I.pulse },
     { id: 'sales', name: 'Продажи и клиент', icon: I.sales },
     { id: 'production', name: 'Производство и качество', icon: I.production },
-    { id: 'finance', name: 'Финансы и люди', icon: I.finance },
+    { id: 'finance', name: 'Финансы и бухгалтерия', icon: I.finance },
+    { id: 'people', name: 'Кадры и документы', icon: I.people },
     { id: 'decisions', name: 'Реестр решений', icon: I.decisions },
     { id: 'data', name: 'Данные и журнал', icon: I.data },
   ];
   const STATUSES = ['новое', 'в работе', 'на проверке', 'закрыто'];
-  const DEMO = [['director', 'Директор'], ['production', 'Руководитель производства'], ['finance', 'Руководитель финансов'], ['analyst', 'Аналитик']];
+  /* Руководитель отдела видит только свои разделы — так просил заказчик. */
+  const DEPT_VIEW = { production: 'production', logistics: 'production', sales: 'sales', support: 'sales', finance: 'finance', hr: 'people', office: 'people' };
+  const myViews = () => !S.user || S.user.role !== 'head' ? VIEWS : VIEWS.filter((v) => ['pulse', 'decisions', 'data', DEPT_VIEW[S.user.dept]].includes(v.id));
+  const DEMO = [['director', 'Директор'], ['production', 'Руководитель производства'], ['finance', 'Руководитель финансов'], ['hr', 'Руководитель по персоналу'], ['operator', 'Мастер участка'], ['analyst', 'Аналитик']];
 
   const store = { get: (k) => { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v == null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch (e) { /* закрытое окно */ } } };
   const hash = new URLSearchParams(location.hash.slice(1));
@@ -110,6 +116,8 @@
   async function start() {
     if (!S.token) return renderLogin();
     try { S.user = await api('/api/me'); } catch (e) { if (e.code !== 401) renderLogin(e.message); return; }
+    if (S.user.role === 'operator') return renderMy();
+    if (!myViews().some((v) => v.id === S.view)) S.view = 'pulse';
     if (!['director', 'head', 'analyst'].includes(S.user.role)) {
       $('#app').innerHTML = `<main class="login"><div class="glass login-card"><span class="logo">Ф</span><h1>Пульт — для руководителей</h1>
         <p class="muted">Вы вошли как «${esc(S.user.title)}». Для операционной команды есть экран участка с очередью и отметками этапов.</p>
@@ -126,7 +134,7 @@
       <aside class="rail glass" aria-label="Разделы">
         <span class="logo" aria-hidden="true">Ф</span>
         <nav class="rail-nav" id="nav"><span class="rail-pill" id="pill"></span>
-          ${VIEWS.map((v) => `<button class="rail-btn" data-view="${v.id}" aria-label="${v.name}">${v.icon}<span class="tip">${v.name}</span></button>`).join('')}
+          ${myViews().map((v) => `<button class="rail-btn" data-view="${v.id}" aria-label="${v.name}">${v.icon}<span class="tip">${v.name}</span></button>`).join('')}
         </nav>
         <span class="avatar" title="${esc(S.user.name)} · ${esc(S.user.title)}">${esc(initials)}</span>
       </aside>
@@ -135,7 +143,7 @@
         <main class="view" id="view" tabindex="-1"></main>
       </div>
     </div>
-    <button class="btn btn-primary fab" id="fab">${I.spark} Помощник</button>`;
+    <button class="btn btn-accent fab" id="fab">${I.spark} Помощник</button>`;
     $('#nav').addEventListener('click', (e) => { const b = e.target.closest('[data-view]'); if (b) go(b.dataset.view); });
     $('#nav').addEventListener('keydown', (e) => {
       if (!['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft'].includes(e.key)) return;
@@ -166,7 +174,7 @@
       <span class="spacer"></span>
       <div class="seg" role="group" aria-label="Период">${[7, 14, 30, 60].map((d) => `<button data-days="${d}" aria-pressed="${S.days === d}">${d} дн.</button>`).join('')}</div>
       <select class="select" id="fProduct" aria-label="Продукт"><option value="">Все продукты</option>${p ? p.products.map((x) => `<option value="${x.id}" ${S.product === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('') : ''}</select>
-      <select class="select" id="fDept" aria-label="Подразделение"><option value="">Все подразделения</option>${p ? p.depts.map((x) => `<option value="${x.id}" ${S.dept === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('') : ''}</select>
+      ${p && p.depts.length > 1 ? `<select class="select" id="fDept" aria-label="Подразделение"><option value="">Все подразделения</option>${p.depts.map((x) => `<option value="${x.id}" ${S.dept === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}
       <span class="chip live" title="Данные обновлены: дата и время"><i></i>${p ? ftime(p.asof) : 'загрузка'}</span>
       <button class="btn btn-icon bell" id="bell" aria-label="Отклонения: ${bad}">${I.bell.replace('<svg', '<svg width="18" height="18"')}${bad ? `<b>${bad}</b>` : ''}</button>
       <button class="btn btn-primary" id="newDec">${I.plus.replace('<svg', '<svg width="16" height="16"')} Решение</button>
@@ -174,13 +182,13 @@
     $('#openPal').onclick = openPalette;
     $$('[data-days]').forEach((b) => b.onclick = () => { S.days = +b.dataset.days; reload(); });
     $('#fProduct').onchange = (e) => { S.product = e.target.value; reload(); };
-    $('#fDept').onchange = (e) => { S.dept = e.target.value; renderView(); };
+    if ($('#fDept')) $('#fDept').onchange = (e) => { S.dept = e.target.value; renderView(); };
     $('#bell').onclick = () => { go('pulse'); setTimeout(() => { const a = $('#alerts'); if (a) a.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 60); };
     $('#newDec').onclick = () => openDecisionForm({});
     $('#logout').onclick = () => logout();
   }
   function go(view) {
-    if (!VIEWS.some((v) => v.id === view)) return;
+    if (!myViews().some((v) => v.id === view)) return;
     S.view = view;
     history.replaceState(null, '', `#v=${view}&d=${S.days}`);
     movePill(true); renderTop(); renderView();
@@ -206,7 +214,7 @@
     const X = (i) => 3 + (i / (series.length - 1)) * 102, Y = (v) => 26 - ((v - min) / span) * 22;
     const d = pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
     const last = pts[pts.length - 1];
-    return `<svg class="spark" viewBox="0 0 108 30" aria-hidden="true"><path d="${d}" fill="none" stroke="${COLOR[st] || '#EADFD7'}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.6" fill="${COLOR[st] || '#EADFD7'}"/></svg>`;
+    return `<svg class="spark" viewBox="0 0 108 30" aria-hidden="true"><path d="${d}" fill="none" stroke="${COLOR[st] || 'var(--ink3)'}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.6" fill="${COLOR[st] || 'var(--ink3)'}"/></svg>`;
   }
   function lineChart(k) {
     const W = 520, H = 190, L = 44, R = 12, T = 14, B = 26;
@@ -221,12 +229,12 @@
     const showPlan = k.plan != null && k.unit !== 'BYN' && k.unit !== 'чел.';
     const step = Math.max(1, Math.ceil(n / 6));
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Динамика показателя «${esc(k.name)}» по дням">
-      <defs><linearGradient id="ar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF7A66" stop-opacity=".38"/><stop offset="1" stop-color="#FF7A66" stop-opacity="0"/></linearGradient></defs>
-      ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="rgba(255,236,226,.08)"/><text x="${L - 8}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#8C7F78" font-family="JetBrains Mono">${fmt(t)}</text>`).join('')}
-      ${showPlan ? `<line x1="${L}" x2="${W - R}" y1="${Y(k.plan).toFixed(1)}" y2="${Y(k.plan).toFixed(1)}" stroke="#EADFD7" stroke-dasharray="5 5" opacity=".7"/><text x="${W - R}" y="${(Y(k.plan) - 6).toFixed(1)}" text-anchor="end" font-size="11" fill="#EADFD7">план ${fmt(k.plan)}</text>` : ''}
-      <path d="${area}" fill="url(#ar)"/><path d="${path}" fill="none" stroke="#FF8A76" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-      ${pts.map((p) => `<circle cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="2.4" fill="#FFD9D2"><title>${k.labels[p[0]]}: ${fmt(p[1])} ${k.unit}</title></circle>`).join('')}
-      ${k.labels.map((l, i) => i % step === 0 ? `<text x="${X(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#8C7F78" font-family="JetBrains Mono">${l}</text>` : '').join('')}
+      <defs><linearGradient id="ar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E9806F" stop-opacity=".30"/><stop offset="1" stop-color="#E9806F" stop-opacity="0"/></linearGradient></defs>
+      ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="var(--edge)"/><text x="${L - 8}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--ink4)" font-family="JetBrains Mono">${fmt(t)}</text>`).join('')}
+      ${showPlan ? `<line x1="${L}" x2="${W - R}" y1="${Y(k.plan).toFixed(1)}" y2="${Y(k.plan).toFixed(1)}" stroke="var(--ink3)" stroke-dasharray="5 5" opacity=".7"/><text x="${W - R}" y="${(Y(k.plan) - 6).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--ink3)">план ${fmt(k.plan)}</text>` : ''}
+      <path d="${area}" fill="url(#ar)"/><path d="${path}" fill="none" stroke="var(--brand)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      ${pts.map((p) => `<circle cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="2.4" fill="var(--brand)"><title>${k.labels[p[0]]}: ${fmt(p[1])} ${k.unit}</title></circle>`).join('')}
+      ${k.labels.map((l, i) => i % step === 0 ? `<text x="${X(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--ink4)" font-family="JetBrains Mono">${l}</text>` : '').join('')}
     </svg>`;
   }
   function bars(rows, unit, opts = {}) {
@@ -254,12 +262,12 @@
     }).join('');
     const coreColor = COLOR[p.pulse.status];
     return `<svg id="map" viewBox="0 0 ${W} ${H}" role="group" aria-label="Карта компании: сквозной поток заказа">
-      <defs><radialGradient id="core" cx="50%" cy="45%" r="60%"><stop offset="0" stop-color="#FF8A76" stop-opacity=".55"/><stop offset="60%" stop-color="#B32A2E" stop-opacity=".22"/><stop offset="100%" stop-color="#B32A2E" stop-opacity="0"/></radialGradient></defs>
+      <defs><radialGradient id="core" cx="50%" cy="45%" r="60%"><stop offset="0" stop-color="#F3B5A8" stop-opacity=".7"/><stop offset="60%" stop-color="#F6C9C4" stop-opacity=".35"/><stop offset="100%" stop-color="#F6C9C4" stop-opacity="0"/></radialGradient></defs>
       <path class="ring" d="${ring}"/>
       ${nodes.map((n) => `<path class="spoke" d="M${cx} ${cy} Q${((cx + n.x) / 2 + Math.sin(n.a) * 18).toFixed(1)} ${((cy + n.y) / 2 - Math.cos(n.a) * 18).toFixed(1)} ${n.x.toFixed(1)} ${n.y.toFixed(1)}" stroke="${COLOR[n.status]}"/>`).join('')}
       ${nodes.map(twigs).join('')}
       <circle cx="${cx}" cy="${cy}" r="118" fill="url(#core)"/>
-      <circle cx="${cx}" cy="${cy}" r="66" fill="rgba(20,12,11,.72)" stroke="${coreColor}" stroke-width="2"/>
+      <circle cx="${cx}" cy="${cy}" r="66" fill="rgba(255,255,255,.92)" stroke="${coreColor}" stroke-width="2"/>
       <circle cx="${cx}" cy="${cy}" r="76" fill="none" stroke="${coreColor}" stroke-width="1" opacity=".35"/>
       <text class="core-t" x="${cx}" y="${cy - 22}" text-anchor="middle">ПУЛЬС</text>
       <text class="core-v" x="${cx}" y="${cy + 12}" text-anchor="middle">${p.pulse.critical + p.pulse.warn}</text>
@@ -287,10 +295,21 @@
       <div class="kpi-foot"><span class="kpi-fc">прогноз ${fmt(k.forecast)}</span>${spark(k.series, k.status)}</div></button>`;
   }
   const kpisOf = (p) => p.kpis.filter((k) => !S.dept || k.dept === S.dept);
+  /* Экран директора словами заказчика: открыл — и по каждому отделу три показателя. */
+  function deptCards(p) {
+    const list = p.departments.filter((c) => !S.dept || c.id === S.dept || (c.depts || []).includes(S.dept));
+    if (!list.length) return '';
+    return `<section class="depts" aria-label="Отделы">${list.map((c) => c.hero
+      ? `<button class="glass-flat dept hero" data-go="${c.view}"><div><header><h3>${esc(c.name)}</h3>${chip(c.status)}</header>
+          <div class="big">${esc(c.metrics[0][1].replace(' %', ''))}<small> %</small></div><p>${esc(c.metrics[0][0])} — главный показатель компании. План 96 %.</p></div>
+          <ul>${c.metrics.slice(1).map((m) => `<li><b>${esc(m[1])}</b><span>${esc(m[0])}</span></li>`).join('')}<li><b>${p.pulse.critical}</b><span>показателей требуют решения</span></li></ul></button>`
+      : `<button class="glass-flat dept${c.note ? ' wide' : ''}" data-go="${c.view}"><header><h3>${esc(c.name)}</h3>${chip(c.status)}</header>
+          <ul>${c.metrics.map((m) => `<li><b>${esc(m[1])}</b><span>${esc(m[0])}</span></li>`).join('')}</ul>${c.note ? `<small>${esc(c.note)}</small>` : ''}</button>`).join('')}</section>`;
+  }
   function alertCard(a) {
     return `<article class="glass-flat alert ${a.level}"><div class="row">${chip(a.level)}<span class="who">${esc(a.dept_name)}</span></div>
       <h3>${esc(a.title)}</h3><p>${esc(a.cause)}</p><p class="who">Отвечает: ${esc(a.owner)} · ${esc(a.context)}</p>
-      <div class="row"><button class="btn btn-sm" data-kpi="${a.kpi}" data-by="${a.by}">К причине</button><button class="btn btn-sm btn-primary" data-decide="${a.kpi}">Оформить решение</button></div></article>`;
+      <div class="row"><button class="btn btn-sm" data-kpi="${a.kpi}" data-by="${a.by}">К причине</button><button class="btn btn-sm btn-accent" data-decide="${a.kpi}">Оформить решение</button></div></article>`;
   }
 
   /* ---------- разделы ---------- */
@@ -299,18 +318,21 @@
       const ks = kpisOf(p), al = p.alerts.filter((a) => !S.dept || a.dept === S.dept);
       const lead = p.pulse.critical ? `Из ${p.pulse.total} показателей ${p.pulse.critical} требуют решения, ещё ${p.pulse.warn} — под вниманием. Щёлкните узел карты или показатель, чтобы дойти до причины.`
         : 'Критических отклонений нет. Щёлкните показатель, чтобы увидеть динамику и формулу.';
-      return `<header class="page-head"><div><h1>Пульс компании</h1><p class="lead">${lead}</p></div></header>
+      return `<header class="page-head"><div><h1>Пульс компании</h1><p class="lead">${lead}</p></div><span class="spacer"></span>
+          <button class="btn" data-act="report">${I.report.replace('<svg', '<svg width="17" height="17"')} Отчёт за период</button></header>
+        ${deptCards(p)}
         <section class="pulse-grid">
           <div class="glass map-panel"><header><h2 class="sec-title">Карта компании</h2><span class="faint" style="font-size:13px">сквозной поток заказа</span>
             <div class="legend"><span><i style="background:var(--ok)"></i>в норме</span><span><i style="background:var(--warn)"></i>внимание</span><span><i style="background:var(--bad)"></i>плохо</span></div></header>${mapSvg(p)}</div>
           <div class="alerts" id="alerts"><h2 class="sec-title">Требует решения <span class="count">${al.length}</span></h2>
-            ${al.length ? al.map(alertCard).join('') : '<div class="glass-flat empty">Отклонений по доступным вам показателям нет.</div>'}</div>
+            ${al.length ? (S.allAlerts ? al : al.slice(0, 3)).map(alertCard).join('') : '<div class="glass-flat empty">Отклонений по доступным вам показателям нет.</div>'}
+            ${al.length > 3 ? `<button class="btn btn-sm more" data-act="alerts">${S.allAlerts ? 'Свернуть' : 'Показать все: ' + al.length}</button>` : ''}</div>
         </section>
         <section><h2 class="sec-title" style="margin-bottom:12px">Показатели <span class="count">${ks.length}</span></h2><div class="kpi-grid">${ks.map(kpiTile).join('')}</div>
           <p class="src">Период: ${fdate(p.period.from)} — ${fdate(p.period.to)}. Прогноз — на следующий такой же период по движению последних двух недель. У каждого показателя внутри — формула, источник и время обновления.</p></section>`;
     },
     async sales(p) {
-      const own = p.kpis.filter((k) => k.dept === 'sales');
+      const own = p.kpis.filter((k) => k.dept === 'sales' || k.dept === 'support');
       const open = own.some((k) => !k.locked);
       let body = '';
       if (open) {
@@ -327,7 +349,7 @@
           <div class="glass panel"><header><h2>Повторные покупки по типу клиента</h2></header>${bars(rep.rows, '%', { calm: true })}${rep.note ? `<p class="note" style="margin-top:14px">${esc(rep.note)}</p>` : ''}</div>
         </section>`;
       }
-      return `<header class="page-head"><div><h1>Продажи и клиент</h1><p class="lead">Воронка, конверсия, средний чек, повторные покупки, каналы и сегменты.</p></div></header>
+      return `<header class="page-head"><div><h1>Продажи и клиент</h1><p class="lead">Воронка, конверсия, средний чек, повторные покупки, каналы и сегменты. Обращения и ответы — данные из действующей системы клиентского сервиса: мы её не заменяем, а подключаемся к ней.</p></div></header>
         <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${body}`;
     },
     async production(p) {
@@ -358,23 +380,48 @@
     },
     async finance(p) {
       const f = await cached('finance', '/api/pult/finance');
-      const own = p.kpis.filter((k) => k.dept === 'finance' || k.dept === 'hr');
-      const months = f.pnl ? [...new Set(f.pnl.map((r) => r.month))] : [];
+      const own = p.kpis.filter((k) => k.dept === 'finance');
       const mname = (m) => ({ '09': 'сентябрь', 10: 'октябрь', 11: 'ноябрь' }[m.slice(5)] || m);
-      const fin = f.locked_fin ? `<div class="glass panel"><header><h2>Доходы и расходы</h2></header><div class="lock-note">${I.lock}<span>Финансовые данные закрыты для вашей роли: их видят директор, руководитель финансов и аналитик.</span></div></div>`
-        : `<div class="glass panel"><header><h2>Доходы и расходы: план и факт</h2><span class="faint" style="font-size:13px">BYN</span></header><div class="scroll-x"><table class="tbl"><thead><tr><th>Статья</th>${months.map((m) => `<th class="n">${mname(m)}: план</th><th class="n">факт</th><th class="n">откл.</th>`).join('')}</tr></thead><tbody>
+      const head = `<header class="page-head"><div><h1>Финансы и бухгалтерия</h1><p class="lead">План и факт доходов и расходов, деньги и долги на начало и конец месяца, расчёты с контрагентами. В 1С такой отчёт собирают часами — здесь он обновляется сам.</p></div></header>`;
+      if (f.locked_fin) return `${head}<div class="glass panel"><div class="lock-note">${I.lock}<span>Финансовые данные закрыты для вашей роли: их видят директор, руководитель финансов и аналитик.</span></div></div>`;
+      const months = [...new Set(f.pnl.map((r) => r.month))];
+      const pnl = `<div class="glass panel"><header><h2>Доходы и расходы: план и факт</h2><span class="faint" style="font-size:13px">BYN</span></header><div class="scroll-x"><table class="tbl"><thead><tr><th>Статья</th>${months.map((m) => `<th class="n">${mname(m)}: план</th><th class="n">факт</th><th class="n">откл.</th>`).join('')}</tr></thead><tbody>
             ${[...new Set(f.pnl.map((r) => r.article))].map((a) => `<tr><td>${esc(a)}</td>${months.map((m) => { const r = f.pnl.find((x) => x.month === m && x.article === a); const d = 100 * (r.fact - r.plan) / r.plan; const bad = (r.kind === 'доход' ? -d : d) > 3;
               return `<td class="n">${fmt(r.plan)}</td><td class="n">${fmt(r.fact)}</td><td class="n ${bad ? 'st-bad' : 'faint'}">${d > 0 ? '+' : '−'}${fmt(Math.abs(d))} %</td>`; }).join('')}</tr>`).join('')}
-            <tr><td><b>Движение денег: поступления</b></td>${f.cash.map((c) => `<td class="n">${fmt(c.inflow_plan)}</td><td class="n">${fmt(c.inflow_fact)}</td><td class="n faint">${fmt(100 * (c.inflow_fact - c.inflow_plan) / c.inflow_plan)} %</td>`).join('')}</tr>
-            <tr><td><b>Движение денег: выплаты</b></td>${f.cash.map((c) => `<td class="n">${fmt(c.outflow_plan)}</td><td class="n">${fmt(c.outflow_fact)}</td><td class="n faint">+${fmt(100 * (c.outflow_fact - c.outflow_plan) / c.outflow_plan)} %</td>`).join('')}</tr>
           </tbody></table></div><p class="src">Источник: ${esc(f.source)}, обновлено ${ftime(f.synced)}. ${esc(f.fin_note)}. Ноябрь — с начала месяца.</p></div>`;
+      const row = (name, a, b, goodUp) => { const d = b - a; const cls = d === 0 ? 'faint' : (d > 0) === goodUp ? 'st-ok' : 'st-bad'; return `<td class="n">${fmt(a)}</td><td class="n">${fmt(b)}</td><td class="n ${cls}">${d > 0 ? '+' : '−'}${fmt(Math.abs(d))}</td>`; };
+      const bal = `<div class="glass panel"><header><h2>На начало и конец месяца</h2><span class="faint" style="font-size:13px">BYN</span></header><div class="scroll-x"><table class="tbl"><thead><tr><th>Месяц</th><th class="n">Деньги: начало</th><th class="n">конец</th><th class="n">изм.</th><th class="n">Нам должны: начало</th><th class="n">конец</th><th class="n">изм.</th><th class="n">Мы должны: начало</th><th class="n">конец</th><th class="n">изм.</th></tr></thead><tbody>
+          ${f.balances.map((x) => `<tr><td>${mname(x.month)}</td>${row('', x.cash_start, x.cash_end, true)}${row('', x.receivable_start, x.receivable_end, false)}${row('', x.payable_start, x.payable_end, false)}</tr>`).join('')}</tbody></table></div>
+          <p class="note" style="margin-top:12px">В ноябре долг покупателей вырос заметнее обычного — стоит посмотреть просрочку по контрагентам.</p></div>`;
+      const cps = `<div class="glass panel"><header><h2>Расчёты с контрагентами</h2><span class="spacer"></span><button class="btn btn-sm" data-kpi="overdue_recv" data-by="counterparty">Просрочка подробнее</button></header><div class="scroll-x"><table class="tbl"><thead><tr><th>Контрагент</th><th>Кто</th><th class="n">Долг, BYN</th><th class="n">Просрочено, BYN</th><th class="n">Дней</th></tr></thead><tbody>
+          ${f.counterparties.map((c) => `<tr><td>${esc(c.name)}</td><td class="muted">${esc(c.kind)}</td><td class="n">${c.debt < 0 ? 'мы: ' + fmt(-c.debt) : fmt(c.debt)}</td><td class="n ${c.overdue_sum ? 'st-bad' : 'faint'}">${c.overdue_sum ? fmt(c.overdue_sum) : '—'}</td><td class="n ${c.overdue_days > 14 ? 'st-bad' : 'faint'}">${c.overdue_days || '—'}</td></tr>`).join('')}</tbody></table></div>
+          <p class="src">Источник: 1С: расчёты с контрагентами. Названия условные — данные тестовые.</p></div>`;
+      return `${head}<div class="kpi-grid">${own.map(kpiTile).join('')}</div>${pnl}<section class="grid2">${bal}${cps}</section>`;
+    },
+    async people(p) {
+      const f = await cached('finance', '/api/pult/finance');
+      const own = p.kpis.filter((k) => k.dept === 'hr' || k.dept === 'office');
+      const maxM = Math.max(1, ...f.moves.map((w) => Math.max(w.hired, w.fired)));
+      const moves = `<div class="glass panel"><header><h2>Приём и увольнение по неделям</h2><span class="legend" style="margin-left:auto"><span><i style="background:var(--ok)"></i>принято</span><span><i style="background:var(--brand)"></i>уволено</span></span></header>
+          <div class="funnel" style="min-height:150px">${f.moves.map((w, i) => `<div class="fstep"><div style="display:flex;gap:4px;align-items:flex-end;height:100px">
+            <div class="col" style="flex:1;background:var(--ok);height:${Math.max(3, w.hired / maxM * 96).toFixed(0)}px;animation-delay:${i * 40}ms" title="Принято: ${w.hired}"></div>
+            <div class="col" style="flex:1;height:${Math.max(3, w.fired / maxM * 96).toFixed(0)}px;animation-delay:${i * 40 + 40}ms" title="Уволено: ${w.fired}"></div></div>
+            <b>+${w.hired} / −${w.fired}</b><span>${fdate(w.week)}</span></div>`).join('') || '<p class="empty">Движения за период нет.</p>'}</div>
+          <p class="src">Источник: ${esc(f.hr_source)}: приём и увольнение. Имён здесь нет.</p></div>`;
+      const att = `<div class="glass panel"><header><h2>Явка по табелю за две недели</h2><span class="spacer"></span><button class="btn btn-sm" data-kpi="attendance">Подробнее</button></header>
+          <div class="bars">${f.attendance.map((r) => `<div class="bar"><span>${esc(r.name)}</span><span class="tr"><i class="${r.value < 92 ? '' : 'calm'}" style="width:${r.value}%"></i></span><b class="${r.value < 92 ? 'st-bad' : ''}">${fmt(r.value)} %</b></div>`).join('')}</div>
+          <p class="src">Вышли на смену ÷ должны были выйти по графику. Источник: HR: табель.</p></div>`;
       const staff = `<div class="glass panel"><header><h2>Штат: работает и по плану</h2></header><div class="bars">${f.staff.flatMap((d) => d.sections && f.staff.length === 1 ? d.sections : [d]).map((d) => `<div class="bar"><span>${esc(d.name)}</span><span class="tr"><i class="${d.fact / d.plan < 0.93 ? '' : 'calm'}" style="width:${(100 * d.fact / d.plan).toFixed(1)}%"></i></span><b>${d.fact} из ${d.plan}</b></div>`).join('')}</div>
-          <p class="src">Источник: ${esc(f.hr_source)}, обновлено ${ftime(f.hr_synced)}. Имён и зарплат здесь нет.</p></div>`;
+          <p class="src">Источник: ${esc(f.hr_source)}, обновлено ${ftime(f.hr_synced)}. Зарплат и личных данных здесь нет.</p></div>`;
       const vac = `<div class="glass panel"><header><h2>Вакансии</h2><span class="cnt">${f.vacancies.length}</span></header>
           <div class="scroll-x"><table class="tbl"><thead><tr><th>Должность</th><th>Где</th><th class="n">Открыта, дней</th></tr></thead><tbody>${f.vacancies.map((v) => `<tr><td>${esc(v.title)}</td><td>${esc(v.where)}</td><td class="n ${v.days > 14 ? 'st-bad' : ''}">${v.days}</td></tr>`).join('') || '<tr><td colspan="3" class="faint">Открытых вакансий нет</td></tr>'}</tbody></table></div>
           <h2 style="font-size:15px;margin:16px 0 8px">Отсутствуют сегодня</h2><div class="bars">${f.absences.map((a) => `<div class="bar"><span>${esc(a.where)}</span><span class="faint">${esc(a.kind)}</span><b>${a.people} чел.</b></div>`).join('') || '<p class="empty">Все на месте.</p>'}</div></div>`;
-      return `<header class="page-head"><div><h1>Финансы и люди</h1><p class="lead">План и факт доходов и расходов, движение денег, себестоимость и маржа, штат, вакансии и отсутствия.</p></div></header>
-        <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${fin}<section class="grid2">${staff}${vac}</section>`;
+      const o = f.office;
+      const office = o ? `<section class="glass panel"><header><h2>Делопроизводство: документы в работе</h2><span class="cnt">${o.open}</span>${o.overdue ? `<span class="chip chip-bad"><i></i>просрочено ${o.overdue}</span>` : ''}<span class="spacer"></span><button class="btn btn-sm" data-kpi="docs_on_time">Кто срывает сроки</button></header>
+          <div class="scroll-x"><table class="tbl"><thead><tr><th>Документ</th><th>Вид</th><th>Подразделение</th><th class="n">Срок</th></tr></thead><tbody>${o.list.map((d) => `<tr><td class="num">${esc(d.id)}</td><td>${esc(d.kind)}</td><td>${esc(d.dept)}</td><td class="n ${d.overdue ? 'st-bad' : ''}">${fdate(d.due)}${d.overdue ? ' — просрочен' : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="faint">Все документы исполнены</td></tr>'}</tbody></table></div>
+          <p class="src">Всего в реестре ${fmt(o.total)} документов. Источник: ${esc(o.source)}, обновлено ${ftime(o.synced)}.</p></section>` : '';
+      return `<header class="page-head"><div><h1>Кадры и документы</h1><p class="lead">Приём и увольнение, табель, штат и вакансии, документы и поручения в срок — то, что сейчас собирают вручную.</p></div></header>
+        <div class="kpi-grid">${own.map(kpiTile).join('')}</div><section class="grid2">${moves}${att}</section><section class="grid2">${staff}${vac}</section>${office}`;
     },
     async decisions() {
       const list = await cached('decisions', '/api/pult/decisions');
@@ -410,12 +457,12 @@
     const bw = (W - L - R) / n, Y = (v) => T + (1 - v / max) * (H - T - B);
     const line = (key) => fc.weeks.map((w, i) => { const v = w[key] || w.capacity; return `${i ? 'L' : 'M'}${(L + i * bw).toFixed(1)} ${Y(v).toFixed(1)} L${(L + (i + 1) * bw).toFixed(1)} ${Y(v).toFixed(1)}`; }).join(' ');
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Спрос и мощность по неделям">
-      ${[0, 0.5, 1].map((k) => `<line x1="${L}" x2="${W - R}" y1="${Y(max * k / 1.1).toFixed(1)}" y2="${Y(max * k / 1.1).toFixed(1)}" stroke="rgba(255,236,226,.08)"/><text x="${L - 6}" y="${(Y(max * k / 1.1) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#8C7F78" font-family="JetBrains Mono">${fmt(max * k / 1.1)}</text>`).join('')}
-      ${fc.weeks.map((w, i) => { const over = !w.fact && w.demand > w.capacity; return `<rect x="${(L + i * bw + 5).toFixed(1)}" y="${Y(w.demand).toFixed(1)}" width="${(bw - 10).toFixed(1)}" height="${(H - B - Y(w.demand)).toFixed(1)}" rx="5" fill="${over ? '#FF6464' : w.fact ? '#EADFD7' : '#FF8A76'}" opacity="${w.fact ? 0.5 : 0.85}"><title>Неделя с ${fdate(w.week)}: спрос ${w.demand}, мощность ${w.capacity}</title></rect>
-        <text x="${(L + i * bw + bw / 2).toFixed(1)}" y="${H - 10}" text-anchor="middle" font-size="10.5" fill="${w.week === fc.deficit_week ? '#FF6464' : '#8C7F78'}" font-family="JetBrains Mono">${fdate(w.week)}</text>`; }).join('')}
-      <path d="${line('capacity_plan')}" fill="none" stroke="#6FE0A8" stroke-width="1.6" stroke-dasharray="5 5" opacity=".8"/>
-      <path d="${line('capacity')}" fill="none" stroke="#FFF8F2" stroke-width="2"/>
-      <text x="${W - R}" y="${T - 2}" text-anchor="end" font-size="11" fill="#BDAFA6">столбики — спрос (светлые — факт) · белая линия — мощность сейчас · пунктир — после закрытия вакансий</text>
+      ${[0, 0.5, 1].map((k) => `<line x1="${L}" x2="${W - R}" y1="${Y(max * k / 1.1).toFixed(1)}" y2="${Y(max * k / 1.1).toFixed(1)}" stroke="var(--edge)"/><text x="${L - 6}" y="${(Y(max * k / 1.1) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--ink4)" font-family="JetBrains Mono">${fmt(max * k / 1.1)}</text>`).join('')}
+      ${fc.weeks.map((w, i) => { const over = !w.fact && w.demand > w.capacity; return `<rect x="${(L + i * bw + 5).toFixed(1)}" y="${Y(w.demand).toFixed(1)}" width="${(bw - 10).toFixed(1)}" height="${(H - B - Y(w.demand)).toFixed(1)}" rx="5" fill="${over ? 'var(--bad)' : w.fact ? 'var(--ink4)' : 'var(--brand2)'}" opacity="${w.fact ? 0.5 : 0.85}"><title>Неделя с ${fdate(w.week)}: спрос ${w.demand}, мощность ${w.capacity}</title></rect>
+        <text x="${(L + i * bw + bw / 2).toFixed(1)}" y="${H - 10}" text-anchor="middle" font-size="10.5" fill="${w.week === fc.deficit_week ? 'var(--bad)' : 'var(--ink4)'}" font-family="JetBrains Mono">${fdate(w.week)}</text>`; }).join('')}
+      <path d="${line('capacity_plan')}" fill="none" stroke="var(--ok)" stroke-width="1.6" stroke-dasharray="5 5" opacity=".8"/>
+      <path d="${line('capacity')}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+      <text x="${W - R}" y="${T - 2}" text-anchor="end" font-size="11" fill="var(--ink3)">столбики — спрос (светлые — факт) · тёмная линия — мощность сейчас · пунктир — после закрытия вакансий</text>
     </svg>`;
   }
   async function renderView() {
@@ -457,7 +504,7 @@
         <div id="drill"><div class="skel"></div></div>
         <dl class="dl"><dt>Как считается</dt><dd>${esc(k.formula)}</dd><dt>Источник</dt><dd>${esc(k.source)}</dd><dt>Обновлено</dt><dd class="num">${ftime(k.updated)}</dd>${k.extra ? `<dt>Ещё</dt><dd>${esc(k.extra)}</dd>` : ''}</dl>
       </div>
-      <footer>${k.status !== 'ok' ? `<button class="btn btn-primary" data-decide="${k.id}">Оформить решение</button>` : ''}<button class="btn" data-act="closeLayer">Закрыть</button></footer></aside>`);
+      <footer>${k.status !== 'ok' ? `<button class="btn btn-accent" data-decide="${k.id}">Оформить решение</button>` : ''}<button class="btn" data-act="closeLayer">Закрыть</button></footer></aside>`);
     const show = async (d) => {
       $$('#dims button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.dim === d));
       const box = $('#drill'); if (!box) return;
@@ -558,12 +605,53 @@
     };
   }
 
+  /* Отчёт за период: то, что в 1С собирают часами, — за секунды из тех же данных, что на экране. */
+  async function openReport() {
+    const t0 = performance.now();
+    const p = S.pulse;
+    let decs = [];
+    try { decs = await cached('decisions', '/api/pult/decisions'); } catch (e) { /* без решений */ }
+    const open = decs.filter((d) => d.status !== 'закрыто');
+    const ms = Math.max(1, Math.round(performance.now() - t0));
+    openLayer(`<article class="report" role="dialog" aria-modal="true" aria-label="Отчёт за период">
+      <header><b style="flex:1">Отчёт собран за ${ms < 1000 ? ms + ' мс' : fmt(ms / 1000) + ' с'}</b><button class="btn btn-primary" id="printRep">Печать или PDF</button><button class="btn" data-act="closeLayer">Закрыть</button></header>
+      <div class="report-body">
+        <div><p class="eyebrow">Фотопринт · управленческий отчёт</p><h1>Итоги за ${fdate(p.period.from)} — ${fdate(p.period.to)}</h1>
+          <p class="muted">Данные на ${ftime(p.asof)}. Составил: ${esc(S.user.name)}, ${esc(S.user.title.toLowerCase())}. Из ${p.pulse.total} показателей требуют решения ${p.pulse.critical}, под вниманием ${p.pulse.warn}.</p></div>
+        <section><h2>Отделы</h2><table class="tbl"><tbody>${p.departments.map((c) => `<tr><td><b>${esc(c.name)}</b></td>${c.metrics.map((m) => `<td>${esc(m[0])}: <b>${esc(m[1])}</b></td>`).join('')}<td>${chip(c.status)}</td></tr>`).join('')}</tbody></table></section>
+        <section><h2>Что требует решения</h2>${p.alerts.length ? `<table class="tbl"><thead><tr><th>Отклонение</th><th>Причина</th><th>Отвечает</th></tr></thead><tbody>${p.alerts.map((a) => `<tr><td>${esc(a.title)}</td><td>${esc(a.cause)}</td><td>${esc(a.owner)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Отклонений нет.</p>'}</section>
+        <section><h2>Показатели</h2><table class="tbl"><thead><tr><th>Показатель</th><th class="n">Факт</th><th class="n">План</th><th class="n">Прошлый период</th><th class="n">Прогноз</th><th>Статус</th></tr></thead><tbody>
+          ${p.kpis.map((k) => `<tr><td>${esc(k.name)}, ${esc(k.unit)}</td><td class="n">${fmt(k.value)}</td><td class="n">${fmt(k.plan)}</td><td class="n">${fmt(k.prev)}</td><td class="n">${fmt(k.forecast)}</td><td class="st-${k.status}">${WORD[k.status]}</td></tr>`).join('')}</tbody></table></section>
+        <section><h2>Решения в работе</h2>${open.length ? `<table class="tbl"><thead><tr><th>Решение</th><th>Владелец</th><th>Срок</th><th>Статус</th></tr></thead><tbody>${open.map((d) => `<tr><td>${esc(d.title)}</td><td>${esc(d.owner)}</td><td class="${d.overdue ? 'st-bad' : ''}">${fdate(d.due)}${d.overdue ? ' — просрочено' : ''}</td><td>${esc(d.status)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Открытых решений нет.</p>'}</section>
+        <p class="src">Формула, источник и время обновления каждого показателя — в его карточке на пульте. Данные тестовые.</p>
+      </div></article>`);
+    $('#printRep').onclick = () => window.print();
+  }
+
+  /* Личная страница сотрудника участка: только его цифры. */
+  async function renderMy() {
+    let d;
+    try { d = await api('/api/pult/my'); } catch (e) { renderLogin(e.message); return; }
+    const blk = (title, x) => `<div class="glass panel"><header><h2>${title}</h2></header><div class="facts"><div class="fact"><small>Заказов прошло участок</small><b>${fmt(x.done)}</b></div>
+      <div class="fact"><small>Обычное время на заказ</small><b>${fmt(x.median)}</b> <span class="faint">ч при норме ${fmt(d.norm)}</span></div><div class="fact"><small>Уложились в норму</small><b>${fmt(x.in_norm)}</b> <span class="faint">%</span></div></div></div>`;
+    $('#layer').innerHTML = '';
+    $('#app').innerHTML = `<main class="my"><header class="page-head"><span class="logo" aria-hidden="true">Ф</span><div><p class="eyebrow">${esc(S.user.title)} · ${esc(S.user.name)}</p><h1>Моя смена: ${esc(d.stage_name.toLowerCase())}</h1></div>
+        <span class="spacer"></span><a class="btn btn-primary" href="/t2/admin.html">Отметить этапы заказов</a><button class="btn" id="lo">Выйти</button></header>
+      ${blk('Сегодня', d.today)}${blk('За неделю', d.week)}
+      <div class="glass panel"><header><h2>Сейчас на участке</h2></header><div class="facts"><div class="fact"><small>Заказов в очереди</small><b>${d.queue.count}</b></div><div class="fact"><small>Ждут дольше нормы</small><b class="${d.queue.stuck ? 'st-bad' : ''}">${d.queue.stuck}</b></div>
+        ${d.defects_found != null ? `<div class="fact"><small>Найдено брака за неделю</small><b>${d.defects_found}</b></div>` : ''}</div></div>
+      <div class="glass panel"><header><h2>Мои поручения</h2></header>${d.tasks.length ? `<table class="tbl"><tbody>${d.tasks.map((t) => `<tr><td>${esc(t.title)}</td><td>срок ${fdate(t.due)}</td><td>${esc(t.status)}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">Поручений на вас сейчас нет.</p>'}</div>
+      <p class="src">${esc(d.note)} Данные на ${ftime(d.asof)}. Источник: ${esc(d.source)}.</p></main>`;
+    $('#lo').onclick = () => logout();
+  }
+
   /* ---------- поиск и команды ---------- */
   async function openPalette() {
     let decs = [];
     try { decs = await cached('decisions', '/api/pult/decisions'); } catch (e) { /* без решений */ }
     const items = [
-      ...VIEWS.map((v) => ({ t: v.name, s: 'раздел', run: () => go(v.id) })),
+      ...myViews().map((v) => ({ t: v.name, s: 'раздел', run: () => go(v.id) })),
+      { t: 'Отчёт за период', s: 'действие', run: openReport },
       ...S.pulse.kpis.filter((k) => !k.locked).map((k) => ({ t: k.name, s: `показатель · ${fmt(k.value)} ${k.unit}`, run: () => openKpi(k.id) })),
       ...decs.map((d) => ({ t: d.title, s: `решение ${d.id} · ${d.status}`, run: () => openDecision(d.id) })),
       { t: 'Новое решение', s: 'действие', run: () => openDecisionForm({}) },
@@ -619,12 +707,15 @@
 
   /* ---------- общие нажатия ---------- */
   document.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act],[data-kpi],[data-decide],[data-decision],[data-node]');
+    const t = e.target.closest('[data-act],[data-kpi],[data-decide],[data-decision],[data-node],[data-go]');
     if (!t) return;
     if (t.dataset.act === 'closeLayer') return closeLayer();
     if (t.dataset.act === 'load') return load();
     if (t.dataset.act === 'rerender') return renderView();
     if (t.dataset.act === 'newDecision') return openDecisionForm({});
+    if (t.dataset.act === 'report') return openReport();
+    if (t.dataset.act === 'alerts') { S.allAlerts = !S.allAlerts; return renderView(); }
+    if (t.dataset.go) return go(t.dataset.go);
     if (t.dataset.decide) return openDecisionForm({ kpi: t.dataset.decide });
     if (t.dataset.decision) return openDecision(t.dataset.decision);
     if (t.dataset.kpi) return openKpi(t.dataset.kpi, t.dataset.by);

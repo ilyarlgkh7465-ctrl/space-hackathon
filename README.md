@@ -13,7 +13,7 @@
 
 ## Тестовые учётные записи
 
-Логины: `director`, `production`, `sales`, `support`, `logistics`, `finance`, `hr`, `operator`, `quality`, `analyst`, `client`.
+Логины: `director`, `production`, `sales`, `support`, `logistics`, `finance`, `hr`, `office`, `operator`, `quality`, `analyst`, `client`.
 Пароль один на всех, лежит в `data/seed/users.json`. Права проверяет сервер по токену.
 
 ## Переменные окружения

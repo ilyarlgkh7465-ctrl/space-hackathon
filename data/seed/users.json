@@ -70,6 +70,16 @@
   "password": "demo2026"
  },
  {
+  "id": "u-off",
+  "login": "office",
+  "name": "Зуева Н. А.",
+  "title": "Руководитель секретариата",
+  "role": "head",
+  "dept": "office",
+  "level": 2,
+  "password": "demo2026"
+ },
+ {
   "id": "u-op1",
   "login": "operator",
   "name": "Жук П. С.",

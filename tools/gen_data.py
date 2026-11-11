@@ -238,6 +238,91 @@ def hr():
     return {"depts": depts, "vacancies": vacancies, "absences": absences, "capacity": capacity}
 
 
+def hr_moves():
+    """Движение персонала и табель: приём, увольнение, явка по дням."""
+    R2 = random.Random(77)
+    places = [("production", "binding", 9), ("production", "print", 5), ("production", "moderation", 4), ("production", "lamination", 2),
+              ("production", "shipping", 3), ("support", None, 5), ("sales", None, 3), ("logistics", None, 2), ("admin", None, 1)]
+    moves, d = [], START
+    while d <= NOW:
+        late = d >= dt.datetime(2026, 10, 12, tzinfo=TZ)
+        for kind, p_day in (("принят", 0.36), ("уволен", 0.52 if late else 0.3)):
+            if R2.random() < p_day:
+                w = [(x, x[2] * (2.2 if kind == "уволен" and x[1] == "binding" and late else 1)) for x in places]
+                tot, r = sum(v for _, v in w), R2.uniform(0, sum(v for _, v in w))
+                for x, v in w:
+                    r -= v
+                    if r <= 0:
+                        break
+                moves.append({"date": d.date().isoformat(), "dept": x[0], "section": x[1], "kind": kind,
+                              "reason": None if kind == "принят" else R2.choice(["по собственному желанию", "по собственному желанию", "окончание договора", "переезд"])})
+        d += dt.timedelta(days=1)
+    plan = {"binding": 36, "print": 52, "moderation": 34, "lamination": 18, "quality": 16, "shipping": 20,
+            "sales": 28, "support": 24, "logistics": 22, "finance": 14, "hr": 6, "admin": 30}
+    sheet, d = [], START
+    while d <= NOW:
+        if d.weekday() < 6:
+            for sec, n in plan.items():
+                miss = R2.choice([0, 0, 1, 1, 2]) if n > 14 else R2.choice([0, 0, 0, 1])
+                if sec == "binding" and d >= SLOW_FROM:
+                    miss = R2.choice([5, 6, 6, 7, 8])
+                if sec == "support" and d >= SLOW_FROM:
+                    miss = R2.choice([2, 3, 3, 4])
+                sheet.append({"date": d.date().isoformat(), "section": sec, "planned": n, "present": n - miss})
+        d += dt.timedelta(days=1)
+    return {"moves": moves, "timesheet": sheet}
+
+
+def accounting(months_rev):
+    """Бухгалтерия: остатки на начало и конец месяца, расчёты с контрагентами."""
+    R3 = random.Random(31)
+    bal, cash, recv, pay = [], 86000.0, 41000.0, 37000.0
+    for m in sorted(months_rev):
+        rev = months_rev[m]
+        c2 = cash + rev * 0.07 - (9000 if m == "2026-11" else 0)
+        r2 = recv + rev * (0.05 if m != "2026-11" else 0.16)
+        p2 = pay + rev * 0.03
+        bal.append({"month": m, "cash_start": round(cash), "cash_end": round(c2), "receivable_start": round(recv), "receivable_end": round(r2),
+                    "payable_start": round(pay), "payable_end": round(p2), "currency": "BYN"})
+        cash, recv, pay = c2, r2, p2
+    parts = []
+    for i in range(1, 12):
+        debt = round(R3.uniform(1800, 9500))
+        od = R3.choice([0, 0, 0, 6, 12, 19, 34]) if i > 3 else R3.choice([21, 34, 47])
+        parts.append({"id": "k-%03d" % i, "name": "Фотостудия %03d" % (R3.randint(11, 97) * 10 + i), "kind": "покупатель", "debt": debt,
+                      "overdue_days": od, "overdue_sum": round(debt * R3.uniform(0.4, 1.0)) if od else 0, "currency": "BYN"})
+    for i, nm in enumerate(["Поставщик бумаги 02", "Поставщик расходных материалов 05", "Служба доставки 01", "Служба доставки 03", "Аренда помещений"], 12):
+        parts.append({"id": "k-%03d" % i, "name": nm, "kind": "поставщик", "debt": -round(R3.uniform(2500, 14000)),
+                      "overdue_days": R3.choice([0, 0, 0, 4]), "overdue_sum": 0, "currency": "BYN"})
+    return {"balances": bal, "counterparties": parts}
+
+
+def office():
+    """Делопроизводство: реестр документов и поручений со сроками."""
+    R4 = random.Random(58)
+    kinds = [("Входящее письмо", 30), ("Договор", 18), ("Счёт", 22), ("Служебная записка", 16), ("Приказ", 8), ("Претензия клиента", 6)]
+    depts = ["production", "sales", "support", "logistics", "finance", "hr"]
+    docs = []
+    for i in range(1, 181):
+        reg = START + (NOW - START) * R4.random()
+        kind = pick([(k, w) for k, w in kinds])[0] if False else None
+        x, r = None, R4.uniform(0, sum(w for _, w in kinds))
+        for k, w in kinds:
+            r -= w
+            if r <= 0:
+                x = k
+                break
+        dept = R4.choice(depts)
+        due = reg + dt.timedelta(days=R4.choice([3, 3, 5, 5, 7]))
+        slow = reg >= SLOW_FROM and dept in ("production", "hr")
+        took = R4.uniform(0.3, 3.3) * (2.1 if slow else 1)
+        done = reg + dt.timedelta(days=took)
+        docs.append({"id": "doc-%04d" % i, "kind": x or "Входящее письмо", "dept": dept, "registered": iso(reg), "due": iso(due),
+                     "done": iso(done) if done <= NOW else None})
+    docs.sort(key=lambda d: d["registered"])
+    return {"documents": docs}
+
+
 def app_funnels():
     steps = [("catalog", "Каталог"), ("photos", "Выбор фото"), ("layout", "Макет"), ("check", "Проверка"), ("cart", "Корзина"), ("paid", "Оплата")]
     weeks = []
@@ -292,14 +377,17 @@ def decisions():
 def main():
     customers, orders = gen()
     tk = tickets(customers, orders)
+    fin = finance(orders)
+    months_rev = {r["month"]: r["fact"] for r in fin["pnl"] if r["article"] == "Выручка"}
     files = {
         "src_crm": {"system": "CRM (Битрикс24)", "synced": "2026-11-11T13:52+03:00", "customers": customers},
         "src_erp": {"system": "ERP производства", "synced": "2026-11-11T13:58+03:00", "products": [
             {"id": p["id"], "name": p["name"]} for p in PRODUCTS], "channels": [{"id": c[0], "name": c[1]} for c in CHANNELS],
             "sections": SECTIONS, "orders": orders},
         "src_support": {"system": "Поддержка (омниканал)", "synced": "2026-11-11T13:55+03:00", "tickets": tk},
-        "src_1c": dict({"system": "1С: финансы", "synced": "2026-11-11T07:00+03:00"}, **finance(orders)),
-        "src_hr": dict({"system": "HR: персонал", "synced": "2026-11-10T18:30+03:00"}, **hr()),
+        "src_1c": dict({"system": "1С: финансы и бухгалтерия", "synced": "2026-11-11T07:00+03:00"}, **fin, **accounting(months_rev)),
+        "src_hr": dict({"system": "HR: персонал", "synced": "2026-11-10T18:30+03:00"}, **hr(), **hr_moves()),
+        "src_office": dict({"system": "Делопроизводство: реестр документов", "synced": "2026-11-11T13:40+03:00"}, **office()),
         "src_web": dict({"system": "Сайт и приложение", "synced": "2026-11-11T13:59+03:00"}, **app_funnels()),
         "decisions": decisions(),
     }

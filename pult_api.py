@@ -5,6 +5,7 @@
   GET  /api/pult/drill?kpi=on_time&by=stage     — детализация показателя до причины
   GET  /api/pult/forecast                       — спрос и мощность на 6 недель, неделя дефицита
   GET  /api/pult/finance                        — план-факт доходов и расходов, штат, вакансии (по правам)
+  GET  /api/pult/my                             — личная страница сотрудника участка: только его цифры
   GET  /api/pult/quality                        — свежесть источников, пропуски, дубли, сверка с 1С
   GET  /api/pult/decisions                      — реестр решений (по правам)
   POST /api/pult/decisions                      — создать решение; поле key защищает от дубля
@@ -23,7 +24,7 @@ import urllib.parse
 import uuid
 
 DEPTS = {"production": "Производство", "sales": "Продажи и маркетинг", "support": "Поддержка клиентов",
-         "logistics": "Логистика", "finance": "Финансы", "hr": "Персонал"}
+         "logistics": "Логистика", "finance": "Финансы и бухгалтерия", "hr": "Кадры", "office": "Делопроизводство"}
 NORMS = {"moderation": 1.5, "print": 5.0, "binding": 4.0, "quality": 1.5, "shipping": 6.0, "delivery": 48.0}   # часы
 STAGE_NAMES = {"moderation": "Допечатная подготовка", "print": "Печать", "binding": "Сборка", "quality": "ОТК",
                "shipping": "Отгрузка", "delivery": "Доставка"}
@@ -69,15 +70,26 @@ KPIS = [
     {"id": "app_conv", "name": "Конверсия приложения", "dept": "sales", "unit": "%", "dir": 1, "warn": 1.0, "bad": 3.0,
      "formula": "Оплаченные заказы ÷ открывшие каталог в приложении", "source": "Сайт и приложение: шаги клиента",
      "dims": ["step"]},
+    {"id": "attendance", "name": "Явка по табелю", "dept": "hr", "unit": "%", "dir": 1, "warn": 1.5, "bad": 3.5,
+     "formula": "Вышли на смену ÷ должны были выйти по графику", "source": "HR: табель", "dims": ["att_section"]},
+    {"id": "turnover", "name": "Текучесть", "dept": "hr", "unit": "%", "dir": -1, "warn": 0.5, "bad": 1.5,
+     "formula": "Уволено за период ÷ численность по штату", "source": "HR: приём и увольнение", "dims": ["hr_dept"]},
+    {"id": "overdue_recv", "name": "Просроченная дебиторка", "dept": "finance", "unit": "BYN", "dir": -1, "warn": 10, "bad": 35, "rel": True,
+     "formula": "Сумма долгов покупателей с истёкшим сроком оплаты", "source": "1С: расчёты с контрагентами", "dims": ["counterparty"]},
+    {"id": "docs_on_time", "name": "Документы в срок", "dept": "office", "unit": "%", "dir": 1, "warn": 3.0, "bad": 8.0,
+     "formula": "Документы, исполненные до срока ÷ документы со сроком в периоде", "source": "Делопроизводство: реестр документов",
+     "dims": ["doc_dept", "doc_kind"]},
     {"id": "delivery", "name": "Доставка в срок", "dept": "logistics", "unit": "%", "dir": 1, "warn": 2.0, "bad": 5.0,
      "formula": "Заказы, доставленные за 48 часов после отгрузки ÷ все доставленные", "source": "ERP: отгрузка · перевозчики",
      "dims": ["client", "product", "day"]},
 ]
 PLAN = {"margin": 47.0, "on_time": 96.0, "defect": 2.5, "sla": 90.0, "load": 90.0, "staffing": 98.0, "avg_check": 160.0,
-        "repeat": 40.0, "lead_time": 10.0, "app_conv": 15.0, "delivery": 92.0, "new_clients_per_day": 36.0}
+        "repeat": 40.0, "lead_time": 10.0, "app_conv": 15.0, "delivery": 92.0, "new_clients_per_day": 36.0,
+        "attendance": 96.0, "overdue_recv": 12000.0, "docs_on_time": 92.0, "turnover_per_30d": 2.5}
 DIM_NAMES = {"product": "По продуктам", "channel": "По каналам", "client": "По типу клиента", "day": "По дням",
              "stage": "По этапам", "shift": "По сменам", "reason": "По причинам", "topic": "По темам",
-             "ticket_channel": "По каналам связи", "section": "По участкам", "step": "По шагам"}
+             "ticket_channel": "По каналам связи", "section": "По участкам", "step": "По шагам", "att_section": "По участкам",
+             "hr_dept": "По подразделениям", "counterparty": "По контрагентам", "doc_dept": "По подразделениям", "doc_kind": "По видам документов"}
 
 _cache = {}
 
@@ -110,8 +122,8 @@ def _h(a, b):
 
 def prep(core):
     """Собирает пять источников в одну модель по общим идентификаторам заказа и клиента."""
-    names = ("src_erp", "src_crm", "src_support", "src_1c", "src_hr", "src_web")
-    erp, crm, sup, fin, hr, web = (_src(core, n) for n in names)
+    names = ("src_erp", "src_crm", "src_support", "src_1c", "src_hr", "src_web", "src_office")
+    erp, crm, sup, fin, hr, web, off = (_src(core, n) for n in names)
     sig = tuple(_cache[n][0] for n in names)
     if _cache.get("prep") and _cache["prep"][0] == sig:
         return _cache["prep"][1]
@@ -133,7 +145,13 @@ def prep(core):
         x["d"] = _dt(t["created"])
         x["product"] = (order_by_id.get(t.get("order_id")) or {}).get("product")
         tickets.append(x)
+    docs = []
+    for d in off["documents"]:
+        x = dict(d)
+        x["d_reg"], x["d_due"], x["d_done"] = _dt(d["registered"]), _dt(d["due"]), _dt(d["done"])
+        docs.append(x)
     P = {"orders": orders, "tickets": tickets, "fin": fin, "hr": hr, "web": web, "crm": crm, "erp": erp, "sup": sup,
+         "off": off, "docs": docs,
          "asof": _dt(erp["synced"]).replace(minute=0) + dt.timedelta(hours=1),
          "products": {p["id"]: p["name"] for p in erp["products"]},
          "channels": {c["id"]: c["name"] for c in erp["channels"]}}
@@ -195,6 +213,21 @@ def measure(P, a, b, product=""):
     depts = P["hr"]["depts"]
     out["staffing"] = 100 * sum(d["fact"] for d in depts) / sum(d["plan"] for d in depts)
     out["tickets"] = len(T)
+    da, db = a.date().isoformat(), b.date().isoformat()
+    sheet = [r for r in P["hr"]["timesheet"] if da <= r["date"] < db]
+    out["attendance"] = 100 * sum(r["present"] for r in sheet) / sum(r["planned"] for r in sheet) if sheet else None
+    moves = [m for m in P["hr"]["moves"] if da <= m["date"] <= db]
+    out["hired"] = sum(1 for m in moves if m["kind"] == "принят")
+    out["fired"] = sum(1 for m in moves if m["kind"] == "уволен")
+    out["turnover"] = 100 * out["fired"] / sum(d["plan"] for d in depts)
+    out["overdue_recv"] = float(sum(c["overdue_sum"] for c in P["fin"]["counterparties"]))
+    due = [d for d in P["docs"] if a <= d["d_due"] < b]
+    out["docs_due"] = len(due)
+    out["docs_on_time"] = 100 * sum(1 for d in due if d["d_done"] and d["d_done"] <= d["d_due"]) / len(due) if due else None
+    out["docs_open"] = sum(1 for d in P["docs"] if not d["d_done"])
+    out["docs_overdue"] = sum(1 for d in P["docs"] if not d["d_done"] and d["d_due"] < P["asof"])
+    out["produced"] = sum(1 for o in P["orders"] if o["d_quality"] and a <= o["d_quality"] < b and (not product or o["product"] == product))
+    out["shipped"] = sum(1 for o in P["orders"] if o["d_shipped"] and a <= o["d_shipped"] < b and (not product or o["product"] == product))
     return out
 
 
@@ -208,6 +241,8 @@ def _plan(P, kid, a, b, product, vals):
         return _rev_plan(P, a, b) * share
     if kid == "new_clients":
         return PLAN["new_clients_per_day"] * days * share
+    if kid == "turnover":
+        return PLAN["turnover_per_30d"] * days / 30
     return PLAN[kid]
 
 
@@ -262,11 +297,9 @@ def pulse(P, user, days=30, product="", dept=""):
         st = _status(k, v, plan)
         item = {"id": k["id"], "name": k["name"], "dept": k["dept"], "dept_name": DEPTS[k["dept"]], "status": st}
         if not sc["all"] and k["dept"] != sc["dept"]:
-            item["locked"] = True                 # чужой отдел: только статус, без значений
-            kpis.append(item)
-            continue
+            continue                              # чужой отдел руководителю не показываем вовсе — так просил заказчик
         series = [x.get(k["id"]) for x in daily]
-        is_total = k["id"] in ("revenue", "new_clients")
+        is_total = k["id"] in ("revenue", "new_clients", "turnover")
         fc = _trend(series, is_total)
         if is_total and fc is not None:
             fc = fc / step * days                 # прогноз суммы на следующий такой же период
@@ -289,10 +322,43 @@ def pulse(P, user, days=30, product="", dept=""):
     warn = sum(1 for k in kpis if k["status"] == "warn")
     return {"asof": b.isoformat(timespec="minutes"), "period": {"from": a.date().isoformat(), "to": b.date().isoformat(), "days": days},
             "product": product, "dept": dept, "kpis": kpis, "alerts": alerts, "flow": flow,
+            "departments": _departments(P, cur, kpis, sc),
             "pulse": {"status": "bad" if crit else "warn" if warn else "ok", "critical": crit, "warn": warn, "total": len(kpis)},
             "products": [{"id": i, "name": n} for i, n in P["products"].items()],
-            "depts": [{"id": i, "name": n} for i, n in DEPTS.items()],
+            "depts": [{"id": i, "name": n} for i, n in DEPTS.items() if sc["all"] or i == sc["dept"]],
             "scope": {"all": sc["all"], "dept": sc["dept"]}}
+
+
+def _departments(P, cur, kpis, sc):
+    """Экран директора словами заказчика: по каждому отделу — три показателя и цвет."""
+    st = {k["id"]: k["status"] for k in kpis}
+    order = {"bad": 0, "warn": 1, "ok": 2, "none": 3}
+
+    def worst(*ids):
+        got = [st[i] for i in ids if i in st]
+        return min(got, key=lambda x: order[x]) if got else "none"
+
+    depts = P["hr"]["depts"]
+    staff_f, staff_p = sum(d["fact"] for d in depts), sum(d["plan"] for d in depts)
+    q = _queue(P)
+    cards = [
+        {"id": "production", "name": "Производство", "view": "production", "kpi": "on_time", "status": worst("on_time", "defect", "load", "lead_time"),
+         "hero": True, "metrics": [["Сделано за один день", _fmt(cur["on_time"]) + " %"], ["Принято заказов", _fmt(cur["n"])], ["Выдано после контроля", _fmt(cur["produced"])]]},
+        {"id": "hr", "name": "Кадры", "view": "people", "kpi": "attendance", "status": worst("staffing", "attendance", "turnover"),
+         "metrics": [["Принято", _fmt(cur["hired"])], ["Уволено", _fmt(cur["fired"])], ["Работает из штата", "%d из %d" % (staff_f, staff_p)]]},
+        {"id": "finance", "name": "Финансы и бухгалтерия", "view": "finance", "kpi": "overdue_recv", "status": worst("margin", "overdue_recv"),
+         "metrics": [["Оборот, BYN", _fmt(cur["revenue"])], ["Валовая маржа", _fmt(cur["margin"]) + " %"], ["Просрочено покупателями, BYN", _fmt(cur["overdue_recv"])]]},
+        {"id": "office", "name": "Делопроизводство", "view": "people", "kpi": "docs_on_time", "status": worst("docs_on_time"),
+         "metrics": [["Документов в работе", _fmt(cur["docs_open"])], ["Исполнено в срок", _fmt(cur["docs_on_time"]) + " %"], ["Просрочено", _fmt(cur["docs_overdue"])]]},
+        {"id": "logistics", "name": "Логистика", "view": "production", "kpi": "delivery", "status": worst("delivery"),
+         "metrics": [["Отгружено", _fmt(cur["shipped"])], ["В пути сейчас", _fmt(q["delivery"]["count"])], ["Доставлено в срок", _fmt(cur["delivery"]) + " %"]]},
+        {"id": "service", "name": "Клиентский сервис", "view": "sales", "kpi": "sla", "status": worst("sla", "revenue", "new_clients", "repeat", "app_conv", "avg_check"),
+         "depts": ["sales", "support"], "note": "данные из действующей системы клиентского сервиса",
+         "metrics": [["Обращений", _fmt(cur["tickets"])], ["Ответ в срок", _fmt(cur["sla"]) + " %"], ["Новых клиентов", _fmt(cur["new_clients"])]]},
+    ]
+    if sc["all"]:
+        return cards
+    return [c for c in cards if c["id"] == sc["dept"] or sc["dept"] in c.get("depts", [])]
 
 
 def _r(v):
@@ -441,6 +507,52 @@ def drill(P, user, kid, by, days=30, product=""):
         if drops:
             w = min(drops, key=lambda r: r["pass"] - r["pass_prev"])
             note = "Сильнее всего просел шаг «%s»: дальше проходит %s %% вместо %s %%." % (w["name"], _fmt(w["pass"]), _fmt(w["pass_prev"]))
+    elif by == "att_section":
+        da, db = a.date().isoformat(), b.date().isoformat()
+        g = {}
+        for r in P["hr"]["timesheet"]:
+            if da <= r["date"] < db:
+                x = g.setdefault(r["section"], [0, 0])
+                x[0] += r["present"]
+                x[1] += r["planned"]
+        names = {x["id"]: x["name"] for d in P["hr"]["depts"] for x in d.get("sections", [])}
+        names.update({d["dept"]: d["name"] for d in P["hr"]["depts"]})
+        for sec, (pr, pl) in g.items():
+            rows.append({"key": sec, "name": names.get(sec, sec), "value": _r(100 * pr / pl), "count": pl - pr, "unit": "%"})
+        rows.sort(key=lambda r: r["value"])
+        if rows:
+            note = "Хуже всего с явкой — «%s»: %s %%, пропущено смен: %d." % (rows[0]["name"], _fmt(rows[0]["value"]), rows[0]["count"])
+    elif by == "hr_dept":
+        da, db = a.date().isoformat(), b.date().isoformat()
+        names = {x["id"]: x["name"] for d in P["hr"]["depts"] for x in d.get("sections", [])}
+        names.update({d["dept"]: d["name"] for d in P["hr"]["depts"]})
+        g = {}
+        for m in P["hr"]["moves"]:
+            if da <= m["date"] <= db and m["kind"] == "уволен":
+                k2 = m["section"] or m["dept"]
+                g[k2] = g.get(k2, 0) + 1
+        for k2, n in sorted(g.items(), key=lambda x: -x[1]):
+            rows.append({"key": k2, "name": names.get(k2, k2), "value": n, "unit": "чел.", "count": None})
+        if rows:
+            note = "Больше всего уволилось — «%s»: %d чел. за период." % (rows[0]["name"], rows[0]["value"])
+    elif by == "counterparty":
+        for c in sorted(P["fin"]["counterparties"], key=lambda c: -c["overdue_sum"]):
+            if c["overdue_sum"]:
+                rows.append({"key": c["id"], "name": "%s · %d дн." % (c["name"], c["overdue_days"]), "value": c["overdue_sum"], "unit": "BYN", "count": None})
+        if rows:
+            tot = sum(r["value"] for r in rows)
+            note = "Три крупнейших должника держат %s %% всей просрочки." % _fmt(100 * sum(r["value"] for r in rows[:3]) / tot)
+    elif by in ("doc_dept", "doc_kind"):
+        due = [d for d in P["docs"] if a <= d["d_due"] < b]
+        g = {}
+        for d in due:
+            g.setdefault(d["dept"] if by == "doc_dept" else d["kind"], []).append(d)
+        for k2, items in g.items():
+            ok = sum(1 for d in items if d["d_done"] and d["d_done"] <= d["d_due"])
+            rows.append({"key": k2, "name": DEPTS.get(k2, k2), "value": _r(100 * ok / len(items)), "count": len(items), "unit": "%"})
+        rows.sort(key=lambda r: r["value"])
+        if rows:
+            note = "Чаще всего срывают срок — «%s»: в срок исполнено %s %% документов." % (rows[0]["name"], _fmt(rows[0]["value"]))
     if by in ("product", "channel", "client", "shift") and rows:
         rows.sort(key=lambda r: (r["value"] if r["value"] is not None else 0) * k["dir"])
         if k["unit"] == "%" or kid in ("lead_time", "avg_check"):
@@ -493,9 +605,9 @@ def _fmt(v):
     return s.replace(".", ",")
 
 
-OWNERS = {"production": ("u-prod", "Гринь Д. А."), "sales": ("u-sales", "Белая М. С."), "support": ("u-sup", "Климович Е. П."),
+OWNERS = {"office": ("u-off", "Зуева Н. А."), "production": ("u-prod", "Гринь Д. А."), "sales": ("u-sales", "Белая М. С."), "support": ("u-sup", "Климович Е. П."),
           "logistics": ("u-log", "Савчук И. Н."), "finance": ("u-fin", "Лозовая Т. К."), "hr": ("u-hr", "Рудая О. В.")}
-FIRST_DIM = {"on_time": "stage", "lead_time": "stage", "defect": "reason", "sla": "topic", "app_conv": "step",
+FIRST_DIM = {"attendance": "att_section", "turnover": "hr_dept", "overdue_recv": "counterparty", "docs_on_time": "doc_dept", "on_time": "stage", "lead_time": "stage", "defect": "reason", "sla": "topic", "app_conv": "step",
              "staffing": "section", "delivery": "client", "load": "day"}
 
 
@@ -618,6 +730,7 @@ def quality(P):
          "gaps": sum(1 for t in P["tickets"] if not t["order_id"]), "dups": 0, "what": "обращения", "gap_note": "без привязки к заказу", "every_h": 1},
         {"system": P["fin"]["system"], "synced": P["fin"]["synced"], "rows": len(P["fin"]["pnl"]), "gaps": 0, "dups": 0, "what": "статьи", "every_h": 24},
         {"system": P["hr"]["system"], "synced": P["hr"]["synced"], "rows": sum(d["fact"] for d in P["hr"]["depts"]), "gaps": 0, "dups": 0, "what": "сотрудники", "every_h": 24},
+        {"system": P["off"]["system"], "synced": P["off"]["synced"], "rows": len(P["docs"]), "gaps": 0, "dups": 0, "what": "документы", "every_h": 2},
     ]
     for r in rows:
         age = _h(_dt(r["synced"]), b)
@@ -654,8 +767,63 @@ def finance(P, user):
                         for v in P["hr"]["vacancies"] if see_all or v["dept"] == sc["dept"]]
     out["vacancies"].sort(key=lambda v: -v["days"])
     out["absences"] = [dict(x, where=names.get(x["section"] or x["dept"], "")) for x in P["hr"]["absences"] if see_all or x["dept"] == sc["dept"]]
+    if not out["locked_fin"]:
+        out["balances"] = P["fin"]["balances"]
+        out["counterparties"] = sorted(P["fin"]["counterparties"], key=lambda c: (-c["overdue_sum"], -abs(c["debt"])))
+    weeks = {}
+    for m in P["hr"]["moves"]:
+        if see_all or m["dept"] == sc["dept"]:
+            d0 = dt.date.fromisoformat(m["date"])
+            wk = (d0 - dt.timedelta(days=d0.weekday())).isoformat()
+            x = weeks.setdefault(wk, {"week": wk, "hired": 0, "fired": 0})
+            x["hired" if m["kind"] == "принят" else "fired"] += 1
+    out["moves"] = [weeks[k] for k in sorted(weeks)][-9:]
+    since = (today - dt.timedelta(days=14)).isoformat()
+    att = {}
+    for r in P["hr"]["timesheet"]:
+        if r["date"] >= since:
+            x = att.setdefault(r["section"], [0, 0])
+            x[0] += r["present"]
+            x[1] += r["planned"]
+    own_sections = {s["id"] for d in depts if d["dept"] == sc["dept"] for s in d.get("sections", [])} | {sc["dept"]}
+    out["attendance"] = sorted(({"section": k2, "name": names.get(k2, k2), "value": round(100 * v[0] / v[1], 1), "missed": v[1] - v[0]}
+                                for k2, v in att.items() if see_all or k2 in own_sections), key=lambda r: r["value"])
+    if sc["all"] or sc["dept"] == "office":
+        docs = P["docs"]
+        open_docs = [d for d in docs if not d["d_done"]]
+        out["office"] = {"open": len(open_docs), "overdue": sum(1 for d in open_docs if d["d_due"] < P["asof"]), "total": len(docs),
+                         "list": [{"id": d["id"], "kind": d["kind"], "dept": DEPTS.get(d["dept"], d["dept"]), "due": d["due"],
+                                   "overdue": d["d_due"] < P["asof"]} for d in sorted(open_docs, key=lambda d: d["due"])[:12]],
+                         "source": P["off"]["system"], "synced": P["off"]["synced"]}
     out["hr_source"] = "HR: персонал"
     out["hr_synced"] = P["hr"]["synced"]
+    return out
+
+
+def my_page(core, P, user):
+    """Линейный сотрудник видит только свой участок: что сделано сегодня и за неделю, как это против нормы, свои задачи."""
+    st = user.get("stage") or "binding"
+    key = {"binding": ("d_print", "d_binding"), "quality": ("d_binding", "d_quality"), "print": ("d_moderation", "d_print"),
+           "moderation": ("d_accepted", "d_moderation"), "shipping": ("d_quality", "d_shipped")}.get(st, ("d_print", "d_binding"))
+    b = P["asof"]
+
+    def block(days):
+        a = b - dt.timedelta(days=days)
+        hrs = [_h(o[key[0]], o[key[1]]) for o in P["orders"] if o[key[1]] and a <= o[key[1]] < b and o[key[0]] and o[key[1]] != o[key[0]]]
+        if not hrs:
+            return {"done": 0, "median": None, "in_norm": None}
+        return {"done": len(hrs), "median": _r(statistics.median(hrs)), "in_norm": _r(100 * sum(1 for x in hrs if x <= NORMS[st]) / len(hrs))}
+
+    q = _queue(P)
+    tasks = [{"id": d["id"], "title": d["title"], "due": d["due"], "status": d["status"]}
+             for d in core.load("decisions") if d.get("owner_id") == user["id"] and d.get("status") != "закрыто"]
+    out = {"stage": st, "stage_name": STAGE_NAMES.get(st, st), "norm": NORMS.get(st), "today": block(1), "week": block(7),
+           "queue": q.get(st, {"count": 0, "stuck": 0}), "tasks": tasks, "asof": b.isoformat(timespec="minutes"),
+           "source": "ERP: отметки этапов", "note": "Цифры — по вашему участку. Показатели других участков и компании здесь не показываются."}
+    if st == "quality":
+        a = b - dt.timedelta(days=7)
+        found = [o for o in P["orders"] if o["d_quality"] and a <= o["d_quality"] < b and o["defect"]]
+        out["defects_found"] = len(found)
     return out
 
 
@@ -806,6 +974,11 @@ def handle(handler, method, path, core):
     if path == "/api/events":
         return _events(handler, method, core, user, arg)
 
+    if method == "GET" and path == "/api/pult/my":
+        if user.get("role") != "operator":
+            return deny("личная страница — для сотрудников участков")
+        handler._json(my_page(core, prep(core), user))
+        return True
     if not _scope(user):
         return deny("пульт доступен руководителям и аналитику")
     P = prep(core)
