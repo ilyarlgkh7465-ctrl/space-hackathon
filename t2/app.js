@@ -822,7 +822,7 @@
   };
   async function loadOrders() {
     if (!S.session) return;
-    try { S.orders = await call('GET', '/orders'); LS.set('pp_orders', S.orders); if (S.view === 'orders') rerender2(); } catch (e) { /* показываем сохранённые */ }
+    try { const list = await call('GET', '/orders'), changed = JSON.stringify(list) !== JSON.stringify(S.orders); S.orders = list; LS.set('pp_orders', S.orders); if (changed && S.view === 'orders') rerender2(); } catch (e) { /* показываем сохранённые */ }
   }
   let r2; function rerender2() { clearTimeout(r2); r2 = setTimeout(() => { if (S.view === 'orders') rerender(); }, 0); }
   let ordersLoaded = false;

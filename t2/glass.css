@@ -95,3 +95,6 @@
 .thread .rep.client { background: var(--brand-soft); border-radius: 12px 12px 4px 12px; }
 .thread .rep small { display: block; font-size: 12px; font-weight: 600; color: var(--ink3); }
 .thread [data-human] { margin-top: 10px; }
+/* нижняя панель: пять вкладок не должны упираться в скруглённый угол рамки телефона */
+.tabs3 { padding: 0 14px; margin: 0 -16px -12px; }
+.tab3 { font-size: 11.5px; min-width: 0; }
