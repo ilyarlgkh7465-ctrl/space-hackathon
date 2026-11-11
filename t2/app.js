@@ -835,15 +835,16 @@
   async function loadSupport() { try { S.support = await call('GET', '/support'); } catch (e) { /* без сети */ } }
   VIEWS.order = () => {
     const o = S.order, mine = S.support.filter((x) => x.order_id === o.id);
-    const threads = mine.map((t) => `<div class="thread"><b>${esc(t.topic)}</b><p>${esc(t.text)}</p><small>${fdate(t.ts)} · ${t.status === 'open' ? 'ответим в течение 4 часов' : 'закрыто'}</small>${(t.messages || []).slice(1).map((m) => `<p class="rep">${esc(m.text)}</p>`).join('')}</div>`).join('');
+    const threads = mine.map((t) => `<div class="thread"><b>${esc(t.topic)}</b><p>${esc(t.text)}</p><small>${fdate(t.ts)} · ${t.status === 'open' ? 'ответим в течение 4 часов' : 'закрыто'}</small>${(t.messages || []).slice(1).map((m) => `<p class="rep ${m.from}"><small>${m.from === 'bot' ? 'Помощник picPac' : m.from === 'client' ? 'Вы' : 'Сотрудник'}</small>${esc(m.text)}</p>`).join('')}${t.bot && !t.bot.human && t.status === 'open' ? `<button class="btn btn-sm" data-human="${t.id}">Позвать сотрудника</button>` : ''}${t.bot && t.bot.human ? '<small>Сотрудник подключён — ответит в течение 4 часов</small>' : ''}</div>`).join('');
     return {
       html: orderBody(o) + `<p class="sec-t">Вопрос по заказу</p>${threads}
         <div class="field"><label for="sp">Опишите вопрос</label><textarea class="textarea" id="sp" rows="3" placeholder="Например: можно ли заменить фото?"></textarea></div>
         ${S.err ? `<p class="err" role="alert">${esc(S.err)}</p>` : ''}<button class="btn btn-lg" id="ssend">Отправить в поддержку</button>`,
       bind() {
+        document.querySelectorAll('[data-human]').forEach((b) => { b.onclick = async () => { try { await call('POST', '/support/' + b.dataset.human + '/human', {}); toast('Позвали сотрудника'); await loadSupport(); rerender(); } catch (e) { toast(e.offline ? 'Нет сети — повторите позже' : e.message); } }; });
         $('#ssend').onclick = async () => {
           const text = $('#sp').value.trim(); if (text.length < 3) { S.err = 'Опишите вопрос хотя бы парой слов'; return rerender(); }
-          try { await call('POST', '/support', { order_id: o.id, text, topic: 'Вопрос по заказу ' + o.number }, { headers: { 'Idempotency-Key': S.supportKey } }); S.supportKey = rid(); S.err = ''; toast('Отправили. Ответим в течение 4 часов'); await loadSupport(); rerender(); }
+          const sb = $('#ssend'); sb.disabled = true; sb.textContent = 'Помощник отвечает…'; try { await call('POST', '/support', { order_id: o.id, text, topic: 'Вопрос по заказу ' + o.number }, { headers: { 'Idempotency-Key': S.supportKey } }); S.supportKey = rid(); S.err = ''; toast('Помощник ответил — если мало, позовите сотрудника'); await loadSupport(); rerender(); }
           catch (e) { S.err = e.offline ? 'Нет сети — повторите, когда она появится' : e.message; rerender(); }
         };
       },

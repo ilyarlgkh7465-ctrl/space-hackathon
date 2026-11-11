@@ -88,3 +88,10 @@
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .app .card, .app .pcard, .app .ocard, .app-head, .actionbar { background: #fff; }
 }
+
+/* чат поддержки: помощник и сотрудник */
+.thread .rep { display: block; margin-top: 8px; padding: 8px 12px; border-radius: 12px 12px 12px 4px; background: rgba(255, 255, 255, .85); border: 1px solid rgba(56, 82, 79, .1); }
+.thread .rep.bot { border-left: 3px solid var(--accent); }
+.thread .rep.client { background: var(--brand-soft); border-radius: 12px 12px 4px 12px; }
+.thread .rep small { display: block; font-size: 12px; font-weight: 600; color: var(--ink3); }
+.thread [data-human] { margin-top: 10px; }

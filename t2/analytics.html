@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Аналитика приложения picPac</title>
+<link rel="stylesheet" href="/shared/fonts/fonts.css">
+<link rel="stylesheet" href="/shared/glass.css">
+<style>
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 64px; display: flex; flex-direction: column; gap: 16px; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+  .top h1 { font-size: 26px; font-weight: 600; }
+  .seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--glass3); }
+  .seg button { border: 0; background: none; min-height: 36px; padding: 0 14px; border-radius: 999px; font-size: 14px; color: var(--ink2); }
+  .seg button[aria-pressed="true"] { background: #fff; color: var(--brand-ink); font-weight: 600; box-shadow: 0 1px 3px rgba(70, 50, 40, .12); }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .kpis { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .kpi { padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+  .kpi b { font-size: 30px; line-height: 1.1; font-weight: 600; } .kpi small { color: var(--ink3); font-size: 13px; }
+  .card { padding: 18px; display: flex; flex-direction: column; gap: 12px; } .card h2 { font-size: 17px; font-weight: 600; }
+  .card .hint { color: var(--ink3); font-size: 13px; }
+  .row { display: grid; grid-template-columns: minmax(90px, 1.2fr) 3fr auto; gap: 10px; align-items: center; font-size: 14px; }
+  .row i { height: 10px; border-radius: 99px; background: var(--track); overflow: hidden; display: block; } .row i b { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+  .row.warn i b { background: #D9A441; } .row.bad i b { background: var(--bad); }
+  .row .n { font-family: var(--mono); font-size: 13px; text-align: right; min-width: 38px; }
+  .row .drop { display: block; font-size: 12px; color: var(--bad); }
+  .days { display: flex; align-items: flex-end; gap: 3px; height: 130px; }
+  .days div { flex: 1; min-width: 4px; background: linear-gradient(180deg, #EE8A78, #DD5757); border-radius: 4px 4px 0 0; position: relative; min-height: 2px; }
+  .days div.zero { background: var(--track); }
+  .axis { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink4); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; } th { text-align: left; font-weight: 500; color: var(--ink3); font-size: 12.5px; padding: 6px 8px; border-bottom: 1px solid var(--edge); }
+  td { padding: 8px; border-bottom: 1px solid var(--edge); } td.n, th.n { text-align: right; font-family: var(--mono); }
+  .empty { color: var(--ink3); font-size: 14px; padding: 6px 0; }
+  .form { max-width: 360px; margin: 60px auto; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+  .err { color: var(--bad); font-size: 14px; }
+  .note { color: var(--ink3); font-size: 13px; }
+  .stars-row { color: #D9A441; font-size: 20px; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+<div class="aurora"><i></i><i></i><i></i></div>
+<main class="wrap" id="app"></main>
+<script>
+(function () {
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const S = { tok: null, user: null, days: 14, data: null, err: '' };
+  try { S.tok = sessionStorage.getItem('pp_dir'); } catch (e) { /* закрытое окно */ }
+  const num = (v) => v == null ? '—' : Number(v).toLocaleString('ru-RU');
+  const byn = (v) => v == null ? '—' : Number(v).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' BYN';
+  const pct = (v) => v == null ? '—' : String(v).replace('.', ',') + ' %';
+  const mmss = (s) => s == null ? '—' : Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+
+  async function call(method, path, body) {
+    const r = await fetch(path, { method, headers: Object.assign({ 'Content-Type': 'application/json' }, S.tok ? { Authorization: 'Bearer ' + S.tok } : {}), body: body ? JSON.stringify(body) : undefined });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw Object.assign(new Error(d.error || 'Ошибка ' + r.status), { status: r.status });
+    return d;
+  }
+  async function load() {
+    try { S.data = await call('GET', '/api/app/analytics?days=' + S.days); S.err = ''; }
+    catch (e) { if (e.status === 401 || e.status === 403) { S.tok = null; try { sessionStorage.removeItem('pp_dir'); } catch (x) { /* */ } } S.err = e.message; S.data = null; }
+    draw();
+  }
+  const bars = (rows, cls) => { const max = Math.max(1, ...rows.map((r) => r.count)); return rows.length ? rows.map((r) => `<div class="row ${cls || ''}"><span>${esc(r.name)}</span><i><b style="width:${r.count / max * 100}%"></b></i><span class="n">${r.count}</span></div>`).join('') : '<p class="empty">Пока данных нет</p>'; };
+
+  function login() {
+    $('#app').innerHTML = `<form class="glass form" id="f"><span class="eyebrow">picPac · аналитика приложения</span><h1 style="font-size:22px">Вход для директора</h1>
+      <p class="note">Доступно директору, руководителям и аналитику. Права проверяет сервер.</p>
+      <label class="field">Логин<input class="input" id="lg" value="director" autocomplete="username"></label>
+      <label class="field">Пароль<input class="input" id="pw" type="password" placeholder="demo2026" autocomplete="current-password"></label>
+      ${S.err ? `<p class="err" role="alert">${esc(S.err)}</p>` : ''}<button class="btn btn-primary" type="submit" style="min-height:48px">Войти</button></form>`;
+    $('#f').onsubmit = async (e) => {
+      e.preventDefault();
+      try { const d = await call('POST', '/api/login', { login: $('#lg').value.trim(), password: $('#pw').value }); S.tok = d.token; S.user = d.user; try { sessionStorage.setItem('pp_dir', d.token); } catch (x) { /* */ } load(); }
+      catch (er) { S.err = er.message; login(); }
+    };
+  }
+  function draw() {
+    if (!S.tok || !S.data) return login();
+    const D = S.data, k = D.kpi, maxD = Math.max(1, ...D.by_day.map((d) => d.orders));
+    const f0 = D.funnel[0].count;
+    const funnel = D.funnel.map((f, i) => {
+      const prev = i ? D.funnel[i - 1].count : null, drop = prev ? Math.round(100 * (prev - f.count) / prev) : null;
+      return `<div class="row"><span>${esc(f.name)}${drop ? `<span class="drop">−${drop} % к прошлому шагу</span>` : ''}</span><i><b style="width:${f0 ? f.count / f0 * 100 : 0}%"></b></i><span class="n">${f.count}</span></div>`;
+    }).join('');
+    const kp = (v, t, s) => `<div class="glass kpi"><span class="eyebrow">${t}</span><b class="num">${v}</b><small>${s || ''}</small></div>`;
+    $('#app').innerHTML = `
+      <div class="top"><div><span class="eyebrow">Фотопринт · мобильное приложение</span><h1>Аналитика приложения</h1></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><div class="seg" role="group" aria-label="Период">${[7, 14, 30, 60].map((d) => `<button data-d="${d}" aria-pressed="${S.days === d}">${d} дн.</button>`).join('')}</div>
+        <a class="btn btn-sm" href="/t1/">← Пульт</a><button class="btn btn-sm btn-ghost" id="out">Выйти</button></div></div>
+      <div class="kpis">
+        ${kp(num(k.orders), 'Заказов', 'за ' + D.days + ' дн.')}${kp(byn(k.revenue), 'Выручка', 'сумма заказов с доставкой')}
+        ${kp(byn(k.avg_check), 'Средний чек', '')}${kp(pct(k.conversion), 'Из выбора в заказ', k.sessions + ' начали')}
+        ${kp(mmss(k.median_time_sec), 'Время до заказа', 'медиана, мин:сек')}${kp(pct(k.with_warnings_pct), 'Заказов с замечаниями', 'клиент согласился на них')}
+        ${kp(num(k.repeat_customers), 'Повторные клиенты', 'из ' + k.customers + ' покупателей')}${kp(num(k.drafts_abandoned), 'Брошенные черновики', 'фото есть, заказа нет')}
+      </div>
+      <div class="grid">
+        <section class="glass card" style="grid-column:1/-1"><h2>Заказы по дням</h2>
+          <div class="days" role="img" aria-label="Заказы по дням">${D.by_day.map((d) => `<div class="${d.orders ? '' : 'zero'}" style="height:${Math.max(2, d.orders / maxD * 100)}%" title="${d.date}: ${d.orders} зак., ${byn(d.revenue)}"></div>`).join('')}</div>
+          <div class="axis"><span>${D.by_day[0].date}</span><span>${D.by_day[D.by_day.length - 1].date}</span></div></section>
+        <section class="glass card"><h2>Воронка заказа</h2><p class="hint">Сколько сессий дошло до каждого шага. Где провал — там клиент уходит.</p>${funnel}</section>
+        <section class="glass card"><h2>Продукты</h2>${D.products.length ? `<table><tr><th>Продукт</th><th class="n">Заказов</th><th class="n">Шт.</th><th class="n">Выручка</th></tr>${D.products.map((p) => `<tr><td>${esc(p.name)}</td><td class="n">${p.orders}</td><td class="n">${p.qty}</td><td class="n">${num(p.revenue)}</td></tr>`).join('')}</table>` : '<p class="empty">Пока заказов нет</p>'}</section>
+        <section class="glass card"><h2>Статусы заказов сейчас</h2>${bars(D.stages.map((s) => ({ name: s.name, count: s.count })))}<p class="note">Брак на участках: ${k.defects}</p></section>
+        <section class="glass card"><h2>Качество фото</h2><p class="hint">С какими замечаниями клиенты всё равно оформили заказ.</p>${bars(D.photo_issues.map((p) => ({ name: p.name, count: p.count })), 'warn')}</section>
+        <section class="glass card"><h2>Получение</h2>${bars(D.delivery)}<h2 style="margin-top:6px">Пункты выдачи</h2>${bars(D.pickup_points)}</section>
+        <section class="glass card"><h2>Промокоды</h2>${bars(D.promos)}<p class="note">Скидок выдано на ${byn(k.discount_given)}</p></section>
+        <section class="glass card"><h2>Поддержка из приложения</h2><p class="num" style="font-size:28px">${D.support.count} <span class="note">обращений, открыто ${D.support.open}</span></p>${bars(D.support.topics)}</section>
+        <section class="glass card"><h2>Сообщество</h2><p class="stars-row">${D.social.rating ? '★'.repeat(Math.round(D.social.rating)) + '☆'.repeat(5 - Math.round(D.social.rating)) : ''} <span class="note">${D.social.rating ? String(D.social.rating).replace('.', ',') + ' · ' : ''}${D.social.reviews} отзывов за период</span></p>
+          <p class="hint">Шаблоны компании по использованию</p>${bars(D.social.templates_top.map((t) => ({ name: t.title, count: t.uses })))}</section>
+      </div>
+      <p class="note">Данные приложения собираются из заказов и событий шагов (воронка считается по сессиям, без имён). Обновляется каждые 15 секунд · ${esc(D.generated)}</p>`;
+    document.querySelectorAll('[data-d]').forEach((b) => { b.onclick = () => { S.days = +b.dataset.d; load(); }; });
+    $('#out').onclick = () => { S.tok = null; S.data = null; try { sessionStorage.removeItem('pp_dir'); } catch (e) { /* */ } draw(); };
+  }
+  load(); setInterval(() => { if (S.tok) load(); }, 15000);
+})();
+</script>
+</body>
+</html>
