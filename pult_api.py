@@ -1101,6 +1101,9 @@ def handle(handler, method, path, core):
         days = 30
     product = arg("product") if arg("product") in P["products"] else ""
 
+    if path.startswith(("/api/pult/ai/", "/api/pult/search", "/api/pult/docs", "/api/pult/widgets")):
+        import pult_ai                            # ИИ-рабочее место, умный поиск, документы, мой дашборд
+        return pult_ai.handle(handler, method, path, core, P, user, product)
     if method == "GET" and path == "/api/pult/pulse":
         dept = arg("dept") if arg("dept") in DEPTS else ""
         data = pulse(P, user, days, product, dept)

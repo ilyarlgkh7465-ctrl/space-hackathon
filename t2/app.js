@@ -42,6 +42,7 @@
     draft: LS.get('pp_draft', null), thumbs: {}, energy: {}, busy: null, orders: LS.get('pp_orders', []), order: null, events: [], support: [],
     price: null, priceNote: '', sheet: null, err: '', form: LS.get('pp_form', { name: '', phone: '', address: '', point: 'center' }),
     pool: LS.get('pp_pool', []), sel: {}, issues: null, outbox: LS.get('pp_outbox', null), replace: null, sess: rid(), stepsSent: {}, poll: null, supportKey: rid(),
+    notes: LS.get('pp_notes', []), notifyOn: LS.get('pp_notify', false), rejects: [], promoPending: '', inbox: [], tabFrom: null, join: null,
   };
   const saveForm = () => LS.set('pp_form', S.form);
 
@@ -64,20 +65,30 @@
   }
   function step(name) {
     if (S.stepsSent[name]) return; S.stepsSent[name] = 1;
-    call('POST', '/step', { step: name, session: S.sess }).catch(() => { });
+    call('POST', '/step', { step: name, session: S.sess }).then(() => wire('Шаг клиента: ' + (STEP_NAME[name] || name))).catch(() => { });
   }
 
   /* ---------- вход ---------- */
   async function loginAs(login, password) {
+    const guestTok = S.session && /^g-/.test(S.session.user.id) ? S.session.token : null;
     const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login, password }) }).catch(() => null);
     if (!r) throw { message: 'Нет сети — войти можно, когда она появится' };
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw { message: d.error || 'Не удалось войти' };
-    setSession(d);
+    // гость вошёл в свою учётную запись: его черновик, фото, заказы и обращения переезжают к ней (сервер проверяет обе сессии)
+    let moved = null;
+    if (guestTok && d.user.role === 'customer') {
+      try {
+        const c = await fetch('/api/app/claim', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + d.token }, body: JSON.stringify({ guest_token: guestTok }) });
+        if (c.ok) moved = await c.json();
+      } catch (e) { /* без сети перенос не случится: черновик останется на телефоне и загрузится заново */ }
+    }
+    setSession(d, !!moved);
+    if (moved && (moved.orders || moved.projects)) toast('Перенесли в вашу учётную запись: заказов ' + moved.orders + ', черновиков ' + moved.projects, 4000);
   }
   async function loginGuest() { setSession(await call('POST', '/guest', {})); }
-  function setSession(d) {
-    const changed = S.session && S.session.user.id !== d.user.id;
+  function setSession(d, keep) {
+    const changed = !keep && S.session && S.session.user.id !== d.user.id;
     S.session = { token: d.token, user: d.user }; LS.set('pp_session', S.session);
     if (changed && S.draft) { S.draft.id = 'pr-' + rid(); S.draft.version = 0; S.draft.photos.forEach((p) => { p.up = false; }); saveDraft(); }
     S.orders = []; LS.set('pp_orders', []);
@@ -125,7 +136,7 @@
   function newDraft(prod) {
     const v = prod.variants[0], opts = {};
     prod.options.forEach((o) => { if (o.kind === 'number') opts[o.id] = o.default; else opts[o.id] = o.values[0].id; });
-    return { id: 'pr-' + rid(), product: prod.id, variant: v.id, options: opts, fit: false, title: '', photos: [], qty: 1, delivery: 'pickup', promo: '', version: 0, t0: null };
+    return { id: 'pr-' + rid(), product: prod.id, variant: v.id, options: opts, fit: false, title: '', photos: [], qty: 1, delivery: 'pickup', promo: S.promoPending || '', version: 0, t0: null };
   }
   function saveDraft() { LS.set('pp_draft', S.draft); syncSoon(); if (S.catalog) refreshPrice(); }
   let syncT, syncing = false, again = false;
@@ -208,8 +219,9 @@
     const portrait = p.h >= p.w, aspect = portrait ? ratio : 1 / ratio, ia = p.w / p.h;
     if (fit || Math.abs(ia - aspect) < 0.01) return { x: 0, y: 0, w: 1, h: 1, aspect, portrait, cut: 0 };
     const E = S.energy[p.id];
-    if (ia > aspect) { const w = aspect / ia; return { x: E ? bestWindow(E.colE, w) : (1 - w) / 2, y: 0, w, h: 1, aspect, portrait, cut: 1 - w }; }
-    const h = ia / aspect; return { x: 0, y: E ? bestWindow(E.rowE, h) : (1 - h) / 2, w: 1, h, aspect, portrait, cut: 1 - h };
+    const M = p.man, clamp = (v, max) => Math.min(max, Math.max(0, v));     // p.man — кадр, который человек сдвинул сам
+    if (ia > aspect) { const w = aspect / ia; return { x: M ? clamp(M.x, 1 - w) : E ? bestWindow(E.colE, w) : (1 - w) / 2, y: 0, w, h: 1, aspect, portrait, cut: 1 - w }; }
+    const h = ia / aspect; return { x: 0, y: M ? clamp(M.y, 1 - h) : E ? bestWindow(E.rowE, h) : (1 - h) / 2, w: 1, h, aspect, portrait, cut: 1 - h };
   }
   function recrop() {
     const d = S.draft, prod = prodOf(d.product), v = varOf(prod, d.variant);
@@ -229,13 +241,14 @@
 
   /* ---------- добавление фото ---------- */
   const okType = (f) => /^image\/(jpeg|png)$/.test(f.type) || /\.(jpe?g|png)$/i.test(f.name);
-  async function addFiles(files, toPool) {
+  async function addFiles(files, toPool, by) {
     files = Array.from(files);
     const good = files.filter(okType), bad = files.length - good.length;
-    if (bad) toast(bad + ' ' + plural(bad, 'файл не подошёл', 'файла не подошли', 'файлов не подошли') + ': принимаем только JPEG и PNG (HEIC сохраните как JPEG)', 4500);
-    if (!good.length) return;
+    const rej = files.filter((f) => !okType(f)).map((f) => ({ name: f.name || 'Файл', why: /hei[cf]/i.test((f.name || '') + f.type) ? 'формат HEIC не печатаем: сохраните снимок как JPEG' : 'формат не поддерживается: нужен JPEG или PNG' }));
+    if (bad) toast(bad + ' ' + plural(bad, 'файл не подошёл', 'файла не подошли', 'файлов не подошли') + ': принимаем только JPEG и PNG', 4500);
+    if (!good.length) { S.rejects = rej; rerender(); return; }
     const d = toPool ? { photos: S.pool, t0: 1, pool: true } : S.draft; if (!d.t0) d.t0 = Date.now();
-    const tooBig = good.filter((f) => f.size > 25 * 1024 * 1024); if (tooBig.length) toast('Файлы больше 25 МБ не принимаем: ' + tooBig.length + ' шт.', 4500);
+    const tooBig = good.filter((f) => f.size > 25 * 1024 * 1024); tooBig.forEach((f) => rej.push({ name: f.name, why: 'файл больше 25 МБ: уменьшите его или выберите другой' }));
     const todo = good.filter((f) => f.size <= 25 * 1024 * 1024), max = d.pool ? 400 : prodOf(d.product).photos.max;
     S.busy = { done: 0, total: todo.length }; rerender();
     let failed = 0, replaced = S.replace; S.replace = null;
@@ -245,18 +258,19 @@
         const url = URL.createObjectURL(f);
         const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
         const w = img.naturalWidth, h = img.naturalHeight;
-        if (Math.min(w, h) < 400) { failed++; toast('«' + f.name + '» слишком маленькое: нужно хотя бы 400 пикселей'); URL.revokeObjectURL(url); continue; }
+        if (Math.min(w, h) < 400) { rej.push({ name: f.name, why: 'слишком маленькое (' + w + '×' + h + '): нужно хотя бы 400 пикселей по короткой стороне' }); URL.revokeObjectURL(url); S.busy.done++; continue; }
         const a = analyze(img, w, h), id = 'f' + rid() + rid().slice(0, 3);
-        const p = { id, name: (f.name || 'Фото').slice(0, 60), w, h, qty: 1, crop: null, sharp: a.sharp, bright: a.bright, hash: a.hash, up: false };
+        const p = { id, name: (f.name || 'Фото').slice(0, 60), w, h, qty: 1, crop: null, sharp: a.sharp, bright: a.bright, hash: a.hash, up: false }; if (by) p.by = by;
         S.thumbs[id] = thumbOf(img, w, h, 360); S.energy[id] = { colE: a.colE, rowE: a.rowE };
         await IDB.put('blobs', id, f); await IDB.put('thumbs', id, S.thumbs[id]);
         URL.revokeObjectURL(url);
         if (replaced) { const i = d.photos.findIndex((x) => x.id === replaced); if (i >= 0) { dropPhotoData(d.photos[i].id); d.photos[i] = p; } else d.photos.push(p); replaced = null; }
         else d.photos.push(p);
-      } catch (e) { failed++; }
+      } catch (e) { failed++; rej.push({ name: f.name, why: 'файл не открылся: возможно, он повреждён' }); }
       S.busy.done++; renderBusy(); await sleep(0);
     }
-    if (failed && !tooBig.length) toast(failed + ' не открылось — попробуйте JPEG или PNG');
+    S.rejects = rej;
+    if (rej.length && !bad) toast(rej.length + ' ' + plural(rej.length, 'файл не добавлен', 'файла не добавлены', 'файлов не добавлены') + ' — причины на экране', 3500);
     S.busy = null; classify(d.photos);
     if (d.pool) LS.set('pp_pool', S.pool); else { recrop(); saveDraft(); step('photos'); }
     rerender();
@@ -299,11 +313,13 @@
     people: SV('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14.5a5 5 0 0 1 4.5 5.5"/>'),
     star: SV('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9 6.8 19.7l1-5.9L3.5 9.7l5.9-.8z"/>'),
     heart: SV('<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.4C19.5 15.4 12 20 12 20z"/>'),
+    bell: SV('<path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/>'),
+    link: SV('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'),
   };
   const haptic = (ok) => { try { navigator.vibrate && navigator.vibrate(ok ? [20, 40, 20] : 10); } catch (e) { /* нет вибрации */ } };
 
   /* ---------- навигация и отрисовка ---------- */
-  const TITLES = { home: 'picPac', product: 'Продукт', photos: 'Фото', layout: 'Макет', check: 'Проверка', cart: 'Оформление', done: 'Заказ', orders: 'Мои заказы', order: 'Заказ', profile: 'Профиль', login: 'Вход', feed: 'Мои фото', social: 'Сообщество' };
+  const TITLES = { home: 'picPac', product: 'Продукт', photos: 'Фото', layout: 'Макет', check: 'Проверка', cart: 'Оформление', done: 'Заказ', orders: 'Мои заказы', order: 'Заказ', profile: 'Профиль', login: 'Вход', feed: 'Мои фото', social: 'Идеи', join: 'Общий альбом' };
   const TABS = ['home', 'feed', 'social', 'orders', 'profile'];
   const flowOf = () => S.draft && hasLayout(S.draft) ? ['product', 'photos', 'layout', 'check', 'cart'] : ['product', 'photos', 'check', 'cart'];
   function go(view, replace) {
@@ -322,26 +338,33 @@
     renderNet();
     const head = $('#head'), isTab = TABS.includes(S.view), FLOW = S.draft ? flowOf() : [], fi = FLOW.indexOf(S.view);
     const guest = S.session && /^g-/.test(S.session.user.id), logo = '<span class="logo">pic<b>Pac</b></span>';
-    const right = S.view === 'home' && guest ? '<button class="head-link" id="signin">Войти</button>' : '<span></span>';
+    const unread = S.notes.filter((n) => !n.read).length;
+    const bell = `<button class="icon-btn" id="bell" aria-label="Уведомления${unread ? ': новых ' + unread : ''}">${ICON.bell}${unread ? `<b>${unread}</b>` : ''}</button>`;
+    const right = isTab ? `<span class="head-acts">${S.view === 'home' && guest ? '<button class="head-link" id="signin">Войти</button>' : ''}${bell}</span>` : '<span></span>';
     const sub = fi >= 0 ? `<small class="stepno">Шаг ${fi + 1} из ${FLOW.length}</small>` : '';
     head.innerHTML = `${isTab || S.view === 'login' ? '<span></span>' : `<button class="icon-btn" id="back" aria-label="Назад">${ICON.back}</button>`}<div class="ttl"><h2>${S.view === 'home' ? logo : TITLES[S.view]}</h2>${sub}</div>${right}
       ${fi >= 0 ? `<div class="progress" style="grid-template-columns:repeat(${FLOW.length},1fr)" aria-hidden="true">${FLOW.map((_, i) => `<i class="${i <= fi ? 'on' : ''}"></i>`).join('')}</div>` : ''}`;
     const b = $('#back'); if (b) b.onclick = back;
     const si = $('#signin'); if (si) si.onclick = () => { S.stack = []; go('profile', true); };
+    const bl = $('#bell'); if (bl) bl.onclick = openNotes;
     document.querySelectorAll('#sideSteps li').forEach((li) => { const s = { home: 0, feed: 1, product: 0, photos: 1, layout: 1, check: 2, cart: 3, done: 4, order: 4 }[S.view]; li.classList.toggle('on', +li.dataset.s === s); li.classList.toggle('done', +li.dataset.s < (s == null ? -1 : s)); });
-    if (S.busy) { renderBusy(); $('#bar').innerHTML = ''; return; }
+    if (S.busy) { renderBusy(); $('#bar').innerHTML = ''; fitBar(); return; }
     const v = VIEWS[S.view]();
     $('#screen').innerHTML = v.html;
     $('#bar').innerHTML = (v.bar || '') + (isTab ? tabbar() : '');
     document.querySelectorAll('[data-tab]').forEach((t) => { t.onclick = () => { S.stack = []; go(t.dataset.tab, true); }; });
     v.bind && v.bind($('#screen'), $('#bar'));
+    const rx = $('#rjx'); if (rx) rx.onclick = () => { S.rejects = []; rerender(); };
+    fitBar();
     if (S.view === 'orders') loadOrders();
     if (S.view === 'social' && !S.soc.fetched) { S.soc.fetched = true; loadSocial(); }
     if (S.view === 'order' || S.view === 'done') startPoll();
   }
   function tabbar() {
+    const i = TABS.indexOf(S.view), from = S.tabFrom == null ? i : S.tabFrom; S.tabFrom = i;
     const t = (id, ic, name) => `<button class="tab3" data-tab="${id}" aria-current="${S.view === id}">${ICON[ic]}<span>${name}</span></button>`;
-    return `<nav class="tabs3" aria-label="Разделы">${t('home', 'home', 'Каталог')}${t('feed', 'photos', 'Мои фото')}${t('social', 'people', 'Идеи')}${t('orders', 'list', 'Заказы')}${t('profile', 'user', 'Профиль')}</nav>`;
+    if (from !== i) requestAnimationFrame(() => requestAnimationFrame(() => { const p = $('.tab-pill'); if (p) p.style.setProperty('--i', i); }));
+    return `<nav class="tabs3" aria-label="Разделы"><i class="tab-pill" style="--i:${from}" aria-hidden="true"></i>${t('home', 'home', 'Каталог')}${t('feed', 'photos', 'Мои фото')}${t('social', 'people', 'Идеи')}${t('orders', 'list', 'Заказы')}${t('profile', 'user', 'Профиль')}</nav>`;
   }
   function renderNet() {
     const n = $('#net'); if (!n) return;
@@ -351,9 +374,9 @@
   }
   function renderBusy() {
     if (!S.busy) return; const { done, total } = S.busy;
-    $('#screen').innerHTML = `<div class="loading"><div class="ai-ava" style="margin:0 auto;width:48px;height:48px">${ICON.spark}</div>
-      <h3 style="margin-top:14px;font-size:18px;font-weight:600">Смотрю кадры</h3><div class="bar"><i style="width:${total ? done / total * 100 : 0}%"></i></div>
-      <p class="num">${done} из ${total}</p><p>Резкость, свет и дубли проверяю прямо на телефоне</p></div>`;
+    $('#screen').innerHTML = `<div class="loading"><div class="ai-ava">${ICON.spark}</div>
+      <h3>${esc(S.busy.title || 'Смотрю кадры')}</h3><div class="bar"><i style="width:${total ? done / total * 100 : 0}%"></i></div>
+      <p class="num">${done} из ${total}</p><p>${esc(S.busy.note || 'Резкость, свет и дубли проверяю прямо на телефоне')}</p></div>`;
   }
 
   /* ---------- экраны ---------- */
@@ -397,14 +420,14 @@
   const OCCASIONS = [['Выпускной альбом', 'book', 'classic'], ['Свадьба', 'book', 'premium'], ['Семейная книга', 'book', 'classic'], ['Календарь 2027', 'calendar', 'wall'], ['Печать 10×15', 'print', '10x15'], ['Холст на стену', 'canvas', '30x40']];
   VIEWS.home = () => {
     const cat = S.catalog, d = S.draft, n = d ? d.photos.length : 0;
-    const cont = d && n ? `<button class="card cont" id="cont"><b>Продолжить: ${esc(prodOf(d.product).name)}</b><span>${n} ${plural(n, 'фото', 'фото', 'фото')} · черновик сохранён</span></button>` : '';
+    const cont = d && n ? `<button class="card cont" id="cont"><b>Продолжить: ${esc(prodOf(d.product).name)}</b><span>${n} ${plural(n, 'фото', 'фото', 'фото')} · черновик сохранён</span><i aria-hidden="true">${ICON.back}</i></button>` : '';
     const ob = S.outbox ? `<div class="warnbox"><span>Заказ ждёт сети и уйдёт сам</span><button class="btn btn-sm" id="retry">Отправить сейчас</button></div>` : '';
     const skel = '<div class="pcard sk"><span class="pic"></span><b></b><small></small></div>'.repeat(4);
     const cards = cat ? cat.products.map((p) => `<button class="pcard" data-pr="${p.id}"><span class="pic">${artOf(p.kind)}</span><b>${esc(p.name)}</b><small>${esc(p.short)}</small><em>от ${money(fromPrice(p))}</em></button>`).join('') : skel;
     return {
       html: `<section class="hello"><h1>Фото — в печать за пару касаний</h1><p>Выберите снимки из галереи. Подскажем, что из них получится.</p></section>
         <label class="btn btn-primary btn-xl cta" for="file" id="cta">${ICON.photos.replace('<svg', '<svg width="22" height="22"')} Выбрать фото</label>
-        ${ob}${cont}
+        ${ob}${cont}${recsHtml()}
         <p class="sec-t">Для чего?</p><div class="occ" role="list">${OCCASIONS.map(([t, pid, vid], i) => `<button class="occ-i" role="listitem" data-oc="${i}">${esc(t)}</button>`).join('')}</div>
         <p class="sec-t">Все продукты</p><div class="pgrid">${cards}</div>
         ${cat ? '' : '<p class="muted" style="text-align:center">Загружаю каталог…</p>'}
@@ -414,28 +437,14 @@
         scr.querySelectorAll('[data-oc]').forEach((b) => { const o = OCCASIONS[+b.dataset.oc]; b.onclick = () => openProduct(o[1], o[2]); });
         const c = $('#cont'); if (c) c.onclick = () => go('photos');
         const r = $('#retry'); if (r) r.onclick = flushOutbox;
+        scr.querySelectorAll('[data-rec]').forEach((b) => { b.onclick = () => runRec(recs()[+b.dataset.rec].act); });
         $('#file').accept = 'image/jpeg,image/png';
       },
     };
   };
-  VIEWS.homeOld = () => {
-    const cat = S.catalog, d = S.draft, n = d ? d.photos.length : 0;
-    const cont = d && n ? `<button class="card cont" id="cont"><b>Продолжить: ${esc(prodOf(d.product).name)}</b><span>${n} ${plural(n, 'фото', 'фото', 'фото')} · черновик сохранён</span></button>` : '';
-    const ob = S.outbox ? `<div class="warnbox"><span>Заказ ждёт сети и уйдёт сам</span><button class="btn btn-sm" id="retry">Отправить сейчас</button></div>` : '';
-    const cards = cat ? cat.products.map((p) => `<button class="pcard" data-pr="${p.id}"><span class="pic">${ICON[p.icon] || ICON.photos}</span><b>${esc(p.name)}</b><small>${esc(p.short)}</small><em>от ${money(fromPrice(p))}</em></button>`).join('')
-      : '<div class="loading"><p>Не удалось загрузить каталог. Проверьте сеть.</p><button class="btn" id="rc">Повторить</button></div>';
-    return {
-      html: `<section class="hello"><h1>Что напечатаем?</h1><p>Выберите продукт, потом фото. Остальное подскажем.</p></section>${ob}${cont}<div class="pgrid">${cards}</div>`,
-      bind(scr) {
-        scr.querySelectorAll('[data-pr]').forEach((b) => { b.onclick = () => openProduct(b.dataset.pr); });
-        const c = $('#cont'); if (c) c.onclick = () => go('photos');
-        const rc = $('#rc'); if (rc) rc.onclick = async () => { await loadCatalog(); rerender(); };
-        const r = $('#retry'); if (r) r.onclick = flushOutbox;
-      },
-    };
-  };
   function openProduct(id, vid) {
-    const prod = prodOf(id);
+    const prod = prodOf(id); if (!prod) return toast('Этот продукт сейчас недоступен');
+    vid = vid && prod.variants.some((v) => v.id === vid) ? vid : null;
     if (!S.draft || S.draft.product !== id) {
       if (S.draft && S.draft.photos.length) {            // прежние фото не выбрасываем: они вернутся в «Мои фото»
         S.pool = S.pool.concat(S.draft.photos); LS.set('pp_pool', S.pool); toast('Прежние фото сохранены в «Моих фото»');
@@ -475,27 +484,28 @@
     const accept = 'image/jpeg,image/png';
     if (!n) return {
       html: `<section class="hello"><h1>Выберите фото</h1><p>${esc(prod.name)}: ${prod.photos.min === prod.photos.max ? prod.photos.min : 'от ' + prod.photos.min} ${plural(prod.photos.max, 'фото', 'фото', 'фото')}. Принимаем JPEG и PNG до 25 МБ.</p></section>
-        <div class="pick"><label class="btn btn-primary btn-xl" for="file">${ICON.photos.replace('<svg', '<svg width="22" height="22"')} Выбрать из галереи</label>
+        ${rejectsHtml()}${inboxHtml()}<div class="pick"><label class="btn btn-primary btn-xl" for="file">${ICON.photos.replace('<svg', '<svg width="22" height="22"')} Выбрать из галереи</label>
         <button class="btn btn-lg" id="demo">Тестовая галерея · 20 кадров</button></div>
         <div class="trust"><div>${ICON.ok} Проверим резкость, свет и дубли на телефоне</div><div>${ICON.ok} Черновик сохраняется сам — можно закрыть и вернуться</div><div>${ICON.ok} Подгоним под формат и честно скажем, хватает ли пикселей</div></div>`,
-      bind() { $('#demo').onclick = () => addDemo(false); $('#file').accept = accept; },
+      bind() { $('#demo').onclick = () => addDemo(false); $('#file').accept = accept; bindShare(); },
     };
     const ratio = !(prod.kind === 'book' && false);
     const items = d.photos.map((p, i) => {
       const q = qualityOf(p), tag = p.rejected ? '<span class="tag bad">Не принято</span>' : p.blur ? '<span class="tag bad">Размыто</span>' : p.dup ? '<span class="tag bad">Дубль</span>' : p.dark ? '<span class="tag bad">Темно</span>' : q.lvl === 'low' ? '<span class="tag warn">Мало пикс.</span>' : '';
       const qty = (prod.kind === 'print' || prod.kind === 'magnet') && p.qty > 1 ? `<span class="qb">×${p.qty}</span>` : '';
-      return `<button class="th on ${p.blur || p.dark || p.dup ? 'flag' : ''}" data-i="${i}" aria-label="Фото ${i + 1}, ${esc(p.name)}"><img src="${S.thumbs[p.id] || ''}" alt=""><span class="ix">${i + 1}</span>${qty}${tag}</button>`;
+      return `<button class="th on ${p.blur || p.dark || p.dup ? 'flag' : ''}" data-i="${i}" aria-label="Фото ${i + 1}, ${esc(p.name)}"><img src="${S.thumbs[p.id] || ''}" alt=""><span class="ix">${i + 1}</span>${qty}${tag}${p.by ? `<span class="by" title="Добавил(а) ${esc(p.by)}">${esc(p.by[0].toUpperCase())}</span>` : ''}</button>`;
     }).join('');
     const fitSeg = (prod.kind === 'print' || prod.kind === 'magnet') ? `<div class="seg" role="group" aria-label="Как печатать"><button data-fit="0" aria-pressed="${!d.fit}">Заполнить кадр</button><button data-fit="1" aria-pressed="${d.fit}">С белыми полями</button></div>` : '';
     return {
-      html: `<div class="ai-note"><span class="ai-ava">${ICON.spark}</span><div class="ai-body">${bad ? `Нашла <b>${bad}</b> ${plural(bad, 'слабый кадр', 'слабых кадра', 'слабых кадров')} (размытые, тёмные, дубли). Можно убрать одним касанием.` : `<b>${n}</b> ${plural(n, 'кадр', 'кадра', 'кадров')} — всё выглядит хорошо.`}
+      html: `${rejectsHtml()}${inboxHtml()}<div class="ai-note"><span class="ai-ava">${ICON.spark}</span><div class="ai-body">${bad ? `Нашла <b>${bad}</b> ${plural(bad, 'слабый кадр', 'слабых кадра', 'слабых кадров')} (размытые, тёмные, дубли). Можно убрать одним касанием.` : `<b>${n}</b> ${plural(n, 'кадр', 'кадра', 'кадров')} — всё выглядит хорошо.`}
         <div class="ai-src">Проверено на телефоне · файлы ${d.photos.every((p) => p.up) ? 'загружены' : 'ждут загрузки'}</div></div></div>
         ${bad ? `<button class="btn" id="dropbad">Убрать слабые (${bad})</button>` : ''}${fitSeg}
         <div class="thumbs">${items}</div>
-        <label class="btn" for="file" style="width:100%">+ Добавить ещё</label>`,
+        <label class="btn" for="file">+ Добавить ещё</label>${shareHtml()}`,
       bar: `<button class="btn btn-primary btn-xl" id="next">Дальше</button><div class="sub">${n} ${plural(n, 'фото', 'фото', 'фото')} · ${S.price && !S.price.local ? 'сейчас ' + money(S.price.total) : 'порядок меняется касанием'}</div>`,
       bind(scr) {
         $('#file').accept = accept;
+        bindShare();
         scr.querySelectorAll('[data-i]').forEach((b) => { b.onclick = () => { S.sheet = +b.dataset.i; renderSheet(); }; });
         scr.querySelectorAll('[data-fit]').forEach((b) => { b.onclick = () => { d.fit = b.dataset.fit === '1'; recrop(); saveDraft(); rerender(); }; });
         const db = $('#dropbad'); if (db) db.onclick = () => { d.photos.filter((p) => p.blur || p.dark || p.dup).forEach((p) => dropPhotoData(p.id)); d.photos = d.photos.filter((p) => !(p.blur || p.dark || p.dup)); classify(); saveDraft(); rerender(); };
@@ -547,7 +557,7 @@
           <div class="chips-row" role="list">${AI_HINTS.map((t, i) => `<button class="pchip" role="listitem" data-hint="${i}">${esc(t)}</button>`).join('')}</div>
           <div class="field"><label for="aiq">Напишите, что изменить</label><textarea class="textarea" id="aiq" rows="2" maxlength="300" placeholder="Например: убери размытые и поставь страницу 5 в начало"></textarea></div>
           ${S.aiMsg ? `<p class="ai-say" role="status">${esc(S.aiMsg)}</p>` : ''}
-          <div class="row2"><button class="btn btn-primary" id="aigo">Применить</button>${d.layoutPrev ? '<button class="btn" id="aiundo">Отменить</button>' : ''}</div></section>
+          <div class="row2"><button class="btn btn-accent" id="aigo">Применить</button>${d.layoutPrev ? '<button class="btn" id="aiundo">Отменить</button>' : ''}</div></section>
         <button class="btn" id="re">Собрать заново</button>`,
       bar: `<button class="btn btn-primary btn-xl" id="next">Дальше · проверка</button><div class="sub">Макет можно не править: мы уже всё разложили</div>`,
       bind(scr) {
@@ -581,7 +591,7 @@
       <b>${prodOf(d.product).kind === 'calendar' ? (i < 12 ? 'Месяц ' + (i + 1) : 'Обложка') : 'Страница ' + (i + 1)}</b>
       <div class="pgfull">${lay[i].map((id) => `<img src="${S.thumbs[id] || ''}" alt="">`).join('') || '<p class="muted">Здесь пока пусто</p>'}</div>
       <div class="row2"><button class="btn" data-a="up" ${i === 0 ? 'disabled' : ''}>← Раньше</button><button class="btn" data-a="dn" ${i === lay.length - 1 ? 'disabled' : ''}>Позже →</button></div>
-      <button class="btn btn-primary btn-lg" data-x>Готово</button></div>`;
+      <button class="btn btn-accent btn-lg" data-x>Готово</button></div>`;
     $('.app').appendChild(el);
     const done = () => { S.pgSheet = null; el.remove(); saveDraft(); rerender(); };
     el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = done; });
@@ -596,13 +606,13 @@
     const L = S.pool, picked = L.filter((p) => S.sel[p.id]);
     if (!L.length) return {
       html: `<section class="hello"><h1>Ваши фото</h1><p>Листайте, как в ленте, отмечайте любимые — и нажмите «Напечатать». Фото остаются на телефоне, пока вы не закажете.</p></section>
-        <div class="pick"><label class="btn btn-primary btn-xl" for="file">${ICON.photos.replace('<svg', '<svg width="22" height="22"')} Добавить из галереи</label><button class="btn btn-lg" id="demo">Тестовая галерея · 20 кадров</button></div>`,
+        ${rejectsHtml()}<div class="pick"><label class="btn btn-primary btn-xl" for="file">${ICON.photos.replace('<svg', '<svg width="22" height="22"')} Добавить из галереи</label><button class="btn btn-lg" id="demo">Тестовая галерея · 20 кадров</button></div>`,
       bind() { $('#demo').onclick = () => addDemo(true); $('#file').accept = 'image/jpeg,image/png'; },
     };
     const cards = L.map((p) => `<article class="fcard ${S.sel[p.id] ? 'sel' : ''}"><img src="${S.thumbs[p.id] || ''}" alt="${esc(p.name)}">
-      <div class="fbar"><span>${esc(p.name)}${p.blur ? ' · размыто' : ''}</span><button class="btn btn-sm ${S.sel[p.id] ? 'btn-primary' : ''}" data-s="${p.id}" aria-pressed="${!!S.sel[p.id]}">${S.sel[p.id] ? '✓ Выбрано' : 'Выбрать'}</button></div></article>`).join('');
+      <div class="fbar"><span>${esc(p.name)}${p.blur ? ' · размыто' : ''}</span><button class="btn btn-sm ${S.sel[p.id] ? 'btn-accent' : ''}" data-s="${p.id}" aria-pressed="${!!S.sel[p.id]}">${S.sel[p.id] ? '✓ Выбрано' : 'Выбрать'}</button></div></article>`).join('');
     return {
-      html: `${cards}<label class="btn" for="file" style="width:100%">+ Добавить ещё</label>`,
+      html: `${rejectsHtml()}${cards}<label class="btn" for="file">+ Добавить ещё</label>`,
       bar: `<button class="btn btn-primary btn-xl" id="print" ${picked.length ? '' : 'disabled'}>Напечатать${picked.length ? ' · ' + picked.length : ''}</button><div class="sub">${picked.length ? 'Дальше выберете, что напечатать' : 'Отметьте фото, которые хотите напечатать'}</div>`,
       bind(scr) {
         $('#file').accept = 'image/jpeg,image/png';
@@ -622,18 +632,23 @@
     $('.app').appendChild(el);
     el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = () => el.remove(); });
     el.querySelectorAll('[data-f]').forEach((b) => {
-      b.onclick = async () => {
-        const [pid, vid] = b.dataset.f.split(':'); el.remove();
-        const chosen = S.pool.filter((p) => S.sel[p.id]);
-        if (S.draft && S.draft.photos.length) S.pool = S.pool.concat(S.draft.photos);   // прежний черновик не теряем: его фото вернутся в ленту
-        S.pool = S.pool.filter((p) => !S.sel[p.id]); S.sel = {};
-        const prod = prodOf(pid); S.draft = newDraft(prod); S.draft.variant = vid; S.draft.t0 = Date.now();
-        S.draft.photos = chosen.map((p) => Object.assign({}, p, { up: false, qty: 1 }));
-        classify(); recrop(); LS.set('pp_pool', S.pool); saveDraft(); step('catalog'); step('photos'); refreshPrice();
-        if (hasLayout(S.draft)) { ensureLayout(true); step('layout'); S.stack.push('feed'); go('layout', true); }
-        else { await runCheck(); S.stack.push('feed'); go('check', true); }
-      };
+      b.onclick = () => { const [pid, vid] = b.dataset.f.split(':'); el.remove(); printFromPool(pid, vid); };
     });
+  }
+
+  /* из «Моих фото» — сразу в продукт: отмеченные кадры (или все) становятся черновиком */
+  async function printFromPool(pid, vid, all) {
+    const prod = prodOf(pid); if (!prod) return toast('Этот продукт сейчас недоступен');
+    if (all) S.pool.forEach((p) => { S.sel[p.id] = true; });
+    const chosen = S.pool.filter((p) => S.sel[p.id]).slice(0, prod.photos.max), ids = new Set(chosen.map((p) => p.id));
+    if (!chosen.length) return toast('Сначала добавьте фото');
+    if (S.draft && S.draft.photos.length) S.pool = S.pool.concat(S.draft.photos);   // прежний черновик не теряем: его фото вернутся в ленту
+    S.pool = S.pool.filter((p) => !ids.has(p.id)); S.sel = {};
+    S.draft = newDraft(prod); if (vid && prod.variants.some((v) => v.id === vid)) S.draft.variant = vid; S.draft.t0 = Date.now();
+    S.draft.photos = chosen.map((p) => Object.assign({}, p, { up: false, qty: 1 }));
+    classify(); recrop(); LS.set('pp_pool', S.pool); saveDraft(); step('catalog'); step('photos'); refreshPrice();
+    if (hasLayout(S.draft)) { ensureLayout(true); step('layout'); S.stack.push('feed'); go('layout', true); }
+    else { await runCheck(); S.stack.push('feed'); go('check', true); }
   }
 
   function renderSheet() {
@@ -641,18 +656,31 @@
     if (S.sheet == null) return;
     const d = S.draft, p = d.photos[S.sheet]; if (!p) { S.sheet = null; return; }
     const prod = prodOf(d.product), v = varOf(prod, d.variant), c = cropFor(p, v.ratio, d.fit), q = qualityOf(p);
-    const each = prod.kind === 'print' || prod.kind === 'magnet';
+    const each = prod.kind === 'print' || prod.kind === 'magnet', canDrag = c.cut > 0.02 && !d.fit;
     const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet';
     el.innerHTML = `<div class="sheet-bg" data-x></div><div class="sheet-body" role="dialog" aria-label="Фото ${S.sheet + 1}">
-      <div class="slot big"><div class="frame ${d.fit ? 'fit' : ''}" style="aspect-ratio:${c.aspect};${c.aspect < 1 ? 'height:240px;width:auto;' : c.aspect === 1 ? 'height:220px;width:220px;' : 'width:100%;height:auto;'}${bgStyle(p, c)}"></div><span class="q ${q.lvl}"><span class="dot"></span>${q.label}</span></div>
+      <div class="slot big"><div class="frame ${d.fit ? 'fit' : ''} ${canDrag ? 'drag' : ''}" style="aspect-ratio:${c.aspect};${c.aspect < 1 ? 'height:240px;width:auto;' : c.aspect === 1 ? 'height:220px;width:220px;' : 'width:100%;height:auto;'}${bgStyle(p, c)}"></div><span class="q ${q.lvl}"><span class="dot"></span>${q.label}</span>${canDrag ? '<span class="cropnote">Потяните кадр, чтобы сдвинуть</span>' : ''}</div>
       <p class="muted" style="text-align:center;font-size:13px">${esc(p.name)} · <span class="num">${p.w}×${p.h}</span>${c.cut > 0.02 && !d.fit ? ' · обрезка ' + Math.round(c.cut * 100) + ' %' : ''}</p>
       ${p.rejected ? `<p class="err">${esc(p.rejected)}</p>` : ''}
       <div class="row2"><button class="btn" data-a="left" ${S.sheet === 0 ? 'disabled' : ''}>← Раньше</button><button class="btn" data-a="right" ${S.sheet === d.photos.length - 1 ? 'disabled' : ''}>Позже →</button></div>
       ${each ? `<div class="allqty"><span>Копий этого фото</span><span class="stepper"><button data-a="m" aria-label="Меньше">−</button><output>${p.qty}</output><button data-a="p" aria-label="Больше">+</button></span></div>` : ''}
-      <div class="row2"><button class="btn" data-a="replace">Заменить</button><button class="btn" data-a="del" style="color:var(--bad)">Убрать</button></div>
-      <button class="btn btn-primary btn-lg" data-x>Готово</button></div>`;
+      ${p.man && canDrag ? '<button class="btn btn-sm btn-ghost" data-a="auto">Вернуть кадр, который подобрало приложение</button>' : ''}
+      <div class="row2"><button class="btn" data-a="replace">Заменить</button><button class="btn btn-danger" data-a="del">Убрать</button></div>
+      <button class="btn btn-accent btn-lg" data-x>Готово</button></div>`;
     $('.app').appendChild(el);
     const done = () => { S.sheet = null; el.remove(); saveDraft(); rerender(); };
+    const fr = el.querySelector('.frame');
+    if (fr && canDrag) {                       // кадрирование: фон больше рамки в 1/c.w раз, поэтому сдвиг пальца делим на размер всего фото
+      let st = null;
+      fr.onpointerdown = (e) => { st = { x: e.clientX, y: e.clientY, cx: c.x, cy: c.y }; try { fr.setPointerCapture(e.pointerId); } catch (er) { /* старый браузер */ } };
+      fr.onpointermove = (e) => {
+        if (!st) return; const r = fr.getBoundingClientRect();
+        p.man = { x: st.cx - (e.clientX - st.x) / (r.width / c.w), y: st.cy - (e.clientY - st.y) / (r.height / c.h) };
+        const k = cropFor(p, v.ratio, d.fit); p.man = { x: k.x, y: k.y };
+        fr.style.backgroundPosition = (k.w < 1 ? k.x / (1 - k.w) * 100 : 0) + '% ' + (k.h < 1 ? k.y / (1 - k.h) * 100 : 0) + '%';
+      };
+      fr.onpointerup = fr.onpointercancel = () => { if (!st) return; st = null; const k = cropFor(p, v.ratio, d.fit); p.crop = { x: k.x, y: k.y, w: k.w, h: k.h }; c.x = k.x; c.y = k.y; saveDraft(); };
+    }
     el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = done; });
     el.querySelectorAll('[data-a]').forEach((b) => {
       b.onclick = () => {
@@ -660,6 +688,7 @@
         if (a === 'left' || a === 'right') { const j = a === 'left' ? i - 1 : i + 1;[L[i], L[j]] = [L[j], L[i]]; S.sheet = j; saveDraft(); renderSheet(); rerender(); }
         else if (a === 'm' || a === 'p') { p.qty = Math.max(1, Math.min(99, p.qty + (a === 'p' ? 1 : -1))); saveDraft(); renderSheet(); refreshPrice(); }
         else if (a === 'del') { dropPhotoData(p.id); L.splice(i, 1); classify(); done(); }
+        else if (a === 'auto') { delete p.man; recrop(); saveDraft(); renderSheet(); }
         else if (a === 'replace') { S.replace = p.id; S.sheet = null; el.remove(); $('#file').click(); }
       };
     });
@@ -688,7 +717,7 @@
     const fixable = Array.isArray(I) && I.length && (nbad || hasCrop);
     const summary = Array.isArray(I) && I.length ? `<p class="muted" style="font-size:15px">Нашли ${I.length} ${plural(I.length, 'замечание', 'замечания', 'замечаний')}. Печать возможна, но лучше посмотреть.</p>` : '';
     return {
-      html: `<p class="sec-t">Перед заказом</p>${summary}${fixable ? `<button class="btn btn-lg" id="fixall">✨ Исправить автоматически${nbad ? ' · убрать ' + nbad + ' слабых' : ''}${hasCrop ? ' · белые поля' : ''}</button>` : ''}${body}`,
+      html: `<p class="sec-t">Перед заказом</p>${summary}${fixable ? `<button class="btn btn-accent btn-lg" id="fixall">${ICON.spark} Исправить автоматически${nbad ? ' · убрать ' + nbad + ' слабых' : ''}${hasCrop ? ' · белые поля' : ''}</button>` : ''}${body}`,
       bar: `<button class="btn btn-primary btn-xl" id="next" ${errs ? 'disabled' : ''}>${warns || I === 'offline' ? 'Всё равно продолжить' : 'Дальше · корзина'}</button>${errs ? '<div class="sub">Исправьте ошибки, чтобы продолжить</div>' : warns ? '<div class="sub">Или вернитесь и замените фото</div>' : ''}`,
       bind(scr) {
         scr.querySelectorAll('[data-rep]').forEach((b) => { b.onclick = () => { S.replace = b.dataset.rep; $('#file').click(); }; });
@@ -788,6 +817,7 @@
     if (S.draft) { S.draft.photos.forEach((p) => { delete S.thumbs[p.id]; delete S.energy[p.id]; IDB.del('blobs', p.id); IDB.del('thumbs', p.id); }); }
     S.draft = null; LS.del('pp_draft'); S.accept = false;
     S.order = o; S.events = []; S.orders = [o].concat(S.orders.filter((x) => x.id !== o.id)); LS.set('pp_orders', S.orders);
+    wire('Заказ ' + o.number + ' · ' + money(o.total));
     S.stack = []; haptic(true); go('done', true);
   }
   window.addEventListener('online', () => { setOnline(true); });
@@ -795,13 +825,19 @@
   setInterval(() => { if (S.outbox && S.session) flushOutbox(); else if (S.draft && S.session && S.online && S.draft.photos.some((p) => !p.up && !p.rejected)) syncSoon(); }, 6000);
 
   /* ---------- статус заказа ---------- */
-  const RIB = [['accepted', 'Принят'], ['moderation', 'Модерация'], ['production', 'Печать'], ['shipped', 'Готов'], ['done', 'Завершён']];
+  const RIB = [['accepted', 'Принят', 'Заказ принят'], ['moderation', 'Модерация', 'Модерация макета'], ['production', 'Печать', 'Производство'], ['shipped', 'Готов', 'Передан в доставку'], ['done', 'Завершён', 'Завершён']];
   const ribIndex = (o) => { const s = o.stage; return { accepted: 0, moderation: 1, production: 2, quality: 2, shipped: 3, done: o.stage_status === 'passed' ? 5 : 4 }[s] ?? 0; };
+  const isPickup = (o) => !!o.pickup_point || !!(o.delivery && o.delivery.id === 'pickup');
+  const stageChip = (o) => o.stage_status === 'defect' ? '<span class="chip chip-bad"><i></i>Переделываем</span>'
+    : `<span class="chip ${ribIndex(o) >= 5 ? 'chip-ok' : 'chip-accent'}"><i></i>${esc(RIB[Math.min(ribIndex(o), 4)][1])}</span>`;
+  /* статусная лента из общих событий: принят → модерация → производство → готов / передан в доставку → завершён */
   function ribbon(o) {
-    const idx = ribIndex(o), when = {};
+    const idx = ribIndex(o), when = {}, defect = o.stage_status === 'defect';
     S.events.forEach((e) => { if (e.status === 'passed') when[e.stage === 'quality' ? 'production' : e.stage] = e.ts; });
-    return `<div class="track5">${RIB.map(([id, name], i) => `<div class="${i < idx ? 'on' : ''} ${i === idx ? 'cur' : ''}"><i>${i < idx ? '✓' : i + 1}</i><b>${name}</b><small>${when[id] ? fdate(when[id]) : ''}</small></div>`).join('')}</div>
-      ${o.stage_status === 'defect' ? '<div class="warnbox">На этапе нашли брак — переделываем, срок может сдвинуться.</div>' : ''}`;
+    return `<ol class="tl" aria-label="Статус заказа">${RIB.map(([id, , name], i) => {
+      const on = i < idx, cur = i === idx, nm = id === 'shipped' && isPickup(o) ? 'Готов к выдаче' : name;
+      return `<li class="${on ? 'on' : ''} ${cur ? (defect ? 'cur bad' : 'cur') : ''}"><i>${on ? ICON.check : i + 1}</i><div><b>${nm}</b>${cur ? `<p aria-live="polite">${esc(defect ? 'На этапе нашли брак — переделываем бесплатно, срок может сдвинуться.' : NOW[o.stage] || '')}</p>` : ''}</div><time>${when[id] ? fdate(when[id]) : ''}</time></li>`;
+    }).join('')}</ol>`;
   }
   function stopPoll() { if (S.poll) { clearInterval(S.poll); S.poll = null; } }
   function startPoll() {
@@ -812,18 +848,24 @@
         const [o, ev] = await Promise.all([call('GET', '/orders/' + S.order.id), call('GET', '/orders/' + S.order.id + '/events')]);
         const changed = o.stage !== S.order.stage || o.stage_status !== S.order.stage_status;
         S.order = o; S.events = ev; S.orders = S.orders.map((x) => x.id === o.id ? o : x); LS.set('pp_orders', S.orders);
-        if (changed) { const nm = RIB[Math.min(ribIndex(o), 4)][1]; toast('Заказ ' + o.number + ': ' + nm.toLowerCase()); haptic(true); }
+        if (changed) { notify('Заказ ' + o.number, stageNews(o), o.id, true); wire('Статус из производства: ' + RIB[Math.min(ribIndex(o), 4)][1].toLowerCase()); }
         if (changed || !S.evShown) { S.evShown = true; rerender(); }
       } catch (e) { /* нет сети — покажем последнее известное */ }
     };
     tick(); S.poll = setInterval(tick, 4000);
   }
   const NOW = { accepted: 'Заказ принят. Сейчас проверим макет.', moderation: 'Проверяем макет и фото. Обычно это занимает около часа.', production: 'Печатаем ваш заказ.', quality: 'Печать готова, проверяем качество.', shipped: 'Заказ готов — можно забирать или ждать доставку.', done: 'Заказ завершён. Спасибо, что выбрали picPac!' };
-  function orderBody(o, queued) {
+  function orderBody(o, compact) {
     const items = (o.items || []).map((it) => `<div class="item" style="grid-template-columns:1fr auto"><div><b>${esc(it.name)}</b><span>${esc(dec(it.note || it.qty + ' шт'))}</span></div><div class="sum">${money(it.sum)}</div></div>`).join('');
-    const where = o.pickup_point ? 'Самовывоз: ' + o.pickup_point.name : (o.delivery ? o.delivery.name + (o.address ? ', ' + o.address : '') : '');
-    return `<div class="card-flat">${ribbon(o)}<p class="nowtxt" aria-live="polite">${esc(NOW[o.stage] || '')}</p><p class="muted" style="margin-top:8px;font-size:14px;text-align:center">Готовность: <b style="color:var(--ink)">${esc(o.ready || '')}</b><br>${esc(where)}</p></div>
-      <div class="card-flat"><div class="items">${items}</div><div class="totals" style="margin-top:10px"><div class="grand" style="border:0;padding:0;margin:0"><span>Итого, при получении</span><span class="num">${money(o.total)}</span></div></div></div>`;
+    const where = o.pickup_point ? o.pickup_point.name : (o.delivery ? o.delivery.name + (o.address ? ', ' + o.address : '') : '');
+    const dl = o.delivery || {};
+    return `<div class="card"><div class="ohead">${compact ? '<span class="eyebrow">Статус заказа</span>' : `<div><span class="eyebrow">Заказ</span><div class="big">${esc(o.number || '')}</div><small>${fdate(o.ts)}</small></div>`}${stageChip(o)}</div>
+        ${ribbon(o)}
+        <div class="ofacts"><div><small>Готовность</small><b>${esc(o.ready || '—')}</b></div><div><small>${isPickup(o) ? 'Самовывоз' : 'Доставка'}</small><b>${esc(where || '—')}</b></div></div></div>
+      <div class="card-flat"><p class="sec-t" style="margin:0 0 12px">Состав заказа</p><div class="items">${items}</div></div>
+      <div class="totals"><div><span>Товары</span><span class="num">${money(o.goods || o.total)}</span></div>${Number(o.discount) ? `<div><span>Скидка${o.promo && o.promo.code ? ' · ' + esc(o.promo.code) : ''}</span><span class="num">−${money(o.discount)}</span></div>` : ''}
+        ${dl.name ? `<div><span>${esc(dl.name)}</span><span class="num">${Number(dl.price) ? money(dl.price) : '0,00 BYN'}</span></div>` : ''}
+        <div class="grand"><span>Итого, при получении</span><span class="num">${money(o.total)}</span></div></div>`;
   }
   VIEWS.done = () => {
     if (S.outbox && !S.order) return {
@@ -834,7 +876,7 @@
     const o = S.order || {};
     return {
       html: `<div class="done-hero"><div class="ok-ico">${ICON.ok}</div><h1>Заказ <span class="num-o">${esc(o.number || '')}</span> принят</h1>
-        ${o.time_sec ? `<div class="timer-pill">Оформлен за <b>${mmss(o.time_sec)}</b> — от выбора фото</div>` : ''}</div>${orderBody(o)}
+        ${o.time_sec ? `<div class="timer-pill">Оформлен за <b>${mmss(o.time_sec)}</b> — от выбора фото</div>` : ''}</div>${orderBody(o, true)}
         <div class="card-flat next"><b>Что дальше</b><ol><li>Проверим макет — это быстро.</li><li>Напечатаем и упакуем.</li><li>Напишем вам, когда заказ можно забирать${o.delivery && o.delivery.id !== 'pickup' ? ' или когда он поедет к вам' : ''}.</li></ol><small>Ничего делать не нужно: статус обновляется сам.</small></div>`,
       bar: `<button class="btn btn-primary btn-xl" id="hist">Мои заказы</button>`,
       bind() { $('#hist').onclick = () => { S.stack = []; go('orders', true); }; },
@@ -842,16 +884,28 @@
   };
   async function loadOrders() {
     if (!S.session) return;
-    try { const list = await call('GET', '/orders'), changed = JSON.stringify(list) !== JSON.stringify(S.orders); S.orders = list; LS.set('pp_orders', S.orders); if (changed && S.view === 'orders') rerender2(); } catch (e) { /* показываем сохранённые */ }
+    try { const list = await call('GET', '/orders'), changed = JSON.stringify(list) !== JSON.stringify(S.orders), was = Object.fromEntries(S.orders.map((o) => [o.id, o]));
+      list.forEach((o) => { const p = was[o.id]; if (p && (p.stage !== o.stage || p.stage_status !== o.stage_status)) { notify('Заказ ' + o.number, stageNews(o), o.id); wire('Статус из производства: ' + RIB[Math.min(ribIndex(o), 4)][1].toLowerCase()); } });
+      S.orders = list; LS.set('pp_orders', S.orders); if (changed && S.view === 'orders') rerender2(); } catch (e) { /* показываем сохранённые */ }
   }
   let r2; function rerender2() { clearTimeout(r2); r2 = setTimeout(() => { if (S.view === 'orders') rerender(); }, 0); }
   let ordersLoaded = false;
   VIEWS.orders = () => {
     const L = S.orders;
-    const html = L.length ? L.map((o) => `<button class="card ocard" data-o="${o.id}"><span class="oart">${artOf(((prodOf((o.items || [])[0] && o.items[0].product) || {}).kind) || 'print')}</span><div><b>${esc(o.number)}</b><span>${fdate(o.ts)} · ${(o.items || []).map((i) => esc(i.name)).join(', ')}</span></div><div class="r"><span class="num">${money(o.total)}</span><span class="chip ${o.stage === 'done' ? 'chip-ok' : 'chip-accent'}">${esc(RIB[Math.min(ribIndex(o), 4)][1])}</span></div></button>`).join('')
+    const html = L.length ? L.map((o) => { const idx = ribIndex(o); return `<button class="card ocard" data-o="${o.id}"><span class="oart">${artOf(((prodOf((o.items || [])[0] && o.items[0].product) || {}).kind) || 'print')}</span>
+        <div><b>${esc(o.number)}</b><span>${fdate(o.ts)} · ${(o.items || []).map((i) => esc(i.name)).join(', ')}</span></div><div class="r"><span class="num">${money(o.total)}</span>${stageChip(o)}</div>
+        <span class="mini" aria-hidden="true">${[0, 1, 2, 3, 4].map((i) => `<i class="${i < idx ? 'on' : i === idx ? 'cur' : ''}"></i>`).join('')}</span></button>`; }).join('')
       : '<div class="empty"><div class="eart">' + artOf('book') + '</div><h3>Заказов пока нет</h3><p>Выберите фото — первый заказ займёт пару минут.</p><button class="btn btn-primary btn-lg" data-tab="home">Выбрать фото</button></div>';
-    return { html, bind(scr) { scr.querySelectorAll('[data-o]').forEach((b) => { b.onclick = async () => { S.order = S.orders.find((x) => x.id === b.dataset.o); S.events = []; S.evShown = false; S.supportKey = rid(); await loadSupport(); go('order'); }; }); } };
+    return { html, bind(scr) { scr.querySelectorAll('[data-o]').forEach((b) => { b.onclick = () => openOrder(b.dataset.o); }); } };
   };
+  async function openOrder(id) {
+    let o = S.orders.find((x) => x.id === id || x.number === id);
+    if (!o) { await loadOrders(); o = S.orders.find((x) => x.id === id || x.number === id); }
+    if (!o) return toast('Такого заказа в вашей истории нет');
+    S.order = o; S.events = []; S.evShown = false; S.supportKey = rid();
+    S.notes.forEach((n) => { if (n.order === o.id) n.read = true; }); LS.set('pp_notes', S.notes);
+    await loadSupport(); go('order');
+  }
   async function loadSupport() { try { S.support = await call('GET', '/support'); } catch (e) { /* без сети */ } }
   VIEWS.order = () => {
     const o = S.order, mine = S.support.filter((x) => x.order_id === o.id);
@@ -864,7 +918,7 @@
         document.querySelectorAll('[data-human]').forEach((b) => { b.onclick = async () => { try { await call('POST', '/support/' + b.dataset.human + '/human', {}); toast('Позвали сотрудника'); await loadSupport(); rerender(); } catch (e) { toast(e.offline ? 'Нет сети — повторите позже' : e.message); } }; });
         $('#ssend').onclick = async () => {
           const text = $('#sp').value.trim(); if (text.length < 3) { S.err = 'Опишите вопрос хотя бы парой слов'; return rerender(); }
-          const sb = $('#ssend'); sb.disabled = true; sb.textContent = 'Помощник отвечает…'; try { await call('POST', '/support', { order_id: o.id, text, topic: 'Вопрос по заказу ' + o.number }, { headers: { 'Idempotency-Key': S.supportKey } }); S.supportKey = rid(); S.err = ''; toast('Помощник ответил — если мало, позовите сотрудника'); await loadSupport(); rerender(); }
+          const sb = $('#ssend'); sb.disabled = true; sb.textContent = 'Помощник отвечает…'; try { await call('POST', '/support', { order_id: o.id, text, topic: 'Вопрос по заказу ' + o.number }, { headers: { 'Idempotency-Key': S.supportKey } }); S.supportKey = rid(); S.err = ''; wire('Обращение по заказу ' + o.number); toast('Помощник ответил — если мало, позовите сотрудника'); await loadSupport(); rerender(); }
           catch (e) { S.err = e.offline ? 'Нет сети — повторите, когда она появится' : e.message; rerender(); }
         };
       },
@@ -889,12 +943,12 @@
     return `<article class="card tcard"><div class="tcover tone${(t.tone || 0) % 6}">${artOf(prod.kind || 'print')}<span class="chip">${esc(t.occasion)}</span></div>
       <div class="tbody"><h3>${esc(t.title)}</h3><p>${esc(t.desc || '')}</p><small>${esc(meta)}</small>
       <div class="trow"><span class="by">от picPac${t.seed ? '' : ' · новое'}</span><button class="like${t.liked ? ' on' : ''}" data-tl="${t.id}" aria-pressed="${!!t.liked}" aria-label="Нравится">${heart(t.liked)}<span class="num">${t.likes}</span></button></div>
-      <div class="trow"><button class="btn btn-primary" data-tu="${t.id}">Использовать шаблон</button>${pub && !t.seed ? `<button class="btn btn-sm btn-ghost" data-td="${t.id}">Убрать</button>` : ''}</div>
+      <div class="trow"><button class="btn btn-accent" data-tu="${t.id}">Использовать шаблон</button>${pub && !t.seed ? `<button class="btn btn-sm btn-ghost" data-td="${t.id}">Убрать</button>` : ''}</div>
       ${t.uses ? `<small class="uses">Использовали ${t.uses} ${plural(t.uses, 'раз', 'раза', 'раз')}</small>` : ''}</div></article>`;
   }
   function revCard(r, pub) {
     const reply = r.reply ? `<div class="rreply"><b>${esc(r.reply.by)}</b><p>${esc(r.reply.text)}</p></div>` : '';
-    const replyForm = S.soc.openReply === r.id ? `<div class="field"><label for="rp">Ответ покупателю</label><textarea class="textarea" id="rp" rows="2" maxlength="400"></textarea><div class="row2"><button class="btn btn-sm btn-primary" data-rs="${r.id}">Отправить</button><button class="btn btn-sm" data-rc="1">Отмена</button></div></div>` : '';
+    const replyForm = S.soc.openReply === r.id ? `<div class="field"><label for="rp">Ответ покупателю</label><textarea class="textarea" id="rp" rows="2" maxlength="400"></textarea><div class="row2"><button class="btn btn-sm btn-accent" data-rs="${r.id}">Отправить</button><button class="btn btn-sm" data-rc="1">Отмена</button></div></div>` : '';
     const acts = [];
     if (pub && !r.demo) acts.push(`<button class="btn btn-sm btn-ghost" data-ro="${r.id}">${r.reply ? 'Изменить ответ' : 'Ответить'}</button>`, `<button class="btn btn-sm btn-ghost" data-rh="${r.id}">${r.hidden ? 'Показать' : 'Скрыть'}</button>`);
     if (r.mine) acts.push(`<button class="btn btn-sm btn-ghost" data-rd="${r.id}">Удалить</button>`);
@@ -911,7 +965,7 @@
       <div class="field"><label id="rl">Оценка</label><div class="rate" role="radiogroup" aria-labelledby="rl">${[1, 2, 3, 4, 5].map((i) => `<button type="button" role="radio" class="${i <= S.soc.rate ? 'on' : ''}" data-st="${i}" aria-checked="${i === S.soc.rate}" aria-label="${i} из 5">${ICON.star}</button>`).join('')}</div></div>
       <div class="field"><label for="rt">Что понравилось и что можно улучшить</label><textarea class="textarea" id="rt" rows="4" maxlength="600" placeholder="Например: быстро собрала книгу, но хотелось больше шаблонов для календаря"></textarea><small class="muted"><span id="rn">0</span>/600 · без ссылок и контактов</small></div>
       ${S.soc.err ? `<p class="err" role="alert">${esc(S.soc.err)}</p>` : ''}
-      <div class="row2"><button class="btn btn-primary" id="rsend">Опубликовать</button><button class="btn" id="rcancel">Отмена</button></div></div>`;
+      <div class="row2"><button class="btn btn-accent" id="rsend">Опубликовать</button><button class="btn" id="rcancel">Отмена</button></div></div>`;
   }
   function composeTemplate(D) {
     const prods = S.catalog ? S.catalog.products : [], p0 = prods[0] || { variants: [] };
@@ -924,7 +978,7 @@
       <div class="field"><label for="tf">Фото на странице</label><select class="select" id="tf">${[1, 2, 3, 4].map((n) => `<option>${n}</option>`).join('')}</select></div></div>
       <div class="field"><label for="to">Повод</label><select class="select" id="to">${(D.occasions || []).map((o) => `<option>${esc(o)}</option>`).join('')}</select></div>
       ${S.soc.err ? `<p class="err" role="alert">${esc(S.soc.err)}</p>` : ''}
-      <div class="row2"><button class="btn btn-primary" id="tsend">Опубликовать</button><button class="btn" id="tcancel">Отмена</button></div></div>`;
+      <div class="row2"><button class="btn btn-accent" id="tsend">Опубликовать</button><button class="btn" id="tcancel">Отмена</button></div></div>`;
   }
   VIEWS.social = () => {
     const so = S.soc, D = so.data;
@@ -945,7 +999,7 @@
         ${D.reviews.map((r) => revCard(r, pub)).join('')}`;
     }
     return {
-      html: `<section class="hello"><h1>Сообщество picPac</h1><p>Готовые шаблоны от компании и отзывы тех, кто уже заказал.</p></section>${seg}${off}${body}
+      html: `<section class="hello"><h1>Идеи и отзывы</h1><p>Готовые шаблоны от компании и отзывы тех, кто уже заказал.</p></section>${seg}${off}${body}
         <p class="src">Отзывы-примеры помечены. Ссылки и контакты в отзывах не публикуются.</p>`,
       bind(scr) { bindSocial(scr); },
     };
@@ -977,7 +1031,7 @@
     if (rs) rs.onclick = async () => {
       try {
         const r = await call('POST', '/social/reviews', { order_id: $('#ro').value, rating: so.rate, text: $('#rt').value });
-        so.compose = null; so.err = ''; toast(r.mine ? 'Спасибо за отзыв!' : 'Готово'); haptic(true); await loadSocial();
+        so.compose = null; so.err = ''; wire('Отзыв покупателя: оценка ' + (r.rating || so.rate)); toast(r.mine ? 'Спасибо за отзыв!' : 'Готово'); haptic(true); await loadSocial();
       } catch (e) { so.err = e.offline ? 'Нет сети — повторите, когда она появится' : e.message; const keep = $('#rt').value, ord = $('#ro').value; rerender(); $('#rt').value = keep; $('#ro').value = ord; $('#rn').textContent = keep.length; }
     };
     const tp = $('#tp');
@@ -999,24 +1053,255 @@
     step('catalog'); refreshPrice(); toast('Шаблон выбран — добавьте фото'); go('photos');
   }
 
-  VIEWS.profile = () => {
-    const u = S.session ? S.session.user : null, guest = !u || u.role === 'customer' && /^g-/.test(u.id);
+  /* ---------- связь с пультом: что приложение пишет в единый слой событий (панель справа на ноутбуке) ---------- */
+  const STEP_NAME = { catalog: 'каталог', photos: 'выбор фото', layout: 'макет', check: 'проверка', cart: 'корзина' };
+  function wire(text) {
+    const ul = $('#wire'); if (!ul) return;
+    const none = ul.querySelector('.none'); if (none) none.remove();
+    const li = document.createElement('li');
+    li.innerHTML = `<i></i><span>${esc(text)}</span><time>${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>`;
+    ul.prepend(li); while (ul.children.length > 6) ul.lastChild.remove();
+  }
+  function fitBar() { const b = $('#bar'); $('#app').style.setProperty('--bar-h', (b ? b.offsetHeight : 0) + 'px'); }
+
+  /* ---------- уведомления: имитация push о статусе заказа (ТЗ, шаг 7) ---------- */
+  let pushT;
+  function stageNews(o) {
+    if (o.stage_status === 'defect') return 'На этапе нашли брак — переделываем бесплатно, срок может сдвинуться.';
+    return { accepted: 'Заказ принят.', moderation: 'Проверяем макет и фото.', production: 'Заказ ушёл в печать.', quality: 'Напечатали, проверяем качество.',
+      shipped: isPickup(o) ? 'Заказ готов — можно забирать.' : 'Заказ передан в доставку.',
+      done: o.stage_status === 'passed' ? 'Заказ завершён. Спасибо, что выбрали picPac!' : (isPickup(o) ? 'Заказ ждёт вас в пункте выдачи.' : 'Заказ в пути к вам.') }[o.stage] || 'Статус заказа изменился.';
+  }
+  function paintBell() {
+    const b = $('#bell'); if (!b) return; const n = S.notes.filter((x) => !x.read).length;
+    b.innerHTML = ICON.bell + (n ? `<b>${n}</b>` : ''); b.setAttribute('aria-label', 'Уведомления' + (n ? ': новых ' + n : ''));
+  }
+  function notify(title, text, orderId, seen) {
+    S.notes.unshift({ id: rid(), title, text, order: orderId || null, ts: new Date().toISOString(), read: !!seen }); S.notes = S.notes.slice(0, 30); LS.set('pp_notes', S.notes);
+    const el = $('#push');
+    el.innerHTML = `<i aria-hidden="true">p</i><span><small>picPac · сейчас</small><b>${esc(title)}</b><span>${esc(text)}</span></span>`; el.dataset.order = orderId || '';
+    el.classList.add('show'); clearTimeout(pushT); pushT = setTimeout(() => el.classList.remove('show'), 6500);
+    haptic(true); paintBell();
+    if (S.notifyOn && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+      try { new Notification(title, { body: text, icon: '/t2/icon-192.png', tag: orderId || 'picpac' }); } catch (e) { /* на iPhone — только из установленного приложения */ }
+    }
+  }
+  $('#push').onclick = () => { const el = $('#push'), id = el.dataset.order; el.classList.remove('show'); if (id) openOrder(id); else openNotes(); };
+  async function toggleNotify() {
+    if (!S.notifyOn) {
+      if (!('Notification' in window)) { toast('Этот браузер не показывает уведомления на экране — они останутся в приложении', 4000); }
+      else { const p = await Promise.resolve(Notification.requestPermission()).catch(() => 'denied'); if (p !== 'granted') toast('Браузер не разрешил уведомления на экране — они останутся в приложении', 4000); }
+    }
+    S.notifyOn = !S.notifyOn; LS.set('pp_notify', S.notifyOn);
+  }
+  function openNotes() {
+    const old = $('#sheet'); if (old) old.remove();
+    const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet';
+    const list = S.notes.map((n) => `<button class="nitem ${n.read ? '' : 'new'}" data-n="${n.order || ''}"><i></i><span><b>${esc(n.title)}</b><span>${esc(n.text)}</span></span><time>${fdate(n.ts)}</time></button>`).join('');
+    el.innerHTML = `<div class="sheet-bg" data-x></div><div class="sheet-body" role="dialog" aria-label="Уведомления"><b>Уведомления</b>
+      <div class="nlist">${list || '<p class="muted">Пока пусто. Здесь появятся сообщения о заказе: модерация, печать, готовность.</p>'}</div>
+      <button class="allqty" id="nsw" role="switch" aria-checked="${!!S.notifyOn}"><span>Показывать на экране телефона<small class="hint">Когда приложение свёрнуто</small></span><span class="switch"></span></button>
+      <button class="btn btn-accent btn-lg" data-x>Готово</button></div>`;
+    $('.app').appendChild(el);
+    S.notes.forEach((n) => { n.read = true; }); LS.set('pp_notes', S.notes); paintBell();
+    el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = () => el.remove(); });
+    el.querySelectorAll('[data-n]').forEach((b) => { b.onclick = () => { el.remove(); if (b.dataset.n) openOrder(b.dataset.n); }; });
+    $('#nsw').onclick = async () => { await toggleNotify(); $('#nsw').setAttribute('aria-checked', !!S.notifyOn); };
+  }
+  setInterval(() => {                        // пока приложение открыто, следим за активными заказами и новыми фото в общем альбоме
+    if (!S.session || !S.online) return;
+    if (S.view === 'photos' && S.draft && S.draft.shareToken) loadInbox();
+    if (S.view === 'order' || S.view === 'done') return;               // на экране заказа он опрашивается сам
+    if (S.orders.some((o) => !(o.stage === 'done' && o.stage_status === 'passed'))) loadOrders();
+  }, 7000);
+
+  /* ---------- файлы, которые не подошли: причина остаётся на экране, пока человек её не прочитает ---------- */
+  function rejectsHtml() {
+    const R = S.rejects; if (!R || !R.length) return '';
+    return `<div class="rejects" role="alert"><b>${R.length} ${plural(R.length, 'файл не добавлен', 'файла не добавлены', 'файлов не добавлены')}</b>
+      <ul>${R.slice(0, 6).map((r) => `<li><span><b style="color:inherit;font-size:inherit">${esc(r.name)}</b> — ${esc(r.why)}</span></li>`).join('')}</ul>${R.length > 6 ? `<span>и ещё ${R.length - 6}</span>` : ''}
+      <div class="row2"><label class="btn btn-sm" for="file">Выбрать другие</label><button class="btn btn-sm btn-ghost" id="rjx">Понятно</button></div></div>`;
+  }
+
+  /* ---------- подсказки «Для вас»: по вашим фото, заказам и времени года (правила, без модели) ---------- */
+  const leadOf = (id) => { const p = prodOf(id); return p ? (p.lead_days[0] === p.lead_days[1] ? p.lead_days[0] : p.lead_days[0] + '–' + p.lead_days[1]) + ' дн.' : ''; };
+  function recs() {
+    if (!S.catalog) return [];
+    const out = [], m = new Date().getMonth(), n = S.pool.length, last = S.orders[0], has = (id) => !!prodOf(id);
+    const add = (tag, title, why, act, go) => { if (out.length < 4) out.push({ tag, title, why, act, go }); };
+    if (n >= 20 && has('book')) add('Ваши фото', 'Фотокнига из ' + n + ' ваших фото', 'Хватит на книгу в 20 страниц. Раскладку соберём сами, вы только поправите.', 'pool:book:classic', 'Собрать книгу');
+    else if (n >= 12 && has('calendar')) add('Ваши фото', 'Календарь из ваших фото', 'В «Моих фото» ' + n + ' ' + plural(n, 'кадр', 'кадра', 'кадров') + ' — по одному на каждый месяц.', 'pool:calendar:wall', 'Собрать календарь');
+    else if (n >= 1 && has('print')) add('Ваши фото', 'Напечатать ' + n + ' фото 10×15', 'Они уже в «Моих фото»: осталось проверить и заказать.', 'pool:print:10x15', 'Напечатать');
+    if ((m >= 9 || m === 0) && has('calendar')) add('К Новому году', 'Календарь на 2027 год', 'Двенадцать ваших кадров на стену. Изготовление ' + leadOf('calendar'), 'prod:calendar:wall', 'Выбрать');
+    else if (m >= 3 && m <= 5 && has('book')) add('Сезон выпускных', 'Выпускной альбом', 'Соберите класс в одну книгу. Изготовление ' + leadOf('book'), 'prod:book:classic', 'Выбрать');
+    else if (m >= 6 && m <= 8 && has('book')) add('После отпуска', 'Книга о путешествии', 'Пока кадры свежие. Изготовление ' + leadOf('book'), 'prod:book:classic', 'Выбрать');
+    else if (has('canvas')) add('Подарок', 'Холст на стену', 'Один любимый кадр крупно. Изготовление ' + leadOf('canvas'), 'prod:canvas:30x40', 'Выбрать');
+    if (last) {
+      const k = (prodOf((last.items || [])[0] && last.items[0].product) || {}).kind;
+      if (k === 'book' && has('magnet')) add('После заказа ' + last.number, 'Магниты из тех же кадров', 'К фотокниге часто берут магниты — в подарок близким.', 'prod:magnet:10x10', 'Выбрать');
+      else if (has('book')) add('После заказа ' + last.number, 'Соберите фотокнигу', 'Отдельные отпечатки теряются, книга сохранит их вместе.', 'prod:book:classic', 'Выбрать');
+    } else add('Первый заказ', 'Промокод WELCOME5', 'Минус 5 BYN на заказ от 30 BYN. Подставим в корзине сами.', 'promo:WELCOME5', 'Применить');
+    return out;
+  }
+  function recsHtml() {
+    const R = recs(); if (!R.length) return '';
+    return `<p class="sec-t">Для вас</p><div class="recs" role="list">${R.map((r, i) => `<button class="card-flat rec" role="listitem" data-rec="${i}"><span class="chip chip-accent">${esc(r.tag)}</span><b>${esc(r.title)}</b><span>${esc(r.why)}</span><em>${esc(r.go)} →</em></button>`).join('')}</div>`;
+  }
+  function applyPromo(code) {
+    S.promoPending = String(code).toUpperCase().slice(0, 30); S.promoOpen = true;
+    if (S.draft) { S.draft.promo = S.promoPending; saveDraft(); }
+    toast('Промокод ' + S.promoPending + ' подставим в корзине');
+  }
+  function runRec(act) { const [k, a, b] = act.split(':'); if (k === 'prod') openProduct(a, b); else if (k === 'pool') printFromPool(a, b, true); else if (k === 'promo') applyPromo(a); }
+
+  /* ---------- совместный альбом (ТЗ 6.5): владелец даёт ссылку, близкие присылают фото, он решает, какие взять ---------- */
+  function shareHtml() {
+    const d = S.draft; if (!d) return '';
+    const url = d.shareToken ? location.origin + '/t2/?join=' + d.shareToken : '';
+    return `<section class="card share" aria-label="Совместный альбом"><header><span class="ai-ava">${ICON.people}</span><b>Совместный альбом</b></header>
+      ${url ? `<p>Отправьте ссылку близким. Их фото придут сюда, а вы решите, какие взять.</p>
+        <div class="link"><input class="input" id="shurl" readonly value="${esc(url)}" aria-label="Ссылка на альбом"><button class="btn btn-accent" id="shcopy">Скопировать</button></div>
+        <button class="btn btn-sm btn-ghost" id="shoff">Закрыть доступ по ссылке</button>`
+      : `<p>Пусть родные добавят свои кадры: вы отправляете ссылку, они загружают фото со своего телефона.</p><button class="btn" id="shon">${ICON.link} Пригласить по ссылке</button>`}</section>`;
+  }
+  function inboxHtml() {
+    const I = S.inbox; if (!I.length || !S.draft) return '';
+    const who = Array.from(new Set(I.map((x) => x.by || 'Гость'))).join(', ');
+    return `<div class="warnbox inbox" role="status"><span><b>${esc(who)}</b>: ${I.length} ${plural(I.length, 'новое фото', 'новых фото', 'новых фото')} в альбом</span><span><button class="btn btn-sm btn-accent" id="inok">Взять</button><button class="btn btn-sm btn-ghost" id="inno">Не брать</button></span></div>`;
+  }
+  async function loadInbox() {
+    const d = S.draft; if (!d || !d.shareToken || !S.online) return;
+    try {
+      const r = await call('GET', '/projects/' + d.id + '/inbox'), ch = r.inbox.length !== S.inbox.length; S.inbox = r.inbox;
+      if (ch && S.view === 'photos' && !$('#sheet') && !S.busy) { if (r.inbox.length) haptic(true); rerender(); }
+    } catch (e) { /* проверим в следующий раз */ }
+  }
+  function bindShare() {
+    const d = S.draft, on = $('#shon'), cp = $('#shcopy'), off = $('#shoff'), ok = $('#inok'), no = $('#inno');
+    if (on) on.onclick = async () => {
+      on.disabled = true;
+      try { await syncDraftNow().catch(() => { }); const r = await call('POST', '/projects/' + d.id + '/share', {}); d.shareToken = r.token; LS.set('pp_draft', d); wire('Открыт общий альбом по ссылке'); rerender(); }
+      catch (e) { on.disabled = false; toast(e.offline ? 'Нет сети — ссылку можно создать, когда она появится' : e.message); }
+    };
+    if (cp) cp.onclick = async () => {
+      const url = $('#shurl').value;
+      try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована — отправьте её близким'); }
+      catch (e) { $('#shurl').focus(); $('#shurl').select(); toast('Скопируйте ссылку из поля'); }
+    };
+    if (off) off.onclick = async () => {
+      try { await call('POST', '/projects/' + d.id + '/share', { off: true }); d.shareToken = null; S.inbox = []; LS.set('pp_draft', d); toast('Ссылка больше не работает'); rerender(); }
+      catch (e) { toast(e.offline ? 'Нет сети — повторите позже' : e.message); }
+    };
+    if (ok) ok.onclick = takeInbox;
+    if (no) no.onclick = () => { const ids = S.inbox.map((x) => x.id); S.inbox = []; rerender(); call('POST', '/projects/' + d.id + '/inbox/clear', { ids }).catch(() => { }); };
+  }
+  async function takeInbox() {
+    const d = S.draft, I = S.inbox.slice(), files = []; S.inbox = [];
+    S.busy = { done: 0, total: I.length, title: 'Забираю фото из общего альбома', note: 'Потом проверю их так же, как ваши' }; rerender();
+    for (const x of I) {
+      try { const b = await call('GET', '/photos/' + x.id, undefined, { blob: true }); if (b) files.push(new File([b], x.name || 'Фото.jpg', { type: b.type || 'image/jpeg' })); } catch (e) { /* пропустим этот кадр */ }
+      S.busy.done++; renderBusy();
+    }
+    S.busy = null;
+    const by = (I[0] && I[0].by) || 'Гость';
+    if (files.length) await addFiles(files, false, by); else rerender();
+    call('POST', '/projects/' + d.id + '/inbox/clear', { ids: I.map((x) => x.id) }).catch(() => { });
+    if (files.length) toast('Добавили ' + files.length + ' фото от: ' + by);
+  }
+  /* приглашённый: открыл ссылку ?join=…, выбрал фото — они уходят владельцу альбома */
+  async function joinAlbum(token) {
+    S.join = { token, info: null, err: '', sent: 0, name: (S.form.name || '') };
+    S.stack = []; go('join', true);
+    try { S.join.info = await call('GET', '/shared/' + encodeURIComponent(token)); }
+    catch (e) { S.join.err = e.offline ? 'Нет сети. Откройте ссылку ещё раз, когда она появится.' : 'Ссылка больше не работает: владелец закрыл доступ к альбому.'; }
+    if (S.view === 'join') rerender();
+  }
+  VIEWS.join = () => {
+    const J = S.join || { err: 'Ссылка на альбом не открыта.' }, I = J.info;
+    if (J.err) return { html: `<div class="empty"><h3>Альбом недоступен</h3><p>${esc(J.err)}</p><button class="btn btn-accent btn-lg" data-tab="home">В каталог</button></div>`, bind() { } };
+    if (!I) return { html: `<div class="loading"><div class="ai-ava">${ICON.people}</div><p>Открываю альбом…</p></div>`, bind() { } };
     return {
-      html: `<div class="card-flat prof"><span class="avatar" aria-hidden="true">${esc((u && !guest ? u.name : 'Г')[0])}</span><div><b>${esc(u ? (guest ? 'Гость' : u.name) : '')}</b><p class="muted">${guest ? 'Вы вошли гостем. Заказы привязаны к этому телефону.' : esc(u ? u.title : '')}</p></div></div>
+      html: `<section class="hello"><h1>Вас позвали в общий альбом</h1><p>${esc(I.owner)} собирает «${esc(I.title)}». Добавьте свои фото — владелец альбома решит, какие взять в печать.</p></section>
+        ${rejectsHtml()}${J.sent ? `<div class="warnbox inbox" role="status"><span>Отправлено: <b>${J.sent}</b> фото. Можно добавить ещё.</span></div>` : ''}
+        <div class="field"><label for="jn">Ваше имя</label><input class="input" id="jn" maxlength="30" value="${esc(J.name)}" placeholder="Чтобы было понятно, от кого фото" autocomplete="given-name"></div>
+        <div class="pick"><label class="btn btn-primary btn-xl" for="file">${ICON.photos} Выбрать фото</label><button class="btn btn-lg" id="jdemo">Тестовые кадры · 4 шт.</button></div>
+        <div class="trust"><div>${ICON.ok} Принимаем JPEG и PNG до 25 МБ</div><div>${ICON.ok} Фото увидит только владелец альбома</div><div>${ICON.ok} В заказ они попадут после его согласия</div></div>`,
+      bar: `<button class="btn btn-lg" id="jhome">Перейти в каталог</button>`,
+      bind() {
+        $('#jn').oninput = (e) => { J.name = e.target.value; };
+        $('#jdemo').onclick = joinDemo; $('#jhome').onclick = () => { S.stack = []; go('home', true); };
+        $('#file').accept = 'image/jpeg,image/png';
+      },
+    };
+  };
+  async function joinUpload(files) {
+    const J = S.join, rej = []; files = Array.from(files); let ok = 0;
+    S.busy = { done: 0, total: files.length, title: 'Отправляю фото в альбом', note: 'Владелец альбома увидит их у себя' }; rerender();
+    for (const f of files) {
+      if (!okType(f)) rej.push({ name: f.name || 'Файл', why: 'формат не поддерживается: нужен JPEG или PNG' });
+      else if (f.size > 25 * 1024 * 1024) rej.push({ name: f.name, why: 'файл больше 25 МБ: уменьшите его или выберите другой' });
+      else {
+        try {
+          await call('POST', '/shared/' + encodeURIComponent(J.token) + '/photos', undefined, { raw: f, headers: { 'Content-Type': f.type || 'image/jpeg', 'X-File-Name': encodeURIComponent(f.name || ''), 'X-Author': encodeURIComponent((J.name || '').trim()) } });
+          ok++;
+        } catch (e) { rej.push({ name: f.name || 'Файл', why: e.offline ? 'нет сети — попробуйте ещё раз' : e.message }); }
+      }
+      S.busy.done++; renderBusy();
+    }
+    S.busy = null; S.rejects = rej; J.sent += ok;
+    if (ok) { toast('Отправили в альбом: ' + ok + ' фото'); haptic(true); wire('Фото в общий альбом: ' + ok); }
+    rerender();
+  }
+  async function joinDemo() {
+    const D = window.DemoGallery, files = [];
+    for (const [scene, seed, size] of D.DEMO.filter((x) => !x[3]).slice(0, 4)) {
+      const c = D.render1(scene, seed, size), big = document.createElement('canvas'); big.width = c.width * 3; big.height = c.height * 3;
+      const bx = big.getContext('2d'); bx.imageSmoothingQuality = 'high'; bx.drawImage(c, 0, 0, big.width, big.height);
+      files.push(new File([await new Promise((r) => big.toBlob(r, 'image/jpeg', 0.82))], D.NAMES[scene] + '.jpg', { type: 'image/jpeg' }));
+    }
+    joinUpload(files);
+  }
+
+  /* ---------- ссылки внутрь приложения (ТЗ 6.5): ?product=book&variant=premium · ?promo=PICPAC10 · ?order=PP-1001 · ?tpl=<id> · ?tab=orders · ?join=<код> ---------- */
+  function deepLink() {
+    const q = params, keys = ['promo', 'join', 'product', 'variant', 'tpl', 'order', 'tab'];
+    if (!keys.some((k) => q.has(k))) return;
+    try { history.replaceState(null, '', location.pathname); } catch (e) { /* не страшно: ссылка просто сработает ещё раз */ }
+    if (q.get('promo')) applyPromo(q.get('promo'));
+    if (q.get('join')) return joinAlbum(q.get('join'));
+    if (q.get('product')) { if (prodOf(q.get('product'))) openProduct(q.get('product'), q.get('variant')); else toast('Такого продукта в каталоге нет'); return; }
+    if (q.get('tpl')) { S.stack = []; go('social', true); loadSocial().then(() => { const t = S.soc.data && S.soc.data.templates.find((x) => x.id === q.get('tpl')); if (t) useTemplate(t); else toast('Шаблон не найден'); }); return; }
+    if (q.get('order')) { S.stack = []; go('orders', true); openOrder(q.get('order')); return; }
+    if (TABS.includes(q.get('tab'))) { S.stack = []; go(q.get('tab'), true); }
+  }
+
+  VIEWS.profile = () => {
+    const u = S.session ? S.session.user : null, guest = !u || u.role === 'customer' && /^g-/.test(u.id), staff = !!u && u.role !== 'customer';
+    const row = (href, key, title, sub) => `<a href="${href}" data-go="${key}"><span>${title}<small>${sub}</small></span>${ICON.back}</a>`;
+    return {
+      html: `<div class="card prof"><span class="avatar" aria-hidden="true">${esc((u && !guest ? u.name : 'Г')[0])}</span><div><b>${esc(u ? (guest ? 'Гость' : u.name) : '')}</b><p class="muted">${guest ? 'Заказы привязаны к этому телефону. Войдите — и они перейдут в вашу учётную запись.' : esc(u ? u.title : '')}</p></div></div>
         ${guest ? `<form id="lf" class="form"><p class="sec-t">Войти в учётную запись</p><div class="field"><label for="lg">Логин</label><input class="input" id="lg" value="client" autocomplete="username"></div>
-          <div class="field"><label for="pw">Пароль</label><input class="input" id="pw" type="password" placeholder="demo2026" autocomplete="current-password"></div>${S.err ? `<p class="err" role="alert">${esc(S.err)}</p>` : ''}<button class="btn btn-xl" type="submit">Войти</button></form>` : ''}
+          <div class="field"><label for="pw">Пароль</label><input class="input" id="pw" type="password" placeholder="demo2026" autocomplete="current-password"></div>${S.err ? `<p class="err" role="alert">${esc(S.err)}</p>` : ''}<button class="btn btn-accent btn-xl" type="submit">Войти</button></form>` : ''}
+        ${staff ? `<p class="sec-t">Рабочие экраны</p><div class="card-flat rows">${row('/t1/', 'fp-token', 'Пульт руководителя', 'Показатели, воронка приложения, решения')}${row('/t2/admin.html', 'pp_staff', 'Экран участка', 'Очередь заказов: принял, сдал, брак')}${['director', 'head', 'analyst'].includes(u.role) ? row('/t2/analytics.html', 'pp_dir', 'Аналитика приложения', 'Заказы, воронка, отзывы') : ''}</div>` : ''}
+        <p class="sec-t">Уведомления</p>
+        <div class="card-flat rows"><button id="pn" role="switch" aria-checked="${!!S.notifyOn}"><span>Статус заказа на экране телефона<small>Модерация, печать, готовность. В приложении они видны всегда</small></span><span class="switch"></span></button></div>
         <p class="sec-t">Данные</p>
         <div class="inset">Мы храним ваши фото и заказы, пока вы их не удалите. Заказы остаются для учёта без имени, телефона и адреса.</div>
-        <button class="btn btn-lg" id="del" style="color:var(--bad)">Удалить мои фото и данные</button>
-        <button class="btn btn-ghost" id="out">Выйти</button>`,
-      bind() {
-        const lf = $('#lf'); if (lf) lf.onsubmit = async (e) => { e.preventDefault(); try { await loginAs($('#lg').value.trim(), $('#pw').value); S.err = ''; toast('Вы вошли'); syncSoon(); rerender(); } catch (er) { S.err = er.message; rerender(); } };
-        $('#out').onclick = () => { S.session = null; LS.del('pp_session'); S.orders = []; go('login', true); };
+        <button class="btn btn-lg btn-danger" id="del">Удалить мои фото и данные</button>
+        <button class="btn btn-ghost" id="out">Выйти</button>
+        <p class="src" style="text-align:center">Тестовый стенд: данные выдуманные, деньги не списываются.</p>`,
+      bind(scr) {
+        const lf = $('#lf'); if (lf) lf.onsubmit = async (e) => { e.preventDefault(); try { await loginAs($('#lg').value.trim(), $('#pw').value); S.err = ''; toast('Вы вошли'); syncSoon(); loadOrders(); rerender(); } catch (er) { S.err = er.message; rerender(); } };
+        // сотрудник переходит в пульт или на экран участка без повторного входа: та же сессия, права всё равно проверяет сервер
+        scr.querySelectorAll('[data-go]').forEach((a) => { a.onclick = () => { try { sessionStorage.setItem(a.dataset.go, S.session.token); } catch (e) { /* войдёт там заново */ } }; });
+        $('#pn').onclick = async () => { await toggleNotify(); rerender(); };
+        $('#out').onclick = () => { S.session = null; LS.del('pp_session'); S.orders = []; S.notes = []; LS.del('pp_notes'); go('login', true); };
         $('#del').onclick = async () => {
           if (!confirm('Удалить все ваши фото, черновики и обращения? Это нельзя отменить.')) return;
           try {
             const r = await call('POST', '/account/delete', { confirm: true });
             if (S.draft) S.draft.photos.forEach((p) => { IDB.del('blobs', p.id); IDB.del('thumbs', p.id); });
+            S.pool.forEach((p) => { IDB.del('blobs', p.id); IDB.del('thumbs', p.id); }); S.pool = []; LS.del('pp_pool'); S.notes = []; LS.del('pp_notes');
             S.draft = null; LS.del('pp_draft'); LS.del('pp_outbox'); LS.del('pp_orders'); S.outbox = null; S.orders = []; S.thumbs = {};
             toast('Удалено: фото ' + r.photos_deleted); if (r.account_removed) { S.session = null; LS.del('pp_session'); go('login', true); } else { S.stack = []; go('home', true); }
           } catch (e) { toast(e.offline ? 'Нет сети — удалить можно, когда она появится' : e.message); }
@@ -1044,7 +1329,7 @@
     makeArt();
     go('home', true); syncSoon(); flushOutbox(); step('catalog');
   }
-  $('#file').addEventListener('change', (e) => { const f = e.target.files; if (f && f.length) { if (S.view === 'feed' || S.view === 'home') { if (S.view === 'home') { S.stack = []; go('feed', true); } addFiles(f, true); } else { if (S.view !== 'photos' && S.view !== 'check') { if (!S.draft) S.draft = newDraft(prodOf('print')); go('photos'); } addFiles(f); } } e.target.value = ''; });
+  $('#file').addEventListener('change', (e) => { const f = e.target.files; if (f && f.length) { if (S.view === 'join') joinUpload(f); else if (S.view === 'feed' || S.view === 'home') { if (S.view === 'home') { S.stack = []; go('feed', true); } addFiles(f, true); } else { if (S.view !== 'photos' && S.view !== 'check') { if (!S.draft) S.draft = newDraft(prodOf('print')); go('photos'); } addFiles(f); } } e.target.value = ''; });
   $('#screen').addEventListener('scroll', (e) => { $('#head').classList.toggle('scrolled', e.target.scrollTop > 4); }, { passive: true });
   setInterval(() => {
     const el = $('#sideTimer'), note = $('#sideTimerNote'); if (!el) return;
@@ -1059,5 +1344,6 @@
     if (!S.session) { try { await loginGuest(); } catch (e) { await loadCatalog(); go('login', true); return; } }
     await startApp();
     if (params.get('demo') === '1' && !S.draft) { openProduct('print'); go('photos'); addDemo(false); }
+    else deepLink();
   })();
 })();

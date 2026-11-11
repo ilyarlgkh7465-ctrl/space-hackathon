@@ -293,6 +293,53 @@ class Api(unittest.TestCase):
         self.assertEqual(self.call("POST", "/api/app/ai/layout", {"instruction": "ok", "layout": lay, "photos": photos}, self.client)[0], 400)
 
     # ---- удаление данных (МП-06)
+    def test_guest_claim_moves_data(self):
+        """Гость сделал черновик и заказ, потом вошёл: всё переходит к учётной записи (шаг 1 пути из ТЗ)."""
+        g = self.call("POST", "/api/app/guest")[1]["token"]
+        c, ph = self.call("POST", "/api/app/photos", token=g, raw=png(1300, 1900), headers={"Content-Type": "image/png", "X-Photo-Id": "claim-1"})
+        self.assertEqual(c, 200, ph)
+        photo = {"id": "claim-1", "w": 1300, "h": 1900, "qty": 1}
+        self.call("POST", "/api/app/projects/pr-claim", {"product": "print", "variant": "10x15", "photos": [photo]}, token=g)
+        c, o = self.call("POST", "/api/app/orders", {"project_id": "pr-claim", "accept_warnings": True, "delivery": {"id": "pickup", "point": "center"},
+                                                     "contact": {"name": "Гость", "phone": "+375290000000"}}, token=g, headers={"Idempotency-Key": "claim-k1"})
+        self.assertEqual(c, 201, o)
+        me = self.login("client")
+        self.assertEqual(self.call("POST", "/api/app/claim", {"guest_token": "нет такого"}, token=me)[0], 404)
+        self.assertEqual(self.call("POST", "/api/app/claim", {"guest_token": me}, token=g)[0], 403)        # гость не может забрать чужое
+        c, r = self.call("POST", "/api/app/claim", {"guest_token": g}, token=me)
+        self.assertEqual(c, 200, r)
+        self.assertEqual((r["orders"], r["projects"], r["photos"]), (1, 1, 1))
+        self.assertIn(o["id"], [x["id"] for x in self.call("GET", "/api/app/orders", token=me)[1]])
+        self.assertEqual(self.call("GET", "/api/app/projects/pr-claim", token=me)[0], 200)
+        self.assertEqual(self.call("GET", "/api/app/photos/claim-1", token=me)[0], 200)
+        self.assertEqual(self.call("GET", "/api/app/orders", token=g)[0], 401)                             # гостевая сессия закрыта
+
+    def test_shared_album(self):
+        """Совместный альбом: ссылка, загрузка приглашённым, разбор владельцем, закрытие доступа."""
+        own = self.call("POST", "/api/app/guest")[1]["token"]
+        friend = self.call("POST", "/api/app/guest")[1]["token"]
+        self.call("POST", "/api/app/projects/pr-share", {"product": "book", "variant": "classic", "title": "Наш альбом", "photos": []}, token=own)
+        self.assertEqual(self.call("POST", "/api/app/projects/pr-share/share", {}, token=friend)[0], 404)   # чужой проект
+        c, r = self.call("POST", "/api/app/projects/pr-share/share", {}, token=own)
+        self.assertEqual(c, 200, r)
+        tok = r["token"]
+        c, info = self.call("GET", "/api/app/shared/" + tok)
+        self.assertEqual((c, info["title"]), (200, "Наш альбом"))
+        self.assertNotIn("photos", info)
+        self.assertEqual(self.call("POST", "/api/app/shared/" + tok + "/photos", raw=b"GIF89a" + b"0" * 64, token=friend, headers={"Content-Type": "image/gif"})[0], 415)
+        c, up = self.call("POST", "/api/app/shared/" + tok + "/photos", raw=png(1300, 1900), token=friend,
+                          headers={"Content-Type": "image/png", "X-Author": "%D0%90%D0%BD%D0%BD%D0%B0"})
+        self.assertEqual(c, 201, up)
+        self.assertEqual(self.call("GET", "/api/app/photos/" + up["id"], token=friend)[0], 404)             # приглашённый не читает альбом
+        self.assertEqual(self.call("GET", "/api/app/projects/pr-share/inbox", token=friend)[0], 404)
+        inbox = self.call("GET", "/api/app/projects/pr-share/inbox", token=own)[1]["inbox"]
+        self.assertEqual([(x["id"], x["by"]) for x in inbox], [(up["id"], "Анна")])
+        self.assertEqual(self.call("GET", "/api/app/photos/" + up["id"], token=own)[0], 200)
+        self.assertEqual(self.call("POST", "/api/app/projects/pr-share/inbox/clear", {"ids": [up["id"]]}, token=own)[1]["left"], 0)
+        self.assertEqual(self.call("GET", "/api/app/photos/" + up["id"], token=own)[0], 404)
+        self.call("POST", "/api/app/projects/pr-share/share", {"off": True}, token=own)
+        self.assertEqual(self.call("GET", "/api/app/shared/" + tok)[0], 404)
+
     def test_delete_account(self):
         t = self.call("POST", "/api/app/guest")[1]["token"]
         self.call("POST", "/api/app/photos", token=t, raw=png(800, 600))

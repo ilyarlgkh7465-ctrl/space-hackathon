@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+from urllib.parse import unquote
 
 CUR = "BYN"
 MAX_PHOTO = 25 * 1024 * 1024          # 25 МБ на файл
@@ -404,6 +405,24 @@ def _route(h, method, path, core):
     if p == "account/delete" and method == "POST":
         return _account_delete(h, core, me())
 
+    # --- гость вошёл в учётную запись: его данные переходят к ней
+    if p == "claim" and method == "POST":
+        return _claim(h, core, me())
+
+    # --- совместный альбом: владелец открывает ссылку, близкие присылают фото
+    if len(parts) == 3 and parts[0] == "projects" and parts[2] == "share" and method == "POST":
+        return _share_toggle(h, core, me(), parts[1])
+    if len(parts) == 3 and parts[0] == "projects" and parts[2] == "inbox" and method == "GET":
+        u = me()
+        h._json({"inbox": _find(core.load("projects"), parts[1], u).get("inbox") or []})
+        return True
+    if len(parts) == 4 and parts[0] == "projects" and parts[2:] == ["inbox", "clear"] and method == "POST":
+        return _inbox_clear(h, core, me(), parts[1])
+    if len(parts) == 2 and parts[0] == "shared" and method == "GET":
+        return _shared_info(h, core, parts[1])
+    if len(parts) == 3 and parts[0] == "shared" and parts[2] == "photos" and method == "POST":
+        return _shared_upload(h, core, me(), parts[1])
+
     # --- соцсеть: отзывы покупателей и шаблоны от компании
     if parts and parts[0] == "social" and _social_route(h, method, parts[1:], core):
         return True
@@ -483,7 +502,9 @@ def _guest(h, core):
 
 # ---------------------------------------------------------------- проекты (черновики)
 def _project_view(pr):
-    return {k: v for k, v in pr.items() if k != "user"}
+    out = {k: v for k, v in pr.items() if k not in ("user", "inbox", "share")}
+    out["share_token"] = (pr.get("share") or {}).get("token")      # ссылка на общий альбом — только владельцу
+    return out
 
 
 def _clean_photos(photos, owned):
@@ -627,6 +648,162 @@ def _photo_delete(h, core, user, pid):
         core.save("uploads_meta", [x for x in meta if x is not rec])
     core.audit(user["name"], "удалил фото", pid, obj="photo " + pid)
     h._json({"ok": True})
+    return True
+
+
+# ---------------------------------------------------------------- гость → учётная запись
+def _claim(h, core, user):
+    """ТЗ, шаг 1: «гостевой режим с последующей идентификацией». Гость вошёл под своей учётной записью —
+    его черновики, фото, заказы, обращения и отзывы переходят к ней. Нужны обе сессии: новая (заголовок) и гостевая (в теле)."""
+    tok = str(h._body().get("guest_token") or "")
+    if user.get("role") != "customer" or str(user["id"]).startswith("g-"):
+        core.audit(user["name"], "перенос данных гостя", "", obj="user " + user["id"], result="отказ")
+        raise Bad("Перенос доступен только учётной записи клиента", 403)
+    with core.lock:
+        s = next((x for x in core.load("sessions") if x.get("token") == tok), None) if tok else None
+        gid = s.get("user") if s else None
+        users = core.load("users")
+        if not gid or not any(x.get("id") == gid and x.get("guest") for x in users):
+            raise Bad("Гостевая сессия не найдена", 404)
+        n = {"orders": 0, "projects": 0, "photos": 0, "support": 0}
+        orders = core.load("orders")
+        for o in orders:
+            if o.get("customer_id") == gid:
+                o["customer_id"] = user["id"]
+                n["orders"] += 1
+        core.save("orders", orders)
+        projects = core.load("projects")
+        for x in projects:
+            if x.get("user") == gid:
+                x["user"] = user["id"]
+                n["projects"] += 1
+        core.save("projects", projects)
+        ints = core.load("interactions")
+        for x in ints:
+            if x.get("customer_id") == gid:
+                x["customer_id"] = user["id"]
+                n["support"] += 1
+        core.save("interactions", ints)
+        revs = core.load("reviews")
+        for x in revs:
+            if x.get("user") == gid:
+                x["user"] = user["id"]
+        core.save("reviews", revs)
+        meta = core.load("uploads_meta")
+        src, dst = _upload_dir(core, {"id": gid}), _upload_dir(core, user)
+        taken = {x["id"] for x in meta if x.get("user") == user["id"]}
+        for x in meta:
+            if x.get("user") == gid and x["id"] not in taken:
+                f = src / (x["id"] + "." + x["fmt"])
+                if f.exists():
+                    shutil.move(str(f), str(dst / f.name))
+                x["user"] = user["id"]
+                n["photos"] += 1
+        core.save("uploads_meta", [x for x in meta if x.get("user") != gid])
+        shutil.rmtree(src, ignore_errors=True)
+        core.save("users", [x for x in users if x.get("id") != gid])
+        core.save("sessions", [x for x in core.load("sessions") if x.get("user") != gid])
+    core.audit(user["name"], "перенёс данные гостя", "заказов %(orders)d, черновиков %(projects)d, фото %(photos)d, обращений %(support)d" % n,
+               obj="user " + gid)
+    h._json(dict(n, ok=True))
+    return True
+
+
+# ---------------------------------------------------------------- совместный альбом (ТЗ 6.5)
+INBOX_MAX = 60                                                  # сколько присланных фото ждёт решения владельца
+
+
+def _share_toggle(h, core, user, pid):
+    off = bool(h._body().get("off"))
+    with core.lock:
+        items = core.load("projects")
+        pr = next((x for x in items if x.get("id") == pid and x.get("user") == user["id"]), None)
+        if not pr:
+            raise Bad("Черновик ещё не сохранён на сервере — нужна сеть", 404)
+        if off:
+            pr.pop("share", None)
+        elif not pr.get("share"):
+            pr["share"] = {"token": uuid.uuid4().hex[:20], "ts": core.now()}
+        core.save("projects", items)
+    core.audit(user["name"], "закрыл общий альбом" if off else "открыл общий альбом по ссылке", "", obj="project " + pid)
+    h._json({"token": (pr.get("share") or {}).get("token")})
+    return True
+
+
+def _shared_project(items, token):
+    ok = re.fullmatch(r"[0-9a-f]{20}", token or "")
+    pr = next((x for x in items if (x.get("share") or {}).get("token") == token), None) if ok else None
+    if not pr:
+        raise Bad("Ссылка не работает: владелец закрыл доступ к альбому", 404)
+    return pr
+
+
+def _shared_info(h, core, token):
+    """Что видит приглашённый: только название альбома и имя владельца. Ни фото, ни заказов."""
+    pr = _shared_project(core.load("projects"), token)
+    owner = next((u for u in core.load("users") if u.get("id") == pr.get("user")), {})
+    h._json({"title": pr.get("title") or PROD[pr["product"]]["name"], "product": PROD[pr["product"]]["name"],
+             "owner": "Гость" if owner.get("guest") else str(owner.get("name") or "Клиент").split(" ")[0]})
+    return True
+
+
+def _shared_upload(h, core, user, token):
+    n = int(h.headers.get("Content-Length") or 0)
+    if n <= 0:
+        raise Bad("Файл пустой")
+    if n > MAX_PHOTO:
+        raise Bad("Файл больше %d МБ — уменьшите его или выберите другой" % (MAX_PHOTO // 1024 // 1024), 413)
+    raw = h.rfile.read(n)
+    info = image_info(raw[:200000])
+    if not info:
+        raise Bad("Принимаем только JPEG и PNG. Если снимок в формате HEIC — сохраните его как JPEG.", 415)
+    fmt, w, hgt = info
+    if min(w, hgt) and min(w, hgt) < 400:
+        raise Bad("Фото слишком маленькое (%d×%d). Нужно хотя бы 400 пикселей по короткой стороне." % (w, hgt), 422)
+    clean = lambda v, k: re.sub(r"[^\w.\- а-яА-ЯёЁ]", "", unquote(v or "")).strip()[:k]
+    name = clean(h.headers.get("X-File-Name"), 80)
+    by = clean(h.headers.get("X-Author"), 30) or ("Гость" if str(user["id"]).startswith("g-") else str(user.get("name") or "Гость").split(" ")[0])
+    pid = _new_id("sh-")
+    with core.lock:
+        items = core.load("projects")
+        pr = _shared_project(items, token)
+        inbox = pr.setdefault("inbox", [])
+        if len(inbox) >= INBOX_MAX:
+            raise Bad("В альбоме уже много новых фото — подождите, пока владелец их разберёт", 429)
+        meta = core.load("uploads_meta")
+        if sum(1 for x in meta if x.get("user") == pr["user"]) >= MAX_PHOTOS_USER:
+            raise Bad("В альбоме не осталось места для новых фото", 429)
+        (_upload_dir(core, {"id": pr["user"]}) / (pid + "." + fmt)).write_bytes(raw)
+        ts = core.now()
+        meta.append({"id": pid, "user": pr["user"], "name": name or pid, "fmt": fmt, "w": w, "h": hgt, "size": n, "ts": ts,
+                     "shared_by": by, "from": user["id"]})
+        core.save("uploads_meta", meta)
+        inbox.append({"id": pid, "name": name or "Фото", "w": w, "h": hgt, "by": by, "ts": ts})
+        core.save("projects", items)
+    core.audit(user["name"], "прислал фото в общий альбом", "%s %dx%d от «%s»" % (fmt, w, hgt, by), obj="project " + pr["id"])
+    h._json({"ok": True, "id": pid, "waiting": len(inbox)}, 201)
+    return True
+
+
+def _inbox_clear(h, core, user, pid):
+    """Владелец разобрал присланные фото: принятые он уже загрузил заново под своими id, временные файлы удаляем."""
+    ids = {str(i) for i in (h._body().get("ids") or [])}
+    with core.lock:
+        items = core.load("projects")
+        pr = next((x for x in items if x.get("id") == pid and x.get("user") == user["id"]), None)
+        if not pr:
+            raise Bad("Не найдено", 404)
+        pr["inbox"] = [x for x in pr.get("inbox") or [] if x["id"] not in ids]
+        core.save("projects", items)
+        meta = core.load("uploads_meta")
+        gone = [x for x in meta if x.get("user") == user["id"] and x.get("shared_by") and x.get("id") in ids]
+        for x in gone:
+            try:
+                (_upload_dir(core, user) / (x["id"] + "." + x["fmt"])).unlink()
+            except OSError:
+                pass
+        core.save("uploads_meta", [x for x in meta if x not in gone])
+    h._json({"ok": True, "left": len(pr["inbox"])})
     return True
 
 

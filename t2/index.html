@@ -5,33 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>picPac · печать с телефона</title>
 <meta name="description" content="От фото в галерее до оформленного заказа за минуту: приложение отбирает удачные кадры, кадрирует под формат и считает цену.">
-<meta name="theme-color" content="#FFFFFF">
+<meta name="theme-color" content="#FAF7F5">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Печать">
+<meta name="apple-mobile-web-app-title" content="picPac">
 <meta name="format-detection" content="telephone=no">
 <link rel="manifest" href="/t2/manifest.webmanifest">
 <link rel="icon" href="/t2/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/t2/icon-192.png">
 <link rel="stylesheet" href="/shared/fonts/fonts.css">
-<link rel="stylesheet" href="/shared/ui.css">
-<link rel="stylesheet" href="/t2/style.css">
-<link rel="stylesheet" href="/t2/picpac.css">
-<link rel="stylesheet" href="/t2/glass.css">
+<link rel="stylesheet" href="/shared/glass.css">
+<link rel="stylesheet" href="/t2/app.css">
 </head>
 <body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
 <div class="stage">
   <aside class="side side-left" aria-label="Шаги заказа">
-    <span class="chip chip-accent">picPac · мобильное приложение</span>
-    <h1>Печать с телефона</h1>
-    <p class="lead">От фотографий в галерее до заказа и статуса печати — несколько касаний, без редактора и регистрации.</p>
-    <ol class="steps" id="sideSteps">
+    <span class="mark" aria-hidden="true">Ф</span>
+    <p class="eyebrow">Фотопринт · единая система</p>
+    <h1>Приложение picPac</h1>
+    <p class="lead">От фотографий в галерее до заказа и статуса печати — несколько касаний. Каждый шаг клиента и каждая отметка производства сразу видны в пульте руководителя.</p>
+    <ol class="steps glass" id="sideSteps">
       <li data-s="0"><div><b>Каталог</b><span>Продукты, варианты и цены приходят с сервера</span></div></li>
-      <li data-s="1"><div><b>Фото</b><span>Из галереи, порядок и кадрирование; черновик сохраняется сам</span></div></li>
+      <li data-s="1"><div><b>Фото и макет</b><span>Порядок, кадрирование, раскладка; черновик сохраняется сам</span></div></li>
       <li data-s="2"><div><b>Проверка</b><span>Мало пикселей, размытые, пустые места — понятным языком</span></div></li>
       <li data-s="3"><div><b>Корзина</b><span>Получение, промокод, заказ без списания денег</span></div></li>
-      <li data-s="4"><div><b>Статус</b><span>Лента из событий; этапы отмечает производство</span></div></li>
+      <li data-s="4"><div><b>Статус</b><span>Лента из общих событий; этапы отмечает производство</span></div></li>
     </ol>
   </aside>
 
@@ -41,30 +41,25 @@
       <div class="net" id="net" role="status" hidden></div>
       <main class="screen" id="screen"></main>
       <footer class="actionbar" id="bar"></footer>
+      <button class="push" id="push" type="button" aria-live="polite"></button>
     </div>
   </div>
 
-  <aside class="side side-right" aria-label="Метрика и боли">
-    <div class="metric">
+  <aside class="side side-right" aria-label="Связь с пультом">
+    <div class="metric glass">
       <span class="eyebrow">Время до заказа</span>
-      <div class="big" id="sideTimer" style="color:var(--ink3)">0:00</div>
+      <div class="big" id="sideTimer" style="color:var(--ink4)">0:00</div>
       <p id="sideTimerNote">Отсчёт пойдёт, когда выберете фото</p>
     </div>
-    <div class="pains">
-      <h3>Что мешает заказать сейчас</h3>
-      <ul>
-        <li><b>Загрузка</b> — FAQ просит перейти в браузер Google Chrome</li>
-        <li><b>Кадрирование</b> — фото с телефона 3:4, печать 10×15 — 2:3: советуют обрезать в Snapseed</li>
-        <li><b>Качество</b> — «поменяйте разрешение на 300 DPI в редакторе» вместо понятного ответа</li>
-        <li><b>Ожидание</b> — самовывоза нет, 4–7 дней доставки</li>
-        <li><b>Шаги</b> — продукт → загрузка → редактор → корзина → доставка → оплата</li>
-      </ul>
-      <p class="src">По страницам picpac.by: FAQ, «Фотопечать», «Доставка и оплата»</p>
+    <div class="wire glass">
+      <header><h3>Что уходит в пульт</h3><span class="chip live"><i></i>сразу</span></header>
+      <ul id="wire"><li class="none">Пока ничего: начните заказ в приложении.</li></ul>
+      <small>Шаги клиента и статусы заказа пишутся в единый слой событий. Из них пульт строит воронку, очередь этапов и время участков.</small>
     </div>
     <div class="side-links">
-      <a class="btn btn-sm" href="/t2/admin.html" target="_blank" rel="noopener">Экран салона →</a>
-      <a class="btn btn-sm" href="/t2/analytics.html" target="_blank" rel="noopener">Аналитика →</a>
-      <a class="btn btn-sm btn-ghost" href="/">Все треки</a>
+      <a class="btn btn-accent btn-sm" href="/t1/#v=sales">Пульт руководителя</a>
+      <a class="btn btn-sm" href="/t2/admin.html">Экран участка</a>
+      <a class="btn btn-sm" href="/t2/analytics.html">Аналитика</a>
     </div>
   </aside>
 </div>
