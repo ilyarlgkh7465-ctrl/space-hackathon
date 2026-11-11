@@ -265,6 +265,33 @@ class Api(unittest.TestCase):
         h = self.call("POST", "/api/app/support/%s/human" % r["id"], token=self.guest)[1]
         self.assertTrue(h["bot"]["human"] and h["needs_human"])
 
+    def test_ai_layout_edit(self):
+        photos = [{"id": "a%d" % i, "name": "к%d" % i, "w": 3000, "h": 4000, "blur": i == 2, "dark": i == 3, "dup": i == 4} for i in range(8)]
+        lay = [["a%d" % (2 * i), "a%d" % (2 * i + 1)] for i in range(4)]
+        def edit(text):
+            return self.call("POST", "/api/app/ai/layout", {"instruction": text, "layout": lay, "photos": photos}, self.client)[1]
+        self.assertEqual(self.call("POST", "/api/app/ai/layout", {"instruction": "по 1", "layout": lay, "photos": photos})[0], 401)
+        r = edit("убери размытые")
+        self.assertTrue(r["changed"] and "a2" not in [i for pg in r["layout"] for i in pg] and "a3" in [i for pg in r["layout"] for i in pg])
+        self.assertEqual(r["mode"], "rules")
+        r = edit("убери тёмные и дубли")
+        flat = [i for pg in r["layout"] for i in pg]
+        self.assertTrue("a3" not in flat and "a4" not in flat and len(flat) == 6)
+        r = edit("страницы в обратном порядке")
+        self.assertEqual(r["layout"][0], lay[3])
+        r = edit("поставь страницу 4 в начало")
+        self.assertEqual(r["layout"][0], lay[3])
+        r = edit("по 2 фото на странице")
+        self.assertEqual(len(r["layout"]), 4)                                                        # число страниц не меняется
+        r = edit("сделай обложкой фото 5")
+        self.assertEqual(r["layout"][0], ["a4"])
+        self.assertEqual(sum(pg.count("a4") for pg in r["layout"]), 1)
+        r = edit("нарисуй кота")
+        self.assertFalse(r["changed"])
+        self.assertIn("Например", r["say"])
+        self.assertEqual(r["layout"], lay)
+        self.assertEqual(self.call("POST", "/api/app/ai/layout", {"instruction": "ok", "layout": lay, "photos": photos}, self.client)[0], 400)
+
     # ---- удаление данных (МП-06)
     def test_delete_account(self):
         t = self.call("POST", "/api/app/guest")[1]["token"]

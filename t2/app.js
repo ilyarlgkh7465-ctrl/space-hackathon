@@ -303,7 +303,7 @@
   const haptic = (ok) => { try { navigator.vibrate && navigator.vibrate(ok ? [20, 40, 20] : 10); } catch (e) { /* нет вибрации */ } };
 
   /* ---------- навигация и отрисовка ---------- */
-  const TITLES = { home: 'picPac', product: 'Продукт', photos: 'Фото', layout: 'Макет', check: 'Проверка', cart: 'Оформление', done: 'Заказ', orders: 'Мои заказы', order: 'Заказ', profile: 'Профиль', login: 'Вход', feed: 'Лента', social: 'Сообщество' };
+  const TITLES = { home: 'picPac', product: 'Продукт', photos: 'Фото', layout: 'Макет', check: 'Проверка', cart: 'Оформление', done: 'Заказ', orders: 'Мои заказы', order: 'Заказ', profile: 'Профиль', login: 'Вход', feed: 'Мои фото', social: 'Сообщество' };
   const TABS = ['home', 'feed', 'social', 'orders', 'profile'];
   const flowOf = () => S.draft && hasLayout(S.draft) ? ['product', 'photos', 'layout', 'check', 'cart'] : ['product', 'photos', 'check', 'cart'];
   function go(view, replace) {
@@ -341,7 +341,7 @@
   }
   function tabbar() {
     const t = (id, ic, name) => `<button class="tab3" data-tab="${id}" aria-current="${S.view === id}">${ICON[ic]}<span>${name}</span></button>`;
-    return `<nav class="tabs3" aria-label="Разделы">${t('home', 'home', 'Каталог')}${t('feed', 'photos', 'Лента')}${t('social', 'people', 'Идеи')}${t('orders', 'list', 'Заказы')}${t('profile', 'user', 'Профиль')}</nav>`;
+    return `<nav class="tabs3" aria-label="Разделы">${t('home', 'home', 'Каталог')}${t('feed', 'photos', 'Мои фото')}${t('social', 'people', 'Идеи')}${t('orders', 'list', 'Заказы')}${t('profile', 'user', 'Профиль')}</nav>`;
   }
   function renderNet() {
     const n = $('#net'); if (!n) return;
@@ -437,8 +437,8 @@
   function openProduct(id, vid) {
     const prod = prodOf(id);
     if (!S.draft || S.draft.product !== id) {
-      if (S.draft && S.draft.photos.length) {            // прежние фото не выбрасываем: они вернутся в «Ленту»
-        S.pool = S.pool.concat(S.draft.photos); LS.set('pp_pool', S.pool); toast('Прежние фото сохранены в Ленте');
+      if (S.draft && S.draft.photos.length) {            // прежние фото не выбрасываем: они вернутся в «Мои фото»
+        S.pool = S.pool.concat(S.draft.photos); LS.set('pp_pool', S.pool); toast('Прежние фото сохранены в «Моих фото»');
       }
       S.draft = newDraft(prod); if (vid) S.draft.variant = vid; saveDraft();
     } else if (vid) { S.draft.variant = vid; saveDraft(); }
@@ -543,16 +543,36 @@
       html: `<div class="ai-note"><span class="ai-ava">${ICON.spark}</span><div class="ai-body">Разложила <b>${N}</b> ${plural(N, 'фото', 'фото', 'фото')} по ${cal ? 'месяцам' : P + ' ' + plural(P, 'странице', 'страницам', 'страницам')} в порядке съёмки. ${empty ? `Пустых ${cal ? 'месяцев' : 'страниц'}: <b>${empty}</b>.` : 'Пустых мест нет.'} Касанием можно переставить.</div></div>
         ${!cal && N < P ? `<div class="warnbox"><span>Фото меньше, чем страниц. Можно уменьшить книгу${P > prod.options[0].min ? '' : ' (меньше 20 страниц нельзя)'}.</span>${P > prod.options[0].min ? `<button class="btn btn-sm" id="fit">${Math.max(prod.options[0].min, P - 2)} стр.</button>` : ''}</div>` : ''}
         <div class="pages">${lay.map(page).join('')}</div>
+        <section class="card aiedit" aria-label="Правка альбома с помощью ИИ"><div class="ai-head"><span class="ai-ava">${ICON.spark}</span><b>Править с помощью ИИ</b></div>
+          <div class="chips-row" role="list">${AI_HINTS.map((t, i) => `<button class="pchip" role="listitem" data-hint="${i}">${esc(t)}</button>`).join('')}</div>
+          <div class="field"><label for="aiq">Напишите, что изменить</label><textarea class="textarea" id="aiq" rows="2" maxlength="300" placeholder="Например: убери размытые и поставь страницу 5 в начало"></textarea></div>
+          ${S.aiMsg ? `<p class="ai-say" role="status">${esc(S.aiMsg)}</p>` : ''}
+          <div class="row2"><button class="btn btn-primary" id="aigo">Применить</button>${d.layoutPrev ? '<button class="btn" id="aiundo">Отменить</button>' : ''}</div></section>
         <button class="btn" id="re">Собрать заново</button>`,
       bar: `<button class="btn btn-primary btn-xl" id="next">Дальше · проверка</button><div class="sub">Макет можно не править: мы уже всё разложили</div>`,
       bind(scr) {
         scr.querySelectorAll('[data-pg]').forEach((b) => { b.onclick = () => { S.pgSheet = +b.dataset.pg; renderPgSheet(); }; });
-        $('#re').onclick = () => { ensureLayout(true); toast('Собрала заново'); rerender(); };
+        scr.querySelectorAll('[data-hint]').forEach((b) => { b.onclick = () => { $('#aiq').value = AI_HINTS[+b.dataset.hint]; $('#aiq').focus(); }; });
+        $('#aigo').onclick = aiEdit;
+        const ud = $('#aiundo'); if (ud) ud.onclick = () => { d.layout = d.layoutPrev; d.layoutPrev = null; S.aiMsg = 'Вернула прежнюю раскладку'; saveDraft(); rerender(); };
+        $('#re').onclick = () => { d.layoutPrev = null; S.aiMsg = ''; ensureLayout(true); toast('Собрала заново'); rerender(); };
         const f = $('#fit'); if (f) f.onclick = () => { d.options.pages = Math.max(prod.options[0].min, P - 2); d.layoutKey = ''; saveDraft(); refreshPrice(); rerender(); };
         $('#next').onclick = async () => { await runCheck(); go('check'); };
       },
     };
   };
+  const AI_HINTS = ['По 2 фото на странице', 'Убери размытые', 'Страницы в обратном порядке', 'Сделай обложкой фото 1'];
+  async function aiEdit() {
+    const d = S.draft, q = $('#aiq').value.trim();
+    if (q.length < 3) { S.aiMsg = 'Напишите, что изменить'; return rerender(); }
+    const btn = $('#aigo'); btn.disabled = true; btn.textContent = 'Думаю…';
+    try {
+      const r = await call('POST', '/ai/layout', { instruction: q, layout: d.layout, photos: d.photos.map((p) => ({ id: p.id, name: p.name, w: p.w, h: p.h, blur: !!p.blur, dark: !!p.dark, dup: !!p.dup })) });
+      if (r.changed) { d.layoutPrev = d.layout; d.layout = r.layout; saveDraft(); step('layout'); haptic(true); }
+      S.aiMsg = r.say;
+    } catch (e) { S.aiMsg = e.offline ? 'Нет сети — правка по команде работает только онлайн. Страницы можно править вручную.' : e.message; }
+    rerender();
+  }
   function renderPgSheet() {
     const old = $('#sheet'); if (old) old.remove();
     const d = S.draft, i = S.pgSheet; if (i == null || !d.layout[i]) return;
