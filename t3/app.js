@@ -1,936 +1,592 @@
-/* Трек 3 — защищённый ИИ-помощник руководителя: встречи, документы, задачи, итоги, защита.
-   Данные компании — shared/company.js, хранилище и ИИ — shared/api.js, документы — t3/docs.js.
-   Всё работает и без модели: поиск, бриф и протокол имеют встроенную логику. */
+/* Трек 3 — помощник руководителя ООО «Фотопринт»: встречи и протоколы, документы, задачи, итоги, защита.
+   Все данные — с сервера по токену (assistant_api.py, адреса /api/assistant/…). Права проверяет сервер:
+   интерфейс показывает только то, что сервер отдал этой учётной записи. Без модели работает встроенная логика. */
 (function () {
   'use strict';
-  const C = window.COMPANY;
   const app = document.getElementById('app');
+  const modalEl = document.getElementById('modal');
+  const TOKEN_KEY = 'fp-t3-token';
+  const DRAFT_KEY = 'fp-t3-drafts';
   const pad = (n) => String(n).padStart(2, '0');
   const isoDay = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   const TODAY = isoDay(new Date());
-
-  /* ---------- роли ---------- */
-  const ROLES = {
-    director:   { label: 'Директор',             person: 'kovalev', areas: ['all'] },
-    production: { label: 'Начальник цеха',        person: 'morozov', areas: ['production'] },
-    salons:     { label: 'Управляющая салонами',  person: 'grinko',  areas: ['clients'] },
-    employee:   { label: 'Сотрудник',             person: 'zhuk',    own: true },
-  };
-  const ROLE_IDS = Object.keys(ROLES);
-  const AREA_OWNER = { finance: 'lisovskaya', clients: 'grinko', production: 'morozov', hr: 'shubina' };
-
-  /* ---------- показатели ---------- */
-  const KPI = {
-    revenue: { label: 'Выручка', area: 'finance' }, profit: { label: 'Прибыль', area: 'finance' },
-    orders: { label: 'Заказы', area: 'clients' }, avgCheck: { label: 'Средний чек', area: 'clients' },
-    repeatShare: { label: 'Повторные клиенты', area: 'clients' }, complaints: { label: 'Жалобы', area: 'clients' },
-    nps: { label: 'NPS', area: 'clients' }, output: { label: 'Выпуск', area: 'production' },
-    defectRate: { label: 'Брак', area: 'production' }, overdueRate: { label: 'Просрочка заказов', area: 'production' },
-    utilization: { label: 'Загрузка оборудования', area: 'production' }, headcount: { label: 'Штат', area: 'hr' },
-    attendance: { label: 'Явка', area: 'hr' }, overtime: { label: 'Сверхурочные', area: 'hr' },
-    turnover: { label: 'Текучесть', area: 'hr' }, vacancyDays: { label: 'Срок закрытия вакансии', area: 'hr' },
-    materials: { label: 'Материальные затраты', area: 'finance' },
-  };
-  /* по каким словам в задачах понять, что отклонением уже кто-то занимается */
-  const KW = { defectRate: ['калибр', 'брак', 'перепечат'], overdueRate: ['просроч', 'переплёт', 'переплет'], complaints: ['жалоб'],
-    nps: ['жалоб'], overtime: ['сверхуроч', 'переплёт'], vacancyDays: ['ваканс', 'администратор'], headcount: ['ваканс', 'администратор'],
-    turnover: ['текуч', 'увольн'], attendance: ['сменщик', 'замен'], profit: ['прибыл'], revenue: ['выручк', 'сменщик'],
-    orders: ['акци'], repeatShare: ['акци', 'повторн'], avgCheck: ['чек'], output: ['выпуск'], utilization: ['загрузк'] };
-  const fv = (v, unit) => unit === '%' ? fmt.n1(v) + ' %' : unit === 'BYN' ? (v < 100 ? fmt.money2(v) : fmt.money(v)) : fmt.n(v) + (unit ? ' ' + unit : '');
-  function deviations() {
-    return Object.keys(C.series).filter((k) => KPI[k]).map((k) => {
-      const s = C.series[k], fact = C.last(k), plan = C.last(k, 'plan'), d = fmt.delta(fact, plan);
-      return { key: k, label: KPI[k].label, area: KPI[k].area, fact, plan, d, unit: s.unit,
-        bad: s.good === 'up' ? d < -2 : d > 2 };
-    }).filter((x) => x.bad).sort((a, b) => Math.abs(b.d) - Math.abs(a.d));
-  }
-  const devLine = (x) => x.label + ': ' + fv(x.fact, x.unit) + ' при плане ' + fv(x.plan, x.unit) + ' (' + fmt.signed(x.d, 0) + ' %)';
-
-  /* ---------- встречи недели ---------- */
-  const MEETINGS = [
-    { id: 'm1', title: 'Планёрка руководителей', start: '2026-11-09T09:00', dur: 60,
-      people: ['kovalev', 'lisovskaya', 'morozov', 'grinko', 'shubina', 'yatskevich'], roles: ['director', 'production', 'salons'],
-      areas: ['finance', 'clients', 'production', 'hr'], allDecisions: true,
-      goal: 'Разобрать итоги октября: прибыль ниже плана на 28 % — найти причины и закрепить решения с ответственными и сроками',
-      query: 'калибровка брак премия салон замена вакансия жалобы сверхурочные' },
-    { id: 'm2', title: 'Разбор качества печати', start: '2026-11-10T11:00', dur: 45,
-      people: ['morozov', 'petrovich', 'zhuk', 'kovalev'], roles: ['director', 'production', 'employee'], areas: ['production'],
-      goal: 'Вернуть брак на минилабе №2 с 11,4 % к норме 2,5 % и закрыть просрочку фотокниг',
-      query: 'калибровка минилаб допуск оператор перепечатки брак журнал наставник' },
-    { id: 'm3', title: 'Встреча с поставщиком бумаги', start: '2026-11-11T15:00', dur: 40,
-      people: ['lisovskaya', 'morozov'], guests: ['Представитель ООО «Фотобум-Снаб»'], roles: ['director', 'production'], areas: ['production', 'finance'],
-      goal: 'Согласовать объём бумаги на сезон фотокниг и календарей и цену со скидкой за объём',
-      query: 'скидка объём рулонов цена брак бумаги акт поставка продление' },
-    { id: 'm4', title: 'Собеседование: администратор «Галереи»', start: '2026-11-12T10:00', dur: 30,
-      people: ['grinko', 'shubina'], guests: ['Кандидат на должность администратора'], roles: ['director', 'salons'], areas: ['clients', 'hr'],
-      goal: 'Закрыть вакансию, открытую 23 дня: салон «Галерея» терял выручку из-за нехватки людей',
-      query: 'смена салон два сотрудника замена резерв адаптация наставник' },
-  ];
-
-  /* заготовки брифов — встроенная логика, если модели нет */
-  const PLAN = {
-    m1: {
-      agenda: [
-        { t: () => 'Итоги октября: прибыль ' + fmt.money(C.last('profit')) + ' при плане ' + fmt.money(C.last('profit', 'plan')) + ' (' + fmt.signed(fmt.delta(C.last('profit'), C.last('profit', 'plan')), 0) + ' %)', owner: 'lisovskaya', min: 10,
-          why: 'Выручка −13 200 BYN, из них салон «Галерея» −11 500 BYN; перепечатки — +2 300 BYN бумаги; сверхурочные 212 ч вместо 60' },
-        { t: () => 'Салон «Галерея»: выручка −35 %, закрыт 7 дней без замены', owner: 'grinko', min: 10,
-          why: 'По стандарту замену назначают за 2 часа из соседнего салона по графику резерва', cites: [['salon', '3'], ['salon', '4']] },
-        { t: () => 'Брак ' + fmt.n1(C.last('defectRate')) + ' % (минилаб №2 — 11,4 %) и просрочка ' + fmt.n1(C.last('overdueRate')) + ' %', owner: 'morozov', min: 15,
-          why: 'Калибровка минилаба №2 не проводилась с 07.10; новый оператор не допущен к калибровке', cites: [['calib', '2'], ['adapt', '4']] },
-        { t: () => 'Жалобы ' + C.last('complaints') + ' (норма 20) и NPS ' + C.last('nps') + ' — ответы клиентам', owner: 'grinko', min: 10,
-          why: 'Жалобы на цвет (минилаб №2) и просроченные фотокниги; ответ — не позднее следующего дня', cites: [['salon', '7']] },
-        { t: () => 'Кадры: 3 вакансии, вакансия «Галереи» открыта 23 дня', owner: 'shubina', min: 5,
-          why: 'Решение от 01.10 просрочено: срок был 15.10' },
-      ],
-      questions: [
-        ['morozov', 'Почему калибровка минилаба №2 не проводилась с 7 октября и кто был назначен замещающим?'],
-        ['grinko', 'Почему по графику резерва не дали сменщика в «Галерею» 13–19 октября?'],
-        ['shubina', 'Что мешает закрыть вакансию администратора 23 дня — зарплата, отклики, собеседования?'],
-        ['lisovskaya', 'Сколько стоили перепечатки и сверхурочные и что из этого вернём в ноябре?'],
-        ['yatskevich', 'Готова ли предновогодняя акция к 15.11 при просрочке фотокниг 14 %?'],
-      ],
-      risks: [
-        ['Сезон фотокниг и календарей: при просрочке переплёта 14 % потеряем предновогодние заказы'],
-        ['Брак выше 4 % — по положению цех лишается премии за качество: риск ухода операторов', [['bonus', '3']]],
-        ['Сверхурочные 212 ч при лимите 120 ч без согласования директора', [['bonus', '6']]],
-        ['Решение о наставнике для нового оператора не было внесено в контроль — так решения теряются', [['protocol', '5']]],
-      ],
-      pins: [['calib', '2'], ['adapt', '4'], ['salon', '3'], ['bonus', '3'], ['protocol', '5']],
-    },
-    m2: {
-      agenda: [
-        { t: () => 'Брак по участкам: минилаб №2 — 11,4 %, минилаб №1 — 2,3 %', owner: 'morozov', min: 10, why: '6 980 перепечаток на минилабе №2, ≈ 2 300 BYN бумаги' },
-        { t: () => 'Калибровка: пропущены 14.10, 21.10 и 28.10 — вернуть график и журнал', owner: 'petrovich', min: 10, why: 'Регламент: раз в неделю, по понедельникам до начала смены', cites: [['calib', '2'], ['calib', '6']] },
-        { t: () => 'Допуск Павла Жука: обучение и проверка калибровки', owner: 'petrovich', min: 10, why: 'Без проверки оператор калибровку не проводит', cites: [['adapt', '4'], ['calib', '4']] },
-        { t: () => 'Правило остановки печати при браке выше 3 %', owner: 'morozov', min: 10, why: 'В октябре правило не сработало ни разу', cites: [['calib', '8']] },
-      ],
-      questions: [
-        ['zhuk', 'Что было непонятно в первые дни на минилабе? Какие заказы перепечатывали чаще всего?'],
-        ['petrovich', 'Сколько времени нужно на обучение и проверку калибровки?'],
-        ['morozov', 'Почему не сработало правило остановки при браке выше 3 %?'],
-      ],
-      risks: [
-        ['Пока Павел не допущен, калибровка держится на одном человеке — Ольге Петрович', [['calib', '3']]],
-        ['В ноябре заказов больше — без снижения брака перепечаток станет ещё больше'],
-      ],
-      pins: [['calib', '2'], ['calib', '4'], ['calib', '8'], ['adapt', '3'], ['adapt', '4']],
-    },
-    m3: {
-      agenda: [
-        { t: () => 'Потребность в бумаге на ноябрь–декабрь (сезон фотокниг и календарей)', owner: 'morozov', min: 10, why: 'Октябрь: 158 400 отпечатков; в сезон рост заказов' },
-        { t: () => 'Скидка за объём: от 30 рулонов — 5 %, от 50 — 8 %', owner: 'lisovskaya', min: 10, why: 'В октябре получили 5 % на 32 рулона', cites: [['contract', '4']] },
-        { t: () => 'Цена 186 BYN за рулон 152 мм — зафиксировать до конца сезона', owner: 'lisovskaya', min: 10, why: 'О повышении поставщик предупреждает за 30 дней', cites: [['contract', '3']] },
-        { t: () => 'Брак: бумага или настройка? Претензию по октябрю не выставляем', owner: 'morozov', min: 5, why: 'Перепечатки — из-за калибровки, такой брак договор не возмещает', cites: [['contract', '6']] },
-        { t: () => 'Следующая заявка и продление договора', owner: 'lisovskaya', min: 5, why: 'Договор продлевается сам, если не заявить за 30 дней', cites: [['contract', '8']] },
-      ],
-      questions: [
-        ['guest', 'Сможете зафиксировать цену до 31.12 при заказе от 50 рулонов?'],
-        ['guest', 'Срок поставки в декабре — те же 3 рабочих дня?'],
-        ['morozov', 'Сколько рулонов нужно с запасом на перепечатки?'],
-      ],
-      risks: [
-        ['Брак из-за настройки оборудования не возмещается — претензия по октябрю необоснованна', [['contract', '6']]],
-        ['До 01.12 решить, продлеваем ли договор на тех же условиях', [['contract', '8']]],
-      ],
-      pins: [['contract', '3'], ['contract', '4'], ['contract', '6'], ['contract', '8']],
-    },
-    m4: {
-      agenda: [
-        { t: () => 'Знакомство и опыт работы с клиентами', owner: 'grinko', min: 10, why: 'Администратор отвечает за приём, выдачу и жалобы' },
-        { t: () => 'График: салон 10:00–21:00, в смене двое', owner: 'grinko', min: 5, why: 'Один сотрудник — салон работает только на приём', cites: [['salon', '1'], ['salon', '2']] },
-        { t: () => 'Замены: готовность выходить в соседние салоны', owner: 'grinko', min: 5, why: 'График резерва между салонами', cites: [['salon', '4']] },
-        { t: () => 'Адаптация: 3 дня с наставником, дата выхода и условия', owner: 'shubina', min: 10, why: 'Вакансия открыта 23 дня', cites: [['adapt', '3']] },
-      ],
-      questions: [
-        ['guest', 'Был ли опыт работы с фотопечатью или кассой?'],
-        ['guest', 'Готовы ли выходить на замену в другие салоны?'],
-        ['shubina', 'Какую вилку зарплаты можем предложить сразу?'],
-      ],
-      risks: [
-        ['Если кандидат откажет, нужен запасной сменщик из «Центра», иначе салон снова закроется', [['salon', '3']]],
-        ['Без второго сотрудника салон работает только на приём и выдачу', [['salon', '2']]],
-      ],
-      pins: [['salon', '2'], ['salon', '3'], ['salon', '4'], ['adapt', '3']],
-    },
-  };
-
-  /* демо-расшифровки встреч */
-  const DEMO_TEXT = {
-    m1: 'Ковалёв: Начнём с главного — прибыль за октябрь 32 800 рублей при плане 45 600, минус 28 процентов.\n' +
-      'Лисовская: Большая часть потери — салон «Галерея», он неделю стоял закрытым. Ещё 2 300 рублей — бумага на перепечатки со второго минилаба и 212 часов сверхурочных.\n' +
-      'Морозов: Калибровку на втором минилабе не делали с седьмого октября. Новый оператор к ней не допущен, а Ольга работала на первом.\n' +
-      'Ковалёв: Решение: Сергей, до 11 ноября откалибровать минилаб №2 и закрепить еженедельную калибровку за Ольгой Петрович.\n' +
-      'Шубина: По «Галерее» мало откликов, зарплата в вакансии ниже рынка.\n' +
-      'Ковалёв: Решение: Елена, до 12 ноября поднять вилку в вакансии и провести собеседование.\n' +
-      'Ковалёв: Решение: Наталья, с понедельника дать в «Галерею» сменщика из «Центра» до выхода нового администратора.\n' +
-      'Гринько: Ещё 64 жалобы, на многие не ответили.\n' +
-      'Ковалёв: Решение: Наталья и Денис, до 10 ноября ответить всем клиентам с жалобами и дать скидку 20 % на перепечатку.\n' +
-      'Ковалёв: Решение: Сергей, до 20 ноября подготовить замену переплётчику на время отпусков.',
-    m2: 'Морозов: Брак на втором минилабе 11,4 процента, на первом 2,3. Разница — в калибровке.\n' +
-      'Петрович: Я была на первом минилабе, второй с седьмого октября никто не калибровал. Павел к калибровке не допущен.\n' +
-      'Жук: Мне показали печать, а калибровку не показывали — я думал, её делает старший.\n' +
-      'Ковалёв: Решение: Ольга, до 11 ноября провести с Павлом обучение калибровке и принять у него проверку по журналу.\n' +
-      'Ковалёв: Решение: Сергей, до 10 ноября откалибровать минилаб №2 и вернуть калибровку по понедельникам.\n' +
-      'Морозов: Правило остановки при браке выше трёх процентов тоже никто не соблюдал.\n' +
-      'Ковалёв: Решение: Сергей, до 13 ноября настроить ежедневный отчёт о браке по каждому минилабу.',
-    m3: 'Лисовская: На ноябрь и декабрь нам нужно около 55 рулонов — сезон фотокниг и календарей.\n' +
-      'Представитель поставщика: При 50 рулонах скидка 8 процентов по договору, цену можем держать до конца года.\n' +
-      'Морозов: Претензию по браку не выставляем: перепечатки были из-за калибровки, не из-за бумаги.\n' +
-      'Решение: Ирина, до 13 ноября оформить заявку на 55 рулонов со скидкой 8 % и фиксацией цены до 31 декабря.\n' +
-      'Решение: Ирина, до 1 декабря решить, продлеваем ли договор на 2027 год.',
-    m4: 'Гринько: Расскажите об опыте работы с клиентами.\n' +
-      'Кандидат: Два года администратором в копицентре — касса и приём заказов.\n' +
-      'Шубина: Готовы выходить на замену в «Центр» и «Восток»?\n' +
-      'Кандидат: Да, если предупредят заранее.\n' +
-      'Решение: Елена, до 13 ноября отправить кандидату предложение и согласовать дату выхода.\n' +
-      'Решение: Наталья, до 16 ноября назначить наставника и план адаптации на 3 дня.',
-  };
-  const FIRST = { 'Андрей': 'kovalev', 'Ирина': 'lisovskaya', 'Сергей': 'morozov', 'Наталья': 'grinko', 'Елена': 'shubina',
-    'Денис': 'yatskevich', 'Ольга': 'petrovich', 'Павел': 'zhuk', 'Виктор': 'sidorenko', 'Мария': 'tkachuk' };
-  const MONTHS = { 'октября': '10', 'ноября': '11', 'декабря': '12' };
+  const LOGINS = [['director', 'Директор'], ['production', 'Руководитель производства'], ['sales', 'Руководитель продаж'],
+    ['support', 'Руководитель поддержки'], ['logistics', 'Руководитель логистики'], ['finance', 'Руководитель финансов'],
+    ['hr', 'Руководитель по персоналу'], ['operator', 'Мастер участка сборки'], ['quality', 'Контролёр качества'], ['analyst', 'Аналитик']];
+  const STATUSES = ['решено', 'предложено', 'обсуждалось', 'требует уточнения'];
+  const ST_CHIP = { 'решено': 'chip chip-ok', 'предложено': 'chip chip-accent', 'обсуждалось': 'chip', 'требует уточнения': 'chip chip-warn' };
+  const TASK_COLS = [['needs_info', 'Требует уточнения'], ['new', 'Новые'], ['in_progress', 'В работе'], ['overdue', 'Просрочено'], ['done', 'Готово']];
 
   /* ---------- состояние ---------- */
   const qs = new URLSearchParams(location.search);
   const S = {
-    tab: qs.get('tab') || 'meetings', role: ROLES[qs.get('role')] ? qs.get('role') : 'director',
-    meetingId: qs.get('m') || 'm1', view: {}, briefs: {}, notes: {}, drafts: {}, run: {}, busy: {},
-    docId: 'calib', hl: null, answer: null, extraDocs: [], filter: 'all',
-    health: { mode: 'off' }, decisions: [], tasks: [], meetings: [], audit: [], dirSummary: null,
-    maskCheck: null, localState: null, sent: {},
+    me: null, people: [], tab: qs.get('tab') || 'meetings', health: { mode: 'off' },
+    meetings: [], meetingId: qs.get('m') || null, mview: {}, tr: {}, hlLine: null,
+    drafts: loadDrafts(), busy: {}, saved: {},
+    docs: [], docsHidden: 0, docsTotal: 0, docId: null, hl: null, answer: null, qText: '',
+    tasks: [], tasksHidden: 0, check: [], filter: 'all',
+    audit: [], access: null, probe: null, maskCheck: null, localState: null, err: null,
   };
-  if (qs.get('view')) S.view[S.meetingId] = qs.get('view');
 
-  /* ---------- помощники ---------- */
-  const person = (id) => C.person(id);
-  const pname = (id) => (person(id) || {}).name || (id === 'guest' ? 'Гость' : id || '—');
-  const initials = (id) => { const p = person(id); if (!p) return id === 'guest' ? 'Г' : '?'; return p.name.split(' ').map((w) => w[0]).join('').slice(0, 2); };
+  /* ---------- запросы к серверу с токеном ---------- */
+  const token = () => { try { return sessionStorage.getItem(TOKEN_KEY); } catch (e) { return null; } };
+  async function call(path, body) {
+    const opt = { headers: { 'Content-Type': 'application/json' } };
+    const t = token();
+    if (t) opt.headers.Authorization = 'Bearer ' + t;
+    if (body !== undefined) { opt.method = 'POST'; opt.body = JSON.stringify(body); }
+    let r;
+    try { r = await fetch(path, opt); } catch (e) { throw new Error('Сервер не отвечает. Проверьте, что он запущен, и повторите — введённое не потеряется.'); }
+    let d = {};
+    try { d = await r.json(); } catch (e) { /* пустой ответ */ }
+    if (r.status === 401 && path !== '/api/login') { signOut(true); throw new Error('Сессия закончилась — войдите снова.'); }
+    if (!r.ok) { const er = new Error(d.error || ('Ошибка сервера ' + r.status)); er.status = r.status; er.data = d; throw er; }
+    return d;
+  }
+  const fail = (e) => { toast(e.message || String(e), 4200); };
+
+  /* ---------- черновики протоколов не теряются при перезагрузке (ОТ-05) ---------- */
+  function loadDrafts() { try { return JSON.parse(sessionStorage.getItem(DRAFT_KEY)) || {}; } catch (e) { return {}; } }
+  function saveDrafts() { try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(S.drafts)); } catch (e) { /* приватный режим */ } }
+  window.addEventListener('beforeunload', (e) => { if (Object.keys(S.drafts).length) { e.preventDefault(); e.returnValue = ''; } });
+
+  /* ---------- люди ---------- */
+  const person = (id) => S.people.find((p) => p.id === id);
+  const pname = (id) => (person(id) || {}).name || (id ? id : 'не назначен');
   const HUES = ['#E8EEFC', '#EAF6EF', '#FDF2E6', '#F3EDFB', '#FCEDEF', '#E6F4F6', '#F6F3E2', '#EEF0F3'];
-  const ava = (id) => '<span class="ava" title="' + esc(pname(id)) + '" style="background:' + HUES[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length] + '">' + esc(initials(id)) + '</span>';
-  const role = () => ROLES[S.role];
-  const who = () => pname(role().person) + ' (' + role().label + ')';
-  const allDocs = () => window.T3_DOCS.concat(S.extraDocs);
-  const doc = (id) => allDocs().find((d) => d.id === id);
-  const docVisible = (id) => { const d = doc(id); return !!d && d.access.includes(S.role); };
-  const visibleDocs = () => allDocs().filter((d) => d.access.includes(S.role));
-  const item = (d, n) => { const x = doc(d); return x && x.items.find((i) => i.n === String(n)); };
-  const meetingVisible = (m) => m.roles.includes(S.role);
-  const dayLabel = (iso) => { const t = new Date(iso).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }); return t.charAt(0).toUpperCase() + t.slice(1); };
-  const timeLabel = (iso) => iso.slice(11, 16);
-  const dueLabel = (iso) => iso ? 'до ' + new Date(iso + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : 'без срока';
-
-  function ownerId(v) {
-    if (!v) return null;
-    if (person(v)) return v;
-    const p = C.people.find((x) => String(v).includes(x.name) || String(v).includes(x.name.split(' ')[1]));
-    return p ? p.id : null;
-  }
-  function canSeeOwner(id) {
-    const r = role();
-    if (r.areas && r.areas.includes('all')) return true;
-    if (r.own) return id === r.person;
-    const p = person(id);
-    return id === r.person || (!!p && r.areas.includes(p.area));
-  }
-  function effStatus(x) {
-    if (x.status === 'done') return 'done';
-    if (x.status === 'overdue' || (x.due && x.due < TODAY)) return 'overdue';
-    return x.status === 'in_progress' ? 'in_progress' : 'new';
-  }
-  /* решения и задачи одним списком: решение показываем, если на него нет отдельной задачи */
-  function workItems() {
-    const linked = new Set(S.tasks.map((t) => t.decision).filter(Boolean));
-    const ds = S.decisions.filter((d) => !linked.has(d.id)).map((d) => ({ kind: 'decision', id: d.id, title: d.title, owner: ownerId(d.owner),
-      due: d.due, status: d.status, st: effStatus(d), source: d.source, effect: d.effect, cause: d.cause, metric: d.metric, raw: d }));
-    const ts = S.tasks.map((t) => ({ kind: 'task', id: t.id, title: t.title, owner: ownerId(t.owner), due: t.due, status: t.status,
-      st: effStatus(t), source: t.source, meeting: t.meeting_title, raw: t }));
-    return ds.concat(ts);
-  }
-  const srcLabel = (x) => (x.kind === 'decision' ? 'Решение · ' : '') + (x.source === 't1' ? 'Пульт причин (Трек 1)' : x.source === 't2' ? 'Мобильный заказ (Трек 2)'
-    : x.meeting ? 'Встреча: ' + x.meeting : x.kind === 'decision' ? 'планёрка' : x.raw && x.raw.decision ? 'По решению планёрки' : 'Поручение');
-
-  /* ---------- поиск по документам: BM25 ---------- */
-  const STOP = new Set(('и в во не что он на я с со как а то все она так его но да ты к у же вы за бы по только ее мне было вот от меня еще нет о из ему ' +
-    'когда даже ну ли если уже или ни быть был него до вас там потом себя ничего ей может они тут где есть надо ней для мы тебя их чем была сам ' +
-    'без чего раз тоже себе под будет тогда кто этот того потому этого какой здесь этом один мой тем чтобы нее сейчас были куда зачем всех можно при ' +
-    'об другой хоть после над больше тот через эти нас про всего них какая много три эту моя свою этой перед лучше чуть том такой им более всегда ' +
-    'это какие какое сколько почему нужно ли п').split(' '));
-  function stem(w) {
-    w = w.replace(/ё/g, 'е');
-    if (w.length <= 5 && w.length > 3) w = w.replace(/[аеиоуыэюяйь]$/, '');
-    return w.slice(0, 5);
-  }
-  const tokens = (s) => (String(s).toLowerCase().match(/[a-zа-яё0-9]+/g) || []).filter((w) => !STOP.has(w) && (w.length > 1 || /\d/.test(w))).map(stem);
-  function search(q, docs, k) {
-    const units = [];
-    docs.forEach((d) => d.items.forEach((it) => units.push({ doc: d, it, toks: tokens(d.short + ' ' + it.text) })));
-    if (!units.length) return [];
-    const df = {}; let total = 0;
-    units.forEach((u) => { total += u.toks.length; new Set(u.toks).forEach((t) => { df[t] = (df[t] || 0) + 1; }); });
-    const avg = total / units.length, N = units.length, k1 = 1.2, b = 0.75;
-    const qt = [...new Set(tokens(q))];
-    return units.map((u) => {
-      let s = 0;
-      qt.forEach((t) => {
-        const tf = u.toks.filter((x) => x === t).length;
-        if (!tf) return;
-        const idf = Math.log(1 + (N - df[t] + 0.5) / (df[t] + 0.5));
-        s += idf * tf * (k1 + 1) / (tf + k1 * (1 - b + b * u.toks.length / avg));
-      });
-      return { doc: u.doc, it: u.it, score: s };
-    }).filter((x) => x.score > 0.3).sort((a, b2) => b2.score - a.score).slice(0, k || 5);
-  }
-
-  /* ---------- текст с ссылками на пункты ---------- */
-  function citeBtn(d, n) {
-    const x = doc(d);
-    if (!x || !docVisible(d)) return '';
-    return '<button class="cite" data-act="cite" data-doc="' + esc(d) + '" data-n="' + esc(n) + '">' + esc(x.short) + ', п. ' + esc(n) + '</button>';
-  }
-  const cites = (arr) => (arr || []).map(([d, n]) => citeBtn(d, n)).filter(Boolean).join(' ');
-  function rich(text) {
-    let h = esc(text).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-    h = h.replace(/\[D:([\w-]+):([\d.]+)\]/g, (m0, d, n) => citeBtn(d, n) || '');
-    return h.split(/\n{2,}/).map((p) => '<p>' + p.replace(/\n/g, '<br>') + '</p>').join('');
-  }
-  const parseCites = (arr) => (Array.isArray(arr) ? arr : []).map((s) => String(s).match(/D:([\w-]+):([\d.]+)/)).filter(Boolean)
-    .map((mm) => [mm[1], mm[2]]).filter(([d, n]) => docVisible(d) && item(d, n));
-
-  function provLine(r) {
-    if (!r) return '';
-    const bits = [];
-    bits.push(r.fallback ? 'Встроенная логика' + (S.health.mode === 'off' ? ' · ИИ выключен' : r.reason ? ' · модель не ответила' : '') : 'Помощник · ' + esc(r.provider || ''));
-    if (r.fallback) return '<div class="prov">' + bits.join(' ') + '</div>';
-    if (r.masked && r.masked.count) bits.push('<span class="chip chip-ok">замаскировано ' + r.masked.count + ': ' + esc(r.masked.labels.slice(0, 4).join(' ')) + (r.masked.labels.length > 4 ? '…' : '') + '</span>');
-    else if (r.masked) bits.push('<span class="chip">персональных данных не найдено</span>');
-    return '<div class="prov">' + bits.join(' ') + '</div>';
-  }
-
-  /* ---------- загрузка ---------- */
-  async function loadStore() {
-    const [d, t, m] = await Promise.all([api.list('decisions'), api.list('tasks'), api.list('meetings')]);
-    S.decisions = d; S.tasks = t; S.meetings = m;
-  }
-  async function loadHealth() {
-    S.health = await api.health();
-    const chip = document.getElementById('aiChip');
-    const map = { cloud: ['chip chip-accent', 'Облако + маскирование'], local: ['chip chip-ok', 'Локальная модель'], off: ['chip', 'Без ИИ · встроенная логика'] };
-    const [cls, txt] = S.health.static ? ['chip', 'Демо по ссылке · встроенная логика'] : map[S.health.mode] || ['chip', 'Сервер не отвечает'];
-    chip.className = cls; chip.querySelector('span:last-child').textContent = txt;
-  }
-
-  /* ================= ВСТРЕЧИ ================= */
-  function openForMeeting(m) {
-    const ids = new Set(m.people);
-    return workItems().filter((x) => x.st !== 'done' && (m.allDecisions || ids.has(x.owner) ||
-      (x.source === 't1' && KPI[x.metric] && m.areas.includes(KPI[x.metric].area))));
-  }
-  function fallbackBrief(m) {
-    const p = PLAN[m.id];
-    const agenda = p.agenda.map((a) => ({ title: a.t(), owner: a.owner, minutes: a.min, why: a.why, cites: (a.cites || []).filter(([d, n]) => docVisible(d) && item(d, n)) }));
-    const open = openForMeeting(m);
-    const t1 = open.filter((x) => x.source === 't1');
-    t1.forEach((x) => agenda.push({ title: 'Решение из пульта: ' + x.title, owner: x.owner, minutes: 5, why: x.cause || 'Принято в пульте причин, срок ' + dueLabel(x.due), tag: 'Трек 1' }));
-    const rest = open.filter((x) => x.source !== 't1');
-    if (rest.length) {
-      const over = rest.filter((x) => x.st === 'overdue').length;
-      agenda.push({ title: 'Контроль решений и задач: открыто ' + rest.length + (over ? ', просрочено ' + over : ''), owner: m.people[0] === 'kovalev' || m.people.includes('kovalev') ? 'kovalev' : m.people[0], minutes: 5,
-        why: rest.slice(0, 3).map((x) => '«' + x.title + '» — ' + pname(x.owner) + ', ' + dueLabel(x.due)).join('; ') });
-    }
-    // уложить повестку в длительность встречи: срезаем самые длинные пункты по 5 минут
-    let total = agenda.reduce((a, x) => a + x.minutes, 0);
-    while (total > m.dur) { const big = agenda.reduce((a, x) => x.minutes > a.minutes ? x : a); if (big.minutes <= 5) break; big.minutes -= 5; total -= 5; }
-    return { goal: m.goal, agenda, questions: p.questions.map(([to, q]) => ({ to, q })), risks: p.risks.map(([text, c]) => ({ text, cites: (c || []).filter(([d, n]) => docVisible(d) && item(d, n)) })) };
-  }
-  function materials(m) {
-    const pins = PLAN[m.id].pins;
-    const vis = pins.filter(([d, n]) => docVisible(d) && item(d, n));
-    const seen = new Set(vis.map(([d, n]) => d + ':' + n));
-    search(m.query + ' ' + m.goal, visibleDocs(), 6).forEach((h) => {
-      const key = h.doc.id + ':' + h.it.n;
-      if (!seen.has(key) && vis.length < 7) { seen.add(key); vis.push([h.doc.id, h.it.n]); }
-    });
-    const hiddenDocs = [...new Set(pins.filter(([d]) => !docVisible(d)).map(([d]) => d))];
-    return { list: vis, hidden: hiddenDocs };
-  }
-  async function makeBrief(m) {
-    S.busy[m.id] = 'brief'; S.view[m.id] = 'brief'; render();
-    await loadStore();
-    const fb = fallbackBrief(m);
-    const mat = materials(m);
-    const open = openForMeeting(m);
-    const ctx = [
-      'Встреча: ' + m.title + ', ' + dayLabel(m.start) + ' ' + timeLabel(m.start) + ', ' + m.dur + ' мин.',
-      'Цель от организатора: ' + m.goal,
-      'Участники (id: имя — роль):', ...m.people.map((id) => '- ' + id + ': ' + pname(id) + ' — ' + person(id).role),
-      ...(m.guests || []).map((g) => '- guest: ' + g),
-      '', 'Отклонения октября (факт / план):', ...deviations().filter((x) => m.areas.includes(x.area)).slice(0, 8).map((x) => '- ' + devLine(x)),
-      '', 'События октября:', ...C.events.filter((e) => m.areas.includes(e.area) || m.allDecisions).map((e) => '- ' + e.date + ': ' + e.text),
-      '', 'Открытые решения и задачи:', ...(open.length ? open.map((x) => '- [' + ({ overdue: 'просрочено', in_progress: 'в работе', new: 'новое' })[x.st] + '] «' + x.title + '» — ' + (x.owner ? pname(x.owner) + ' (id ' + x.owner + ')' : 'не назначен') + ', ' + dueLabel(x.due) + (x.source === 't1' ? ' (из пульта причин)' : '')) : ['- нет']),
-      '', 'Пункты документов, на которые можно ссылаться:', ...mat.list.map(([d, n]) => '[D:' + d + ':' + n + '] ' + doc(d).short + ', п. ' + n + ': ' + item(d, n).text),
-    ].join('\n');
-    const system = 'Ты — ИИ-помощник руководителя компании «Проявка» (сеть фотосалонов и цех печати). Готовишь бриф к встрече. ' +
-      'Пиши по-русски, коротко и по делу, только по фактам из контекста — ничего не выдумывай. Ответ — JSON: ' +
-      '{"goal":"одна фраза","agenda":[{"title":"пункт повестки","owner":"id участника","minutes":10,"why":"почему важно, с цифрами","cites":["D:calib:2"]}],' +
-      '"questions":[{"to":"id участника или guest","q":"вопрос"}],"risks":[{"text":"риск","cites":["D:bonus:3"]}]}. ' +
-      'Повестка — 4–6 пунктов, сумма минут не больше длительности встречи. Если есть открытые или просроченные решения — отдельный пункт «Контроль решений». ' +
-      'Решения из пульта причин обязательно включи в повестку. owner и to — только id из списка участников (или guest). cites — только из списка пунктов. ' +
-      'В текстах (title, why, q, text) называй людей по фамилии, а не по id. 3–5 вопросов, 2–4 риска.';
-    const r = await api.ai({ system, user: ctx, json: true, mask: true, who: who(), title: 'Бриф: ' + m.title, max_tokens: 1400, timeout: 40000 }, fb);
-    let brief = r.fallback ? fb : normBrief(r.json, m, fb);
-    if (!brief) { brief = fb; r.fallback = true; r.reason = 'ответ модели не по формату'; }
-    brief.materials = mat; brief.r = r; brief.ts = new Date().toISOString();
-    S.briefs[m.id] = brief; S.busy[m.id] = null;
-    render();
-  }
-  function normBrief(j, m, fb) {
-    if (!j || !Array.isArray(j.agenda) || !j.agenda.length) return null;
-    const ids = new Set(m.people);
-    const agenda = j.agenda.slice(0, 7).map((a) => ({ title: String(a.title || '').slice(0, 220), owner: ids.has(a.owner) ? a.owner : null,
-      minutes: Math.max(1, Math.min(60, parseInt(a.minutes, 10) || 5)), why: String(a.why || ''), cites: parseCites(a.cites) })).filter((a) => a.title);
-    // решения из пульта (трек 1) должны остаться в повестке, даже если модель их пропустила
-    fb.agenda.filter((a) => a.tag).forEach((a) => {
-      const key = a.title.replace('Решение из пульта: ', '').slice(0, 25).toLowerCase();
-      if (!agenda.some((x) => (x.title + x.why).toLowerCase().includes(key))) agenda.push(a);
-      else agenda.forEach((x) => { if ((x.title + x.why).toLowerCase().includes(key)) x.tag = 'Трек 1'; });
-    });
-    return {
-      goal: String(j.goal || m.goal),
-      agenda,
-      questions: (Array.isArray(j.questions) ? j.questions : []).slice(0, 6).map((q) => ({ to: ids.has(q.to) || q.to === 'guest' ? q.to : null, q: String(q.q || '') })).filter((q) => q.q),
-      risks: (Array.isArray(j.risks) ? j.risks : []).slice(0, 5).map((x) => typeof x === 'string' ? { text: x, cites: [] } : { text: String(x.text || ''), cites: parseCites(x.cites) }).filter((x) => x.text),
-    };
-  }
-
-  /* протокол: встроенный разбор расшифровки */
-  function parseProtocol(text, m) {
-    const sents = text.replace(/\n+/g, ' \n').split(/(?<=[.!?])\s+|\n/).map((s) => s.trim()).filter(Boolean);
-    const items = [];
-    const base = new Date(m.start);
-    sents.forEach((s0) => {
-      let s = s0;
-      const dm = s.match(/до (\d{1,2}) (октября|ноября|декабря)/i);
-      const mon = /с понедельника/i.test(s);
-      if (!dm && !mon) return;
-      for (let i = 0; i < 3; i++) s = s.replace(/^[А-ЯЁ][а-яё]+(?:\s[а-яё]+)?:\s*/, '');
-      let best = null, bestIdx = 1e9;
-      Object.keys(FIRST).forEach((nm) => {
-        const idx = s.search(new RegExp('(^|[\\s«])' + nm + '(?=[,\\s])'));
-        if (idx >= 0 && idx < bestIdx) { bestIdx = idx; best = FIRST[nm]; }
-      });
-      if (!best) return;
-      let title = s.replace(/^[А-ЯЁ][а-яё]+(?:\s+и\s+[А-ЯЁ][а-яё]+)?,\s*/, '')
-        .replace(/(до \d{1,2} (?:октября|ноября|декабря)|с понедельника),?\s*/i, '').replace(/[.!]+$/, '').trim();
-      title = title.charAt(0).toUpperCase() + title.slice(1);
-      let due;
-      if (dm) due = '2026-' + MONTHS[dm[2].toLowerCase()] + '-' + pad(dm[1]);
-      else { const d = new Date(base); d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7)); due = isoDay(d); }
-      items.push({ title, owner: best, due });
-    });
-    const b = S.briefs[m.id] || fallbackBrief(m);
-    const summary = 'Обсудили: ' + b.agenda.slice(0, 4).map((a) => a.title.replace(/:.*/, '').toLowerCase()).join('; ') + '. ' +
-      'Приняли ' + items.length + ' ' + plural(items.length, 'решение', 'решения', 'решений') + ' с ответственными и сроками.';
-    return { summary, items };
-  }
+  const initials = (id) => { const p = person(id); return p ? p.name.split(' ').slice(0, 2).map((w) => w[0]).join('') : '?'; };
+  const ava = (id) => id ? '<span class="ava" aria-hidden="true" style="background:' + HUES[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length] + '">' + esc(initials(id)) + '</span>' : '';
+  const isLead = () => S.me && (S.me.role === 'director' || S.me.role === 'head');
   const plural = (n, a, b, c) => { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20) ? b : c; };
+  const dLabel = (iso) => iso ? new Date(iso.length > 10 ? iso : iso + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : '';
+  const dueLabel = (iso) => iso ? 'до ' + dLabel(iso) : 'без срока';
+  const dayLabel = (iso) => { const t = new Date(iso).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }); return t.charAt(0).toUpperCase() + t.slice(1); };
+  const timeLabel = (iso) => new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
 
-  async function makeProtocol(m) {
-    const text = (S.notes[m.id] || '').trim();
-    if (!text) { toast('Сначала нужны заметки или расшифровка встречи'); return; }
-    S.busy[m.id] = 'protocol'; S.view[m.id] = 'protocol'; render();
-    const fb = parseProtocol(text, m);
-    const ppl = C.people.map((p) => '- ' + p.id + ': имя ' + p.name.split(' ')[0] + ', фамилия ' + p.name.split(' ')[1] + ', ' + p.role.toLowerCase()).join('\n');
-    const system = 'Ты ведёшь протокол встречи компании «Проявка». Из расшифровки извлеки все решения и поручения. ' +
-      'Верни JSON: {"summary":"2–3 предложения: что обсудили и к чему пришли","items":[{"title":"поручение, начинается с глагола","owner":"id","due":"YYYY-MM-DD"}]}. ' +
-      'owner — только id из списка людей; если ответственный не назван — null. Год — 2026. «С понедельника» — ближайший понедельник после даты встречи. ' +
-      'Не выдумывай поручений, которых нет в тексте. Если в поручении двое — owner первый названный.';
-    const user = 'Встреча: ' + m.title + ', ' + m.start.slice(0, 10) + ' (' + dayLabel(m.start) + ').\nЛюди:\n' + ppl + '\n\nРасшифровка:\n' + text;
-    const r = await api.ai({ system, user, json: true, mask: true, who: who(), title: 'Протокол: ' + m.title, max_tokens: 1400, timeout: 40000 }, fb);
-    let p = fb;
-    if (!r.fallback && r.json && Array.isArray(r.json.items) && r.json.items.length) {
-      p = { summary: String(r.json.summary || fb.summary), items: r.json.items.map((x) => ({ title: String(x.title || ''), owner: ownerId(x.owner),
-        due: /^\d{4}-\d{2}-\d{2}$/.test(x.due || '') ? x.due : '' })).filter((x) => x.title) };
-    } else if (!r.fallback) { r.fallback = true; r.reason = 'ответ модели не по формату'; }
-    p.r = r;
-    S.drafts[m.id] = p; S.busy[m.id] = null;
-    render();
+  /* ================= ВХОД ================= */
+  function renderLogin(msg) {
+    document.getElementById('nav').hidden = true;
+    document.getElementById('me').hidden = true;
+    app.innerHTML = '<div class="login card"><h2 class="sec">Вход в помощник</h2>' +
+      '<p class="sec-lead">Помощник видит ровно то, что положено вашей роли: права проверяет сервер по учётной записи.</p>' +
+      '<form data-act="login" class="stack" style="margin-top:14px">' +
+      '<div class="field"><label for="lg">Учётная запись</label><select class="select" id="lg">' +
+      LOGINS.map(([l, t]) => '<option value="' + l + '">' + esc(t) + ' — ' + l + '</option>').join('') + '</select></div>' +
+      '<div class="field"><label for="pw">Пароль</label><input class="input" id="pw" type="password" autocomplete="current-password" placeholder="тестовый пароль — в README"></div>' +
+      (msg ? '<p class="err" role="alert">' + esc(msg) + '</p>' : '') +
+      '<button class="btn btn-primary" type="submit">Войти</button></form>' +
+      '<p class="hint" style="margin-top:12px">Чтобы сравнить роли, откройте помощник во второй вкладке и войдите под другой учётной записью.</p></div>';
+    const pw = document.getElementById('pw'); if (pw) pw.focus();
+  }
+  async function signIn(login, password) {
+    try {
+      const r = await call('/api/login', { login, password });
+      sessionStorage.setItem(TOKEN_KEY, r.token);
+      await boot();
+    } catch (e) { renderLogin(e.status === 401 ? 'Неверный логин или пароль.' : e.message); }
+  }
+  function signOut(expired) {
+    try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* */ }
+    S.me = null; S.answer = null; S.audit = []; S.access = null;
+    renderLogin(expired ? 'Сессия закончилась — войдите снова.' : '');
   }
 
-  async function approve(m) {
-    const d = S.drafts[m.id];
-    const items = d.items.filter((x) => x.title.trim());
-    if (!items.length) { toast('В протоколе нет ни одного решения'); return; }
-    S.busy[m.id] = 'approve'; render();
-    const rec = await api.add('meetings', { meeting_id: m.id, title: m.title, date: m.start, participants: m.people, summary: d.summary,
-      items, approved_by: role().person, provider: d.r && !d.r.fallback ? d.r.provider : 'встроенная логика' });
-    const created = [];
-    for (const x of items) {
-      created.push(await api.add('tasks', { title: x.title, owner: x.owner, due: x.due, status: 'new', source: 't3', meeting: rec.id, meeting_title: m.title }));
-    }
-    S.sent[m.id] = created.map((t) => t.id);
-    if (S.health.telegram) {
-      for (const t of created) await api.telegram(tgText(t, m), who());
-    }
-    await loadStore();
-    S.busy[m.id] = null;
-    toast('Протокол утверждён: ' + created.length + ' ' + plural(created.length, 'задача ушла', 'задачи ушли', 'задач ушли') + ' исполнителям');
-    render();
+  /* ================= ВСТРЕЧИ И ПРОТОКОЛ (сценарий 3) ================= */
+  async function loadMeetings() {
+    const r = await call('/api/assistant/meetings');
+    S.meetings = r.meetings.sort((a, b) => a.start.localeCompare(b.start));
+    if (!S.meetings.find((m) => m.id === S.meetingId)) S.meetingId = (S.meetings.find((m) => m.status !== 'planned') || S.meetings[0] || {}).id || null;
   }
-  const tgText = (t, m) => '📋 Задача со встречи «' + m.title + '», ' + new Date(m.start).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) +
-    '\n\n' + t.title + '\nСрок: ' + dueLabel(t.due) + '\nПоставил: ' + pname(role().person);
-
-  /* ---------- рендер встреч ---------- */
+  async function loadTranscript(m) {
+    if (!m || !m.transcript_id || S.tr[m.id]) return;
+    const r = await call('/api/assistant/meetings/' + m.id);
+    S.tr[m.id] = r.transcript;
+    Object.assign(m, r.meeting);
+  }
   function renderMeetings() {
-    const vis = MEETINGS.filter(meetingVisible);
-    if (!vis.find((m) => m.id === S.meetingId) && vis.length) S.meetingId = vis[0].id;
     const days = {};
-    MEETINGS.forEach((m) => { (days[m.start.slice(0, 10)] = days[m.start.slice(0, 10)] || []).push(m); });
+    S.meetings.forEach((m) => { (days[m.start.slice(0, 10)] = days[m.start.slice(0, 10)] || []).push(m); });
     const list = Object.keys(days).map((d) => '<div><div class="day-label">' + esc(dayLabel(d + 'T12:00')) + '</div>' + days[d].map((m) => {
-      const ok = meetingVisible(m);
-      const done = S.meetings.some((x) => x.meeting_id === m.id);
-      const chip = done ? '<span class="chip chip-ok">протокол есть</span>' : S.briefs[m.id] ? '<span class="chip chip-accent">бриф готов</span>' : '';
-      return '<button class="meet' + (ok ? '' : ' locked') + '" ' + (ok ? 'data-act="meeting" data-id="' + m.id + '"' : 'disabled') + ' aria-current="' + (ok && m.id === S.meetingId) + '">' +
-        '<div class="meet-time">' + timeLabel(m.start) + ' · ' + m.dur + ' мин</div>' +
-        '<div class="meet-title">' + esc(m.title) + '</div>' +
-        '<div class="meet-foot"><span class="avas">' + m.people.map(ava).join('') + '</span>' + (ok ? chip : '<span class="chip">🔒 нет доступа</span>') + '</div></button>';
+      const chip = m.protocol ? '<span class="chip chip-ok">протокол утверждён</span>' : S.drafts[m.id] ? '<span class="chip chip-warn">черновик</span>'
+        : m.transcript_id ? '<span class="chip">есть расшифровка</span>' : '<span class="chip">запланирована</span>';
+      return '<button class="meet" data-act="meeting" data-id="' + m.id + '" aria-current="' + (m.id === S.meetingId) + '">' +
+        '<div class="meet-time">' + timeLabel(m.start) + ' · ' + m.minutes + ' мин</div><div class="meet-title">' + esc(m.title) + '</div>' +
+        '<div class="meet-foot"><span class="avas">' + m.participants.slice(0, 6).map(ava).join('') + '</span>' + chip + '</div></button>';
     }).join('') + '</div>').join('');
-    const m = vis.find((x) => x.id === S.meetingId);
-    return '<div class="sec-head"><div><h2 class="sec">Встречи недели</h2><p class="sec-lead">Помощник готовит бриф из отклонений, открытых решений и документов, ведёт протокол и раздаёт задачи.</p></div></div>' +
-      '<div class="meet-grid"><div class="week">' + list + '</div><section class="card detail">' + (m ? renderDetail(m) : '<p class="empty">Для этой роли встреч нет.</p>') + '</section></div>';
+    const m = S.meetings.find((x) => x.id === S.meetingId);
+    return '<div class="sec-head"><div><h2 class="sec">Встречи</h2><p class="sec-lead">Протокол из расшифровки: решения, вопросы, риски и задачи со ссылкой на реплику. В реестр — только после вашего подтверждения.</p></div></div>' +
+      (S.meetings.length ? '<div class="meet-grid"><div class="week">' + list + '</div><section class="card detail">' + (m ? renderMeeting(m) : '') + '</section></div>'
+        : '<p class="empty">Вы не участвуете ни в одной встрече этой недели. Встречи видят только их участники и директор.</p>');
   }
-  function renderDetail(m) {
-    const v = S.view[m.id] || 'brief';
-    const approved = S.meetings.filter((x) => x.meeting_id === m.id).slice(-1)[0];
-    const head = '<div class="detail-head"><div><div class="eyebrow">' + esc(dayLabel(m.start)) + ' · ' + timeLabel(m.start) + ' · ' + m.dur + ' мин</div>' +
-      '<h2>' + esc(m.title) + '</h2><p class="goal">' + esc(m.goal) + '</p>' +
-      '<div class="row" style="margin-top:10px;flex-wrap:wrap">' + m.people.map((id) => '<span class="person">' + ava(id) + esc(pname(id)) + '</span>').join('') +
-      (m.guests || []).map((g) => '<span class="chip">' + esc(g) + '</span>').join('') + '</div></div></div>';
-    const steps = '<div class="steps" role="tablist">' + [['brief', 'Бриф'], ['run', 'Встреча'], ['protocol', 'Протокол']].map(([k, l], i) =>
-      '<button role="tab" data-act="view" data-v="' + k + '" aria-selected="' + (v === k) + '"><span class="n">' + (i + 1) + '</span>' + l + '</button>').join('') + '</div>';
-    let body = '';
-    if (v === 'brief') body = renderBrief(m);
-    if (v === 'run') body = renderRun(m);
-    if (v === 'protocol') body = renderProtocol(m, approved);
-    return head + steps + body;
-  }
-  function renderBrief(m) {
-    if (S.busy[m.id] === 'brief') return '<div class="ai-note"><div class="ai-ava">ИИ</div><div class="ai-body"><b>Готовлю бриф</b><p class="muted typing">Смотрю отклонения октября, открытые решения участников и пункты документов</p></div></div>';
-    const b = S.briefs[m.id];
-    if (!b) {
-      return '<div class="ai-note"><div class="ai-ava">ИИ</div><div class="ai-body"><b>Подготовить встречу?</b>' +
-        '<p class="muted" style="margin-top:4px">Соберу повестку из отклонений пульта, открытых и просроченных решений участников (в том числе созданных в пульте причин), приложу пункты документов, предложу вопросы и риски. Персональные данные замаскирую до отправки модели.</p>' +
-        '<div class="actions" style="margin-top:12px"><button class="btn btn-primary" data-act="brief">Подготовить бриф</button></div></div></div>';
+  function renderMeeting(m) {
+    const v = S.mview[m.id] || (m.protocol ? 'protocol' : m.transcript_id ? 'protocol' : 'info');
+    const head = '<div class="detail-head"><div><div class="eyebrow">' + esc(dayLabel(m.start)) + ' · ' + timeLabel(m.start) + ' · ' + m.minutes + ' мин</div>' +
+      '<h2>' + esc(m.title) + '</h2><p class="goal">' + esc(m.goal || '') + '</p>' +
+      '<div class="row" style="margin-top:10px;flex-wrap:wrap;gap:10px">' + m.participants.map((id) => '<span class="person">' + ava(id) + esc(pname(id)) + '</span>').join('') + '</div></div></div>';
+    if (!m.transcript_id) {
+      return head + '<p class="empty">Встреча ещё не прошла — расшифровки нет. Подготовка повестки и приглашения (сценарии 1–2) появятся здесь.</p>';
     }
-    const total = b.agenda.reduce((s, a) => s + a.minutes, 0);
-    const mat = b.materials;
-    return '<div class="brief">' +
-      '<div><h4>Цель</h4><p>' + esc(b.goal) + '</p></div>' +
-      '<div><h4>Повестка · ' + total + ' из ' + m.dur + ' мин</h4><ol class="agenda">' + b.agenda.map((a, i) =>
-        '<li><span class="i">' + (i + 1) + '</span><div><div class="t">' + esc(a.title) + (a.tag ? ' <span class="chip chip-accent">' + esc(a.tag) + '</span>' : '') + '</div>' +
-        (a.why ? '<div class="why">' + esc(a.why) + '</div>' : '') + (a.cites && a.cites.length ? '<div style="margin-top:6px">' + cites(a.cites) + '</div>' : '') + '</div>' +
-        '<div class="meta"><span class="mono">' + a.minutes + ' мин</span>' + (a.owner ? '<span class="person">' + ava(a.owner) + esc(pname(a.owner).split(' ')[1] || '') + '</span>' : '') + '</div></li>').join('') + '</ol></div>' +
-      '<div class="two"><div><h4>Вопросы участникам</h4><ul class="qs">' + b.questions.map((q) => '<li><b>' + esc(q.to === 'guest' ? 'Гостю' : q.to ? pname(q.to) : 'Всем') + ':</b> ' + esc(q.q) + '</li>').join('') + '</ul></div>' +
-      '<div><h4>Риски</h4><ul class="risks">' + b.risks.map((x) => '<li>' + esc(x.text) + (x.cites && x.cites.length ? ' ' + cites(x.cites) : '') + '</li>').join('') + '</ul></div></div>' +
-      '<div><h4>Материалы к встрече</h4>' + (mat.list.length ? mat.list.map(([d, n]) => '<div class="mat">' + citeBtn(d, n) + esc(item(d, n).text) + '</div>').join('') : '<p class="empty">Нет доступных документов.</p>') +
-      (mat.hidden.length ? '<p class="locked-note" style="margin-top:8px">🔒 ' + mat.hidden.map((d) => '«' + esc(doc(d).title) + '»').join(', ') + ' — закрыто для роли «' + esc(role().label) + '». В бриф они не попали и в модель не отправлялись.</p>' : '') + '</div>' +
-      '<div class="row" style="justify-content:space-between;flex-wrap:wrap">' + provLine(b.r) +
-      '<div class="actions no-print"><button class="btn btn-sm" data-act="brief">Пересобрать</button><button class="btn btn-sm btn-primary" data-act="view" data-v="run">Начать встречу →</button></div></div>' +
-      '</div>';
+    const steps = '<div class="steps" role="tablist">' + [['transcript', 'Расшифровка'], ['protocol', 'Протокол']].map(([k, l], i) =>
+      '<button role="tab" data-act="mview" data-v="' + k + '" aria-selected="' + (v === k) + '"><span class="n">' + (i + 1) + '</span>' + l + '</button>').join('') + '</div>';
+    return head + steps + (v === 'transcript' ? renderTranscript(m) : renderProtocol(m));
   }
-  function renderRun(m) {
-    const b = S.briefs[m.id] || fallbackBrief(m);
-    const run = S.run[m.id] || { start: null, checked: [] };
-    const hasRec = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-    return '<div class="run"><div class="stack">' +
-      '<div class="row" style="justify-content:space-between"><div class="timer" id="timer">' + timerText(m) + '<small>из ' + m.dur + ' мин</small></div>' +
-      '<button class="btn btn-sm" data-act="timer">' + (run.start ? 'Сбросить' : 'Старт') + '</button></div>' +
-      '<div><div class="eyebrow" style="margin-bottom:4px">Повестка</div><ul class="check">' + b.agenda.map((a, i) => {
-        const done = run.checked.includes(i);
-        return '<li class="' + (done ? 'done' : '') + '"><input type="checkbox" data-act="check" data-i="' + i + '" ' + (done ? 'checked' : '') + ' aria-label="Пункт ' + (i + 1) + '"><span>' + esc(a.title) + ' <span class="faint mono">' + a.minutes + ' мин</span></span></li>';
-      }).join('') + '</ul></div></div>' +
-      '<div class="stack"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><div class="eyebrow">Заметки и расшифровка</div>' +
-      '<div class="actions"><button class="btn btn-sm rec' + (S.recOn ? ' on' : '') + '" data-act="mic" ' + (hasRec ? '' : 'disabled') + '><span class="dot" style="color:var(--ink3)"></span>' + (S.recOn ? 'Остановить' : 'Диктовать') + '</button>' +
-      '<button class="btn btn-sm" data-act="demo">Вставить демо-расшифровку</button></div></div>' +
-      '<textarea class="textarea notes" id="notes" placeholder="Кто что сказал и что решили. Формат «Решение: Имя, до 12 ноября — что сделать» помощник разберёт и без модели.">' + esc(S.notes[m.id] || '') + '</textarea>' +
-      '<p class="hint">' + (hasRec ? 'Сейчас речь распознаёт браузер.' : 'Этот браузер не распознаёт речь.') + ' В защищённом контуре распознавание идёт на вашем сервере (локальный Whisper) — звук наружу не уходит.</p>' +
-      '<div class="actions"><button class="btn btn-primary" data-act="protocol">Сформировать протокол →</button></div></div></div>';
+  function renderTranscript(m) {
+    const tr = S.tr[m.id];
+    if (!tr) return '<p class="muted typing">Загружаю расшифровку</p>';
+    return '<div class="transcript">' + tr.lines.map((ln, i) => '<div class="tline' + (S.hlLine === i ? ' hl' : '') + '" id="ln-' + i + '">' +
+      '<span class="mono t">' + esc(ln.t) + '</span><span class="who">' + ava(ln.s) + esc(pname(ln.s)) + '</span><span class="tx">' + esc(ln.text) + '</span></div>').join('') +
+      '</div><p class="hint" style="margin-top:10px">' + (tr.control ? 'Контрольная расшифровка для приёмки: эталон задач — в data/eval/control.json. ' : '') +
+      'Тестовая расшифровка. На живой встрече текст приходит из распознавания речи на сервере компании.</p>' +
+      (m.protocol ? '' : '<div class="actions" style="margin-top:12px"><button class="btn btn-primary" data-act="draft">Составить протокол →</button></div>');
   }
-  function timerText(m) {
-    const run = S.run[m.id];
-    if (!run || !run.start) return '00:00';
-    const s = Math.floor((Date.now() - run.start) / 1000);
-    return pad(Math.floor(s / 60)) + ':' + pad(s % 60);
+  const lineLink = (m, line, t) => line == null ? '' : '<button class="cite" data-act="line" data-m="' + m.id + '" data-l="' + line + '" title="Открыть реплику в расшифровке">' + esc(t || ('реплика ' + line)) + '</button>';
+
+  async function makeDraft(m) {
+    if (!isLead()) { toast('Протокол утверждает руководитель. Вы можете читать расшифровку и протокол.'); return; }
+    S.busy[m.id] = 'draft'; S.mview[m.id] = 'protocol'; render();
+    try {
+      const p = await call('/api/assistant/protocol', { meeting_id: m.id });
+      p.key = uid();
+      p.tasks.forEach((t) => { t.skip = false; });
+      S.drafts[m.id] = p; saveDrafts();
+    } catch (e) { fail(e); }
+    S.busy[m.id] = null; render();
   }
-  function renderProtocol(m, approved) {
-    if (S.busy[m.id] === 'protocol') return '<div class="ai-note"><div class="ai-ava">ИИ</div><div class="ai-body"><b>Составляю протокол</b><p class="muted typing">Ищу решения, ответственных и сроки</p></div></div>';
+  function renderProtocol(m) {
+    if (S.busy[m.id] === 'draft') return '<div class="ai-note"><div class="ai-ava">ИИ</div><div class="ai-body"><b>Составляю протокол</b><p class="muted typing">Ищу решения, поручения, сроки и риски в расшифровке</p></div></div>';
+    if (m.protocol) return renderSaved(m);
     const d = S.drafts[m.id];
-    const sent = S.sent[m.id];
-    if (sent && sent.length) {
-      const ts = S.tasks.filter((t) => sent.includes(t.id));
-      return '<div class="stack"><div class="ai-note"><div class="ai-ava">ИИ</div><div class="ai-body"><b>Протокол утверждён</b><p class="muted">' + esc((approved && approved.summary) || (d && d.summary) || '') + '</p>' +
-        '<p class="ai-src">Задачи в контроле: ' + ts.length + '. Каждому исполнителю ушло сообщение' + (S.health.telegram ? ' в Telegram' : ' (ниже — как оно выглядит в Telegram)') + '. Статусы видны на доске «Задачи» и в итогах недели.</p></div></div>' +
-        '<div class="tg-grid">' + ts.map((t) => '<div class="tg"><div class="tg-head">' + ava(t.owner) + esc(pname(t.owner)) + ' · Telegram</div>' +
-          '<div class="tg-msg">' + esc(tgText(t, m)) + '</div><div class="tg-btns">' +
-          (effStatus(t) === 'new' ? '<button class="tg-btn" data-act="tg" data-id="' + t.id + '" data-s="in_progress">✅ Принято</button><button class="tg-btn" data-act="tg" data-id="' + t.id + '" data-s="question">❓ Вопрос</button>'
-            : '<span class="chip chip-ok">' + (effStatus(t) === 'done' ? 'Выполнено' : 'Принято в работу') + '</span>') + '</div></div>').join('') + '</div>' +
-        '<div class="actions"><button class="btn btn-sm" data-act="tab" data-tab="tasks">Открыть доску задач →</button></div></div>';
+    if (!d) {
+      return '<div class="ai-note"><div class="ai-ava">ИИ</div><div class="ai-body"><b>Составить протокол по расшифровке?</b>' +
+        '<p class="muted" style="margin-top:4px">Разделю пункты на «решено», «предложено», «обсуждалось» и «требует уточнения», выпишу задачи с владельцем, сроком и ссылкой на реплику. ' +
+        'Если владелец или срок не названы — не выдумываю, а помечаю «требует уточнения». Ничего не сохраняю без вашего подтверждения.</p>' +
+        '<div class="actions" style="margin-top:12px">' + (isLead() ? '<button class="btn btn-primary" data-act="draft">Составить протокол</button>' : '<span class="chip">утверждает руководитель</span>') +
+        '<button class="btn" data-act="mview" data-v="transcript">Посмотреть расшифровку</button></div></div></div>';
     }
-    if (approved && !d) {
-      return '<div class="ai-note"><div class="ai-ava">ИИ</div><div class="ai-body"><b>Протокол уже утверждён</b><p class="muted">' + esc(approved.summary || '') + '</p>' +
-        '<ul class="list" style="margin-top:8px">' + (approved.items || []).map((x) => '<li><span>' + esc(x.title) + '</span><span class="r">' + esc(pname(x.owner)) + ' · ' + dueLabel(x.due) + '</span></li>').join('') + '</ul></div></div>';
+    const opts = (sel) => '<option value="">— не назначен —</option>' + S.people.map((p) => '<option value="' + p.id + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(p.name + ' · ' + p.title) + '</option>').join('');
+    const nT = d.tasks.filter((t) => !t.skip).length;
+    const unclear = d.tasks.filter((t) => !t.skip && (!t.owner || !t.due)).length;
+    return '<div class="stack proto">' +
+      '<div class="prov">' + provBadge(d) + '</div>' +
+      '<div class="field"><label for="psum">Итог встречи</label><textarea class="textarea" id="psum" data-f="summary" style="min-height:64px">' + esc(d.summary) + '</textarea></div>' +
+      '<div><h4 class="h4">Пункты протокола</h4><table class="table ptable"><thead><tr><th>Пункт</th><th>Статус</th><th>Основание</th><th></th></tr></thead><tbody>' +
+      d.points.map((p, i) => '<tr class="' + (p.skip ? 'skipped' : '') + '"><td><input data-pt="' + i + '" data-f="text" value="' + esc(p.text) + '" aria-label="Пункт ' + (i + 1) + '"></td>' +
+        '<td><select data-pt="' + i + '" data-f="status" aria-label="Статус пункта">' + STATUSES.map((s) => '<option' + (s === p.status ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td>' +
+        '<td>' + lineLink(m, p.line, p.t) + '</td><td><button class="x" data-act="pt-del" data-i="' + i + '" aria-label="Убрать пункт">×</button></td></tr>').join('') +
+      '</tbody></table><button class="btn btn-sm btn-ghost" data-act="pt-add" style="margin-top:6px">+ Пункт</button></div>' +
+      '<div><h4 class="h4">Задачи · ' + nT + (unclear ? ' · требует уточнения: ' + unclear : '') + '</h4><table class="table ptable tasks"><thead><tr><th>Задача</th><th>Ответственный</th><th>Срок</th><th>Основание</th><th></th></tr></thead><tbody>' +
+      d.tasks.map((t, i) => {
+        const sug = [];
+        if (!t.owner && t.suggested_owner) sug.push('<button class="sugg-chip" data-act="sug-owner" data-i="' + i + '">Помощник предлагает: ' + esc(pname(t.suggested_owner)) + '</button>');
+        if (!t.due && t.suggested_due) sug.push('<button class="sugg-chip" data-act="sug-due" data-i="' + i + '">Предложить срок: ' + esc(dLabel(t.suggested_due)) + '</button>');
+        const flags = [!t.owner ? 'нет владельца' : '', !t.due ? 'нет срока' : ''].filter(Boolean);
+        return '<tr class="' + (t.skip ? 'skipped' : '') + '"><td><input data-tk="' + i + '" data-f="title" value="' + esc(t.title) + '" aria-label="Задача ' + (i + 1) + '">' +
+          (flags.length ? '<div class="flags"><span class="chip chip-warn">требует уточнения: ' + flags.join(', ') + '</span>' + sug.join('') + '</div>' : '') + '</td>' +
+          '<td><select data-tk="' + i + '" data-f="owner" aria-label="Ответственный">' + opts(t.owner) + '</select></td>' +
+          '<td><input type="date" data-tk="' + i + '" data-f="due" value="' + esc(t.due || '') + '" aria-label="Срок"></td>' +
+          '<td>' + lineLink(m, t.line, t.t) + '</td>' +
+          '<td><button class="x" data-act="tk-del" data-i="' + i + '" aria-label="' + (t.skip ? 'Вернуть задачу' : 'Не создавать задачу') + '">' + (t.skip ? '↺' : '×') + '</button></td></tr>';
+      }).join('') + '</tbody></table><button class="btn btn-sm btn-ghost" data-act="tk-add" style="margin-top:6px">+ Задача</button></div>' +
+      (d.risks.length ? '<div><h4 class="h4">Риски</h4><ul class="risks">' + d.risks.map((r) => '<li>' + esc(r.text) + ' ' + lineLink(m, r.line, r.t) + '</li>').join('') + '</ul></div>' : '') +
+      feedbackRow('protocol:' + m.id) +
+      '<div class="actions"><button class="btn btn-primary" data-act="preview">Сохранить протокол и задачи…</button>' +
+      '<button class="btn" data-act="redraft">Составить заново</button><button class="btn btn-ghost" data-act="discard">Отменить черновик</button></div>' +
+      '<p class="hint">Пока вы не нажали «Подтвердить», в реестре ничего не меняется. Черновик сохраняется в этой вкладке.</p></div>';
+  }
+  function provBadge(d) {
+    if (d.fallback) return '<span class="chip">Встроенная логика' + (d.reason ? ' · ' + esc(d.reason) : '') + '</span><span>Модель не использовалась: разбор правилами на сервере.</span>';
+    return '<span class="chip chip-accent">' + esc(d.provider || 'модель') + '</span><span>Имена заменены кодами сотрудников до отправки' + (d.outside ? ', суммы и контакты замаскированы' : '') + '.</span>';
+  }
+  function renderSaved(m) {
+    const p = m.protocol;
+    const tasks = S.tasks.filter((t) => (p.task_ids || []).includes(t.id));
+    return '<div class="stack"><div class="ai-note"><div class="ai-ava">✓</div><div class="ai-body"><b>Протокол утверждён</b>' +
+      '<p class="muted">' + esc(pname(p.approved_by)) + ' · ' + esc(fmt.dt(p.approved_at)) + (p.provider ? ' · ' + esc(p.provider) : '') + '</p>' +
+      '<p style="margin-top:6px">' + esc(p.summary) + '</p></div></div>' +
+      '<div><h4 class="h4">Пункты</h4><ul class="list">' + p.points.map((x) => '<li><span><span class="' + (ST_CHIP[x.status] || 'chip') + '">' + esc(x.status) + '</span> ' + esc(x.text) + '</span><span class="r">' + lineLink(m, x.line, x.t) + '</span></li>').join('') + '</ul></div>' +
+      '<div><h4 class="h4">Задачи из протокола · ' + (p.task_ids || []).length + '</h4><ul class="list">' + (tasks.length ? tasks.map((t) =>
+        '<li><span>' + esc(t.title) + '</span><span class="r">' + esc(pname(t.owner)) + ' · ' + esc(dueLabel(t.due)) + ' <button class="cite" data-act="goto-task" data-id="' + t.id + '">в реестре</button></span></li>').join('')
+        : '<li class="empty">Задачи созданы, но вне вашей зоны видимости.</li>') + '</ul></div>' +
+      (p.risks && p.risks.length ? '<div><h4 class="h4">Риски</h4><ul class="risks">' + p.risks.map((r) => '<li>' + esc(r.text) + ' ' + lineLink(m, r.line, r.t) + '</li>').join('') + '</ul></div>' : '') +
+      '<p class="hint">Протокол хранит ссылку на расшифровку, задачи — ссылку на встречу и реплику-основание.</p></div>';
+  }
+  function previewModal(m) {
+    const d = S.drafts[m.id];
+    const tasks = d.tasks.filter((t) => !t.skip && t.title.trim());
+    const pts = d.points.filter((p) => !p.skip && p.text.trim());
+    openModal('<h3>Подтвердите сохранение</h3><p class="muted" style="margin:4px 0 12px">Будет записано в систему от имени: <b>' + esc(S.me.name) + '</b> Отмена ничего не меняет.</p>' +
+      '<div class="card-flat"><b>Протокол встречи «' + esc(m.title) + '»</b><p class="muted">' + pts.length + ' ' + plural(pts.length, 'пункт', 'пункта', 'пунктов') +
+      ': решено ' + pts.filter((p) => p.status === 'решено').length + ', требует уточнения ' + pts.filter((p) => p.status === 'требует уточнения').length + '. Ссылка на расшифровку сохранится.</p></div>' +
+      '<h4 class="h4" style="margin-top:14px">Будут созданы задачи · ' + tasks.length + '</h4><ul class="list">' + tasks.map((t) =>
+        '<li><span>' + esc(t.title) + '</span><span class="r">' + (t.owner && t.due ? esc(pname(t.owner)) + ' · ' + esc(dueLabel(t.due)) : '<span class="chip chip-warn">требует уточнения</span>') + '</span></li>').join('') + '</ul>' +
+      '<div class="actions" style="margin-top:16px"><button class="btn btn-primary" data-act="confirm" data-m="' + m.id + '">Подтвердить и сохранить</button><button class="btn" data-act="close">Отмена</button></div>');
+  }
+  async function confirmSave(mid) {
+    const m = S.meetings.find((x) => x.id === mid);
+    const d = S.drafts[mid];
+    const btn = modalEl.querySelector('[data-act="confirm"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Сохраняю…'; }
+    try {
+      // повторное нажатие или обрыв связи не создают второй протокол: сервер узнаёт запрос по ключу d.key
+      await call('/api/assistant/protocol/confirm', { meeting_id: mid, key: d.key, summary: d.summary, provider: d.provider,
+        points: d.points.filter((p) => !p.skip), risks: d.risks, tasks: d.tasks.filter((t) => !t.skip) });
+      delete S.drafts[mid]; saveDrafts();
+      closeModal();
+      await Promise.all([loadMeetings(), loadTasks()]);
+      toast('Протокол сохранён, задачи в реестре');
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Подтвердить и сохранить'; }
+      fail(e);
+      if (e.status === 409) { delete S.drafts[mid]; saveDrafts(); closeModal(); await loadMeetings(); }
     }
-    if (!d) return '<p class="empty">Протокола пока нет. На шаге «Встреча» вставьте заметки или расшифровку и нажмите «Сформировать протокол».</p>';
-    return '<div class="stack"><div class="field"><label for="psum">Итог встречи</label><textarea class="textarea" id="psum" data-act="psum" style="min-height:70px">' + esc(d.summary) + '</textarea></div>' +
-      '<table class="table ptable"><thead><tr><th>Решение / поручение</th><th>Ответственный</th><th>Срок</th><th></th></tr></thead><tbody>' +
-      d.items.map((x, i) => '<tr><td><input data-pi="' + i + '" data-f="title" value="' + esc(x.title) + '" aria-label="Поручение"></td>' +
-        '<td><select data-pi="' + i + '" data-f="owner" aria-label="Ответственный"><option value="">— не назначен —</option>' + C.people.map((p) => '<option value="' + p.id + '"' + (p.id === x.owner ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></td>' +
-        '<td><input type="date" data-pi="' + i + '" data-f="due" value="' + esc(x.due || '') + '" aria-label="Срок"></td>' +
-        '<td><button class="x" data-act="prow-del" data-i="' + i + '" aria-label="Удалить строку">×</button></td></tr>').join('') +
-      '</tbody></table>' +
-      '<div class="row" style="justify-content:space-between;flex-wrap:wrap"><button class="btn btn-sm btn-ghost" data-act="prow-add">+ Добавить строку</button>' + provLine(d.r) + '</div>' +
-      '<div class="actions"><button class="btn btn-primary" data-act="approve" ' + (S.busy[m.id] === 'approve' ? 'disabled' : '') + '>' + (S.busy[m.id] === 'approve' ? '<span class="spin"></span> Рассылаю…' : 'Утвердить и разослать исполнителям') + '</button>' +
-      '<button class="btn" data-act="view" data-v="run">← К заметкам</button></div></div>';
+    render();
+    if (m) S.mview[mid] = 'protocol';
   }
 
-  /* ================= ДОКУМЕНТЫ ================= */
-  const SUGG = ['Как часто калибровать минилаб?', 'Может ли новый оператор калибровать сам?', 'Сколько человек должно быть в смене салона?',
-    'Какой брак допустим для премии?', 'Какая скидка у поставщика за объём?', 'Что делать, если салону нужна замена?'];
-  async function askDocs(q) {
+  /* ================= ДОКУМЕНТЫ (сценарий 5) ================= */
+  async function loadDocs() {
+    const r = await call('/api/assistant/docs');
+    S.docs = r.docs; S.docsHidden = r.hidden; S.docsTotal = r.total;
+    if (!S.docs.find((d) => d.id === S.docId)) S.docId = S.docs[0] ? S.docs[0].id : null;
+  }
+  const SUGG = ['Какая допустимая доля перепечаток?', 'Сколько переплётчиков нужно в смене в сезон?', 'Во сколько Белпочта забирает отправления?',
+    'Какой срок первого ответа клиенту в чате?', 'Когда новый сотрудник может работать на оборудовании сам?', 'Какая выручка за 3 квартал?'];
+  async function ask(q) {
     q = String(q || '').trim();
     if (!q) return;
-    const docs = visibleDocs();
-    const hidden = allDocs().length - docs.length;
-    const hits = search(q, docs, 5);
-    S.answer = { q, hits, hidden, loading: true }; render();
-    if (!hits.length) {
-      S.answer = { q, hits, hidden, text: 'В доступных вам документах ответа на этот вопрос нет.', r: { fallback: true } };
-      render(); return;
-    }
-    const ctx = hits.map((h) => '[D:' + h.doc.id + ':' + h.it.n + '] ' + h.doc.title + ', п. ' + h.it.n + ': ' + h.it.text).join('\n');
-    const fb = () => 'Ближайшие пункты из доступных вам документов (дословно, без модели):\n\n' + hits.slice(0, 3).map((h) => h.it.text + ' [D:' + h.doc.id + ':' + h.it.n + ']').join('\n\n');
-    const r = await api.ai({
-      system: 'Ты — помощник руководителя компании «Проявка». Отвечай только по приведённым пунктам документов, по-русски, 2–5 предложений. ' +
-        'После каждого утверждения ставь ссылку на пункт строго в формате [D:id:номер], каждую ссылку в отдельных скобках. ' +
-        'Если в пунктах нет ответа — так и скажи: «В документах этого нет». Ничего не добавляй от себя.',
-      user: 'Вопрос: ' + q + '\n\nПункты документов:\n' + ctx, mask: true, who: who(), title: 'Вопрос по документам: ' + q, max_tokens: 600,
-    }, fb);
-    S.answer = { q, hits, hidden, text: r.text, r };
-    if (hits[0]) { S.docId = hits[0].doc.id; S.hl = null; }
+    S.qText = q; S.answer = { q, loading: true }; render();
+    try {
+      const r = await call('/api/assistant/ask', { q });
+      S.answer = r;
+      if (r.cites && r.cites[0]) { S.docId = r.cites[0].doc; S.hl = r.cites.filter((c) => c.doc === S.docId).map((c) => c.n); }
+    } catch (e) { S.answer = { q, error: e.message }; }
     render();
   }
+  function richAnswer(a) {
+    const byKey = {};
+    (a.cites || []).forEach((c) => { byKey[c.doc + ':' + c.n] = c; });
+    let h = esc(a.answer || '');
+    h = h.replace(/\[D:(d\d+):(\d+)\]/g, (m0, d, n) => { const c = byKey[d + ':' + n]; return c ? citeBtn(c) : ''; });
+    return h.split(/\n{2,}/).map((p) => '<p>' + p.replace(/\n/g, '<br>') + '</p>').join('');
+  }
+  const citeBtn = (c) => '<button class="cite" data-act="cite" data-doc="' + esc(c.doc) + '" data-n="' + esc(c.n) + '" title="' + esc(c.title) + ', от ' + esc(dLabel(c.date)) + '">' + esc(c.code) + ', п. ' + esc(c.n) + '</button>';
   function renderDocs() {
-    if (!docVisible(S.docId)) { const v = visibleDocs()[0]; S.docId = v ? v.id : null; }
-    const list = allDocs().map((d) => {
-      const ok = d.access.includes(S.role);
-      return '<li><button class="' + (ok ? '' : 'locked') + '" ' + (ok ? 'data-act="doc" data-id="' + d.id + '"' : 'disabled') + ' aria-current="' + (d.id === S.docId) + '">' +
-        '<span class="doc-ico">' + (ok ? esc((d.kind || 'Док').slice(0, 3).toUpperCase()) : '🔒') + '</span><span><span>' + esc(d.title) + '</span><br><span class="k">' +
-        (ok ? esc(d.code || '') + (d.local ? ' · только в этом браузере' : '') : 'закрыто для роли «' + esc(role().label) + '»') + '</span></span></button></li>';
-    }).join('');
     const a = S.answer;
     let ans = '';
     if (a) {
-      const foundIn = [...new Set(a.hits.map((h) => h.doc.short))];
       ans = '<div class="answer"><div class="ai-note"><div class="ai-ava">ИИ</div><div class="ai-body">' +
-        (a.loading ? '<p class="muted typing">Ищу в ' + visibleDocs().length + ' документах и формулирую ответ</p>' : rich(a.text)) +
-        (foundIn.length && !a.loading ? '<p class="ai-src">Искал в доступных документах, нашла в: ' + foundIn.map(esc).join(', ') + '.</p>' : '') +
-        (a.hidden ? '<p class="ai-src">🔒 Не искал в ' + a.hidden + ' ' + plural(a.hidden, 'документе', 'документах', 'документах') + ' — они закрыты для роли «' + esc(role().label) + '».</p>' : '') +
-        (!a.loading ? provLine(a.r) : '') + '</div></div></div>';
+        (a.loading ? '<p class="muted typing">Ищу в доступных вам документах</p>' : a.error ? '<p class="err" role="alert">' + esc(a.error) + '</p><button class="btn btn-sm" data-act="retry">Повторить</button>' :
+          richAnswer(a) +
+          (a.cites && a.cites.length ? '<div class="sources"><div class="eyebrow">Источники</div>' + a.cites.map((c) => '<div class="src-row">' + citeBtn(c) +
+            '<span>' + esc(c.title) + ' · от ' + esc(new Date(c.date).toLocaleDateString('ru-RU')) + '</span></div>').join('') + '</div>' : '') +
+          ((a.notes || []).includes('injection') ? '<p class="ai-src">⚠ В найденном фрагменте есть текст, похожий на указание для ИИ. Помощник считает его данными и не выполняет.</p>' : '') +
+          '<p class="ai-src">Искал в ' + a.searched + ' ' + plural(a.searched, 'документе', 'документах', 'документах') + (a.hidden ? '; ' + a.hidden + ' закрыты для вашей роли и в поиск не попадали' : '') + '.</p>' +
+          '<div class="prov">' + (a.fallback ? '<span class="chip">Встроенная логика</span>' + (a.reason ? '<span>' + esc(a.reason) + '</span>' : '') : '<span class="chip chip-accent">' + esc(a.provider) + '</span>' +
+            (a.masked && a.masked.count ? '<span class="chip chip-ok">замаскировано: ' + a.masked.count + '</span>' : '')) + '</div>' +
+          feedbackRow('ask:' + a.q)) + '</div></div></div>';
     }
-    const d = doc(S.docId);
-    const hitSet = new Set(a && !a.loading ? a.hits.filter((h) => h.doc.id === S.docId).map((h) => h.it.n) : []);
-    const view = d ? '<div class="card-flat doc-view" style="margin-top:16px"><div class="eyebrow">' + esc(d.kind || 'Документ') + '</div><h3 style="font-size:18px;margin-top:2px">' + esc(d.title) + '</h3>' +
-      '<div class="doc-meta"><span class="chip">' + esc(d.code || '') + '</span>' + (d.date ? '<span class="chip">от ' + esc(new Date(d.date).toLocaleDateString('ru-RU')) + '</span>' : '') +
-      '<span class="chip chip-ok">видят: ' + d.access.map((r) => ROLES[r].label).join(', ') + '</span></div>' +
-      d.items.map((it) => '<div class="item' + (S.hl === it.n ? ' hl' : hitSet.has(it.n) ? ' found' : '') + '" id="it-' + esc(it.n) + '"><span class="n">' + esc(it.n) + '.</span><span>' + esc(it.text) + '</span></div>').join('') + '</div>'
-      : '<p class="empty">Для этой роли нет доступных документов.</p>';
-    return '<div class="sec-head"><div><h2 class="sec">Документы компании</h2><p class="sec-lead">Помощник отвечает только по пунктам документов и ставит ссылки. Документы вне вашей роли не участвуют в поиске.</p></div></div>' +
-      '<div class="docs-grid"><div class="card"><ul class="doc-list">' + list + '</ul>' +
-      '<label class="btn btn-sm btn-ghost" style="margin-top:8px;width:100%">+ Свой документ (.txt, .md)<input type="file" id="upload" accept=".txt,.md,text/plain,text/markdown" hidden></label>' +
-      '<p class="hint" style="padding:0 6px">Загруженный файл живёт только в этом браузере и пропадёт после перезагрузки.</p></div>' +
-      '<div><div class="card"><form class="ask" data-act="ask"><input class="input" id="q" placeholder="Спросите, например: кто отвечает за калибровку?" value="' + esc(a ? a.q : '') + '" autocomplete="off">' +
+    const d = S.docs.find((x) => x.id === S.docId);
+    const hl = new Set(S.hl || []);
+    const list = S.docs.map((x) => '<li><button data-act="doc" data-id="' + x.id + '" aria-current="' + (x.id === S.docId) + '"><span class="doc-ico">' + esc((x.kind || 'Док').slice(0, 3).toUpperCase()) + '</span>' +
+      '<span><span>' + esc(x.title) + '</span><br><span class="k">' + esc(x.code) + ' · от ' + esc(new Date(x.date).toLocaleDateString('ru-RU')) + '</span></span></button></li>').join('');
+    const view = d ? '<div class="card-flat doc-view" style="margin-top:16px"><div class="eyebrow">' + esc(d.kind) + '</div><h3 style="font-size:18px;margin-top:2px">' + esc(d.title) + '</h3>' +
+      '<div class="doc-meta"><span class="chip">' + esc(d.code) + '</span><span class="chip">от ' + esc(new Date(d.date).toLocaleDateString('ru-RU')) + '</span><span class="chip chip-ok">видят: ' + esc(d.access_label) + '</span></div>' +
+      (d.sensitive ? '<p class="locked-note" style="margin:8px 0">Документ содержит ' + esc(d.sensitive) + '. Вы можете его читать, но помощник не использует его в ответах и не цитирует.</p>' : '') +
+      d.items.map((it) => '<div class="item' + (hl.has(it.n) ? ' found' : '') + '" id="it-' + esc(it.n) + '"><span class="n">' + esc(it.n) + '.</span><span>' + esc(it.text) + '</span></div>').join('') + '</div>'
+      : '<p class="empty">Для вашей роли нет доступных документов.</p>';
+    return '<div class="sec-head"><div><h2 class="sec">Документы компании</h2><p class="sec-lead">Ответ — только по пунктам доступных вам документов, со ссылкой на пункт и дату. Нет основания — помощник так и скажет.</p></div></div>' +
+      '<div class="docs-grid"><div class="card"><p class="muted" style="font-size:13.5px;margin:0 6px 8px">Вам доступно ' + S.docs.length + ' из ' + S.docsTotal + '.' + (S.docsHidden ? ' Остальные закрыты для вашей роли — их названия не показываются.' : '') + '</p><ul class="doc-list">' + list + '</ul></div>' +
+      '<div><div class="card"><form class="ask" data-act="ask"><label class="sr" for="q">Вопрос по документам</label><input class="input" id="q" placeholder="Например: сколько переплётчиков нужно в смене?" value="' + esc(S.qText) + '" autocomplete="off">' +
       '<button class="btn btn-primary" type="submit">Спросить</button></form>' +
       '<div class="sugg">' + SUGG.map((s) => '<button data-act="sugg">' + esc(s) + '</button>').join('') + '</div>' + ans + '</div>' + view + '</div></div>';
   }
 
-  /* ================= ЗАДАЧИ ================= */
-  function renderTasks() {
-    const all = workItems();
-    const vis = all.filter((x) => canSeeOwner(x.owner));
-    const hidden = all.length - vis.length;
-    const people = [...new Set(vis.map((x) => x.owner).filter(Boolean))];
-    if (S.filter !== 'all' && !people.includes(S.filter)) S.filter = 'all';
-    const shown = vis.filter((x) => S.filter === 'all' || x.owner === S.filter);
-    const cols = [['new', 'Новые'], ['in_progress', 'В работе'], ['overdue', 'Просрочено'], ['done', 'Готово']];
-    const fresh = new Set(Object.values(S.sent).flat());
-    const card = (x) => '<div class="tcard' + (x.st === 'overdue' ? ' overdue' : '') + (fresh.has(x.id) ? ' fresh' : '') + '"><div class="tt">' + esc(x.title) + '</div>' +
-      '<div class="tm"><span class="person">' + (x.owner ? ava(x.owner) + esc(pname(x.owner)) : 'не назначен') + '</span><span class="' + (x.st === 'overdue' ? 'chip chip-bad' : 'chip') + '">' + dueLabel(x.due) + '</span></div>' +
-      '<div class="src">' + esc(srcLabel(x)) + (x.st === 'overdue' && x.status === 'in_progress' ? ' · в работе' : '') + '</div>' +
-      '<div class="tb">' + (x.st !== 'done' && x.status !== 'in_progress' ? '<button class="btn btn-sm" data-act="st" data-kind="' + x.kind + '" data-id="' + x.id + '" data-s="in_progress">В работу</button>' : '') +
-      (x.st !== 'done' ? '<button class="btn btn-sm" data-act="st" data-kind="' + x.kind + '" data-id="' + x.id + '" data-s="done">Готово</button>' :
-        '<button class="btn btn-sm btn-ghost" data-act="st" data-kind="' + x.kind + '" data-id="' + x.id + '" data-s="in_progress">Вернуть</button>') + '</div></div>';
-    return '<div class="sec-head"><div><h2 class="sec">Задачи и решения</h2><p class="sec-lead">Всё, что решили на встречах и в пульте причин, — с ответственным и сроком. Просрочка видна сразу.</p></div>' +
-      '<label class="row"><span class="faint">Кто</span><select class="select" data-act="filter" style="width:auto"><option value="all">Все (' + vis.length + ')</option>' +
-      people.map((id) => '<option value="' + id + '"' + (S.filter === id ? ' selected' : '') + '>' + esc(pname(id)) + '</option>').join('') + '</select></label></div>' +
-      (hidden ? '<p class="locked-note" style="margin-bottom:12px">🔒 Ещё ' + hidden + ' ' + plural(hidden, 'задача скрыта', 'задачи скрыты', 'задач скрыто') + ' — они вне участка роли «' + esc(role().label) + '».</p>' : '') +
-      '<div class="board">' + cols.map(([k, l]) => { const xs = shown.filter((x) => x.st === k); return '<div class="col"><h3><span>' + l + '</span><span class="faint mono">' + xs.length + '</span></h3>' + (xs.length ? xs.map(card).join('') : '<p class="empty">Пусто</p>') + '</div>'; }).join('') + '</div>';
+  /* ---------- обратная связь (AI-07) ---------- */
+  const feedbackRow = (ref) => '<div class="fb" data-ref="' + esc(ref) + '"><span class="faint">Ответ полезен?</span><button class="btn btn-sm btn-ghost" data-act="fb" data-r="1" aria-label="Полезно">👍</button>' +
+    '<button class="btn btn-sm btn-ghost" data-act="fb" data-r="-1" aria-label="Не полезно">👎</button></div>';
+  async function sendFeedback(ref, rating) {
+    const comment = rating < 0 ? (prompt('Что не так? Комментарий увидит команда (необязательно):') || '') : '';
+    try { await call('/api/assistant/feedback', { ref, rating, comment }); toast('Спасибо, оценка записана'); } catch (e) { fail(e); }
   }
 
-  /* ================= ИТОГИ ================= */
-  function weekFacts() {
-    const all = workItems().filter((x) => canSeeOwner(x.owner));
-    const by = (st) => all.filter((x) => x.st === st);
-    const soon = all.filter((x) => x.st !== 'done' && x.due && x.due >= TODAY && x.due <= isoDay(new Date(Date.now() + 7 * 864e5))).sort((a, b) => a.due.localeCompare(b.due));
-    const effects = S.decisions.filter((d) => d.effect && canSeeOwner(ownerId(d.owner)));
-    const covered = new Set(S.decisions.filter((d) => d.status !== 'done').map((d) => d.metric));
-    const openTitles = all.filter((x) => x.st !== 'done').map((x) => x.title.toLowerCase()).join(' | ');
-    deviations().forEach((x) => { if ((KW[x.key] || []).some((w) => openTitles.includes(w))) covered.add(x.key); });
-    const uncovered = deviations().filter((x) => !covered.has(x.key) && (role().areas && (role().areas.includes('all') || role().areas.includes(x.area)) || role().own)).slice(0, 5);
-    return { all, done: by('done'), over: by('overdue'), work: by('in_progress'), fresh: by('new'), soon, effects, uncovered };
+  /* ================= ЗАДАЧИ (сценарий 4) ================= */
+  async function loadTasks() {
+    const [r, c] = await Promise.all([call('/api/assistant/tasks'), call('/api/assistant/tasks/check')]);
+    S.tasks = r.tasks; S.tasksHidden = r.hidden; S.check = c.items;
   }
-  function fallbackDirector(f) {
-    const pr = C.last('profit'), pp = C.last('profit', 'plan');
-    const oldest = f.over.slice().sort((a, b) => String(a.due).localeCompare(String(b.due)))[0];
-    return 'Октябрь: прибыль ' + fmt.money(pr) + ' при плане ' + fmt.money(pp) + ' (' + fmt.signed(fmt.delta(pr, pp), 0) + ' %). ' +
-      'Причины — салон «Галерея» 7 дней стоял без замены (−11 500 BYN выручки) и брак 11,4 % на минилабе №2 после пропущенных калибровок (≈ 2 300 BYN бумаги и 212 ч сверхурочных).\n\n' +
-      'В контроле ' + f.all.length + ' решений и задач: выполнено ' + f.done.length + ', в работе ' + f.work.length + ', новых ' + f.fresh.length + ', просрочено ' + f.over.length + '.' +
-      (oldest ? ' Самое старое просроченное — «' + oldest.title + '» (' + pname(oldest.owner) + ', ' + dueLabel(oldest.due) + ').' : '') + '\n\n' +
-      (f.soon.length ? 'На этой неделе сроки: ' + f.soon.slice(0, 3).map((x) => pname(x.owner).split(' ')[1] + ' — «' + x.title + '»').join('; ') + '. ' : '') +
-      'Риск недели — сезон фотокниг при просрочке переплёта 14 %.';
+  const taskCol = (t) => t.status === 'done' ? 'done' : (t.status === 'needs_info' || !t.owner || !t.due) ? 'needs_info' : t.due < TODAY ? 'overdue' : t.status === 'in_progress' ? 'in_progress' : 'new';
+  function canEdit(t, field) {
+    const me = S.me;
+    if (me.role === 'director') return true;
+    if (me.role === 'head') { const o = person(t.owner); return t.dept === me.dept || (o && o.dept === me.dept) || t.owner === me.id || t.created_by === me.id; }
+    if (me.role === 'operator') return t.owner === me.id && field === 'status';
+    return false;
   }
-  async function directorSummary() {
-    const f = weekFacts();
-    S.dirSummary = { loading: true }; render();
-    const ctx = ['Отклонения октября:', ...deviations().slice(0, 8).map((x) => '- ' + devLine(x)),
-      '', 'Решения и задачи:', ...f.all.map((x) => '- [' + ({ done: 'выполнено', overdue: 'просрочено', in_progress: 'в работе', new: 'новое' })[x.st] + '] «' + x.title + '» — ' + pname(x.owner) + ', ' + dueLabel(x.due) + (x.effect ? ', эффект: ' + x.effect : '')),
-      '', 'Протоколы встреч: ' + (S.meetings.map((m) => m.title).join('; ') || 'нет'),
-      '', 'События:', ...C.events.map((e) => '- ' + e.date + ': ' + e.text)].join('\n');
-    const r = await api.ai({ system: 'Ты — помощник руководителя. Напиши итог недели для директора, который читается за 30 секунд: 4–6 предложений, ' +
-      'по-русски, без воды. Что с деньгами и почему; что сделано; что горит и кто отвечает; один главный риск и одно предложение, что решить. Только факты из контекста.',
-      user: ctx, mask: true, who: who(), title: 'Итог недели для директора', max_tokens: 500 }, () => fallbackDirector(f));
-    S.dirSummary = { text: r.text, r }; render();
+  function renderTasks() {
+    const people = [...new Set(S.tasks.map((t) => t.owner).filter(Boolean))];
+    if (S.filter !== 'all' && !people.includes(S.filter)) S.filter = 'all';
+    const shown = S.tasks.filter((t) => S.filter === 'all' || t.owner === S.filter);
+    const mt = (id) => S.meetings.find((m) => m.id === id);
+    const card = (t) => {
+      const col = taskCol(t);
+      const m = t.meeting_id ? mt(t.meeting_id) : null;
+      return '<div class="tcard' + (col === 'overdue' ? ' overdue' : '') + (S.focusTask === t.id ? ' fresh' : '') + '" id="task-' + t.id + '"><div class="tt">' + esc(t.title) + '</div>' +
+        '<div class="tm"><span class="person">' + (t.owner ? ava(t.owner) + esc(pname(t.owner)) : '<span class="chip chip-warn">нет владельца</span>') + '</span>' +
+        '<span class="' + (col === 'overdue' ? 'chip chip-bad' : t.due ? 'chip' : 'chip chip-warn') + '">' + esc(dueLabel(t.due)) + '</span></div>' +
+        '<div class="src">' + (t.meeting_id ? 'Основание: ' + (m ? '<button class="cite" data-act="line" data-m="' + t.meeting_id + '" data-l="' + (t.line == null ? '' : t.line) + '">' + esc(m.title) + '</button>' : 'встреча ' + esc(t.meeting_id)) : 'Поручение') + '</div>' +
+        '<div class="tb">' + (canEdit(t, 'status') && col !== 'done' && t.status !== 'in_progress' && col !== 'needs_info' ? '<button class="btn btn-sm" data-act="st" data-id="' + t.id + '" data-s="in_progress">В работу</button>' : '') +
+        (canEdit(t, 'status') && col !== 'done' && col !== 'needs_info' ? '<button class="btn btn-sm" data-act="st" data-id="' + t.id + '" data-s="done">Готово</button>' : '') +
+        (canEdit(t, 'status') && col === 'done' ? '<button class="btn btn-sm btn-ghost" data-act="st" data-id="' + t.id + '" data-s="in_progress">Вернуть</button>' : '') +
+        (col === 'needs_info' && canEdit(t, 'owner') ? '<button class="btn btn-sm" data-act="fix" data-id="' + t.id + '">Уточнить</button>' : '') + '</div></div>';
+    };
+    const chk = S.check.filter((c) => canEdit(S.tasks.find((t) => t.id === c.id) || {}, 'owner'));
+    return '<div class="sec-head"><div><h2 class="sec">Реестр задач</h2><p class="sec-lead">Задачи со встреч и поручения: владелец, срок и основание. Видно только ваш участок.</p></div>' +
+      '<label class="row"><span class="faint">Кто</span><select class="select" data-act="filter" style="width:auto"><option value="all">Все (' + S.tasks.length + ')</option>' +
+      people.map((id) => '<option value="' + id + '"' + (S.filter === id ? ' selected' : '') + '>' + esc(pname(id)) + '</option>').join('') + '</select></label></div>' +
+      (chk.length ? '<div class="ai-note" style="margin-bottom:14px"><div class="ai-ava">ИИ</div><div class="ai-body"><b>Без владельца или срока: ' + chk.length + '</b>' +
+        '<p class="muted">Предлагаю ответственного по теме задачи и срок через 5 рабочих дней. Применяется только после вашего подтверждения.</p><ul class="list" style="margin-top:6px">' +
+        chk.map((c) => '<li><span>' + esc(c.title) + ' <span class="chip chip-warn">' + esc(c.flags.join(', ')) + '</span></span><span class="r">' +
+          (c.suggested_owner ? esc(pname(c.suggested_owner)) + ' · ' : '') + (c.suggested_due ? esc(dueLabel(c.suggested_due)) + ' · ' : '') +
+          '<button class="btn btn-sm" data-act="apply-sug" data-id="' + c.id + '">Применить…</button></span></li>').join('') + '</ul></div></div>' : '') +
+      (S.tasksHidden ? '<p class="locked-note" style="margin-bottom:12px">Ещё ' + S.tasksHidden + ' ' + plural(S.tasksHidden, 'задача', 'задачи', 'задач') + ' вне вашего участка — сервер их не передал.</p>' : '') +
+      '<div class="board board5">' + TASK_COLS.map(([k, l]) => { const xs = shown.filter((t) => taskCol(t) === k); return '<div class="col"><h3><span>' + l + '</span><span class="faint mono">' + xs.length + '</span></h3>' + (xs.length ? xs.map(card).join('') : '<p class="empty">Пусто</p>') + '</div>'; }).join('') + '</div>';
   }
+  function fixModal(id, fromSug) {
+    const t = S.tasks.find((x) => x.id === id);
+    const c = S.check.find((x) => x.id === id) || {};
+    const owner = t.owner || (fromSug ? c.suggested_owner : '') || '';
+    const due = t.due || (fromSug ? c.suggested_due : '') || '';
+    openModal('<h3>Уточнить задачу</h3><p class="muted" style="margin:4px 0 12px">«' + esc(t.title) + '». ' + (fromSug ? 'Поля заполнены предложением помощника — проверьте перед сохранением.' : '') + '</p>' +
+      '<div class="stack"><div class="field"><label for="fo">Ответственный</label><select class="select" id="fo"><option value="">— не назначен —</option>' +
+      S.people.map((p) => '<option value="' + p.id + '"' + (p.id === owner ? ' selected' : '') + '>' + esc(p.name + ' · ' + p.title) + '</option>').join('') + '</select></div>' +
+      '<div class="field"><label for="fd">Срок</label><input class="input" type="date" id="fd" value="' + esc(due) + '"></div></div>' +
+      '<p class="hint" style="margin-top:10px">Изменение запишется в журнал: кто, когда, что было и что стало.</p>' +
+      '<div class="actions" style="margin-top:14px"><button class="btn btn-primary" data-act="fix-save" data-id="' + id + '">Подтвердить</button><button class="btn" data-act="close">Отмена</button></div>');
+  }
+  async function updateTask(id, fields) {
+    try { await call('/api/assistant/tasks/' + id, fields); await loadTasks(); toast('Задача обновлена'); } catch (e) { fail(e); }
+    render();
+  }
+
+  /* ================= ИТОГИ (сценарий 6 — данные пульта подключатся через /api/context) ================= */
   function renderSummary() {
-    const f = weekFacts();
+    const by = (k) => S.tasks.filter((t) => taskCol(t) === k);
+    const over = by('overdue'), need = by('needs_info'), done = by('done');
+    const soon = S.tasks.filter((t) => taskCol(t) !== 'done' && t.due && t.due >= TODAY && t.due <= isoDay(new Date(Date.now() + 7 * 864e5))).sort((a, b) => a.due.localeCompare(b.due));
+    const li = (t) => '<li><span>' + esc(t.title) + '</span><span class="r">' + esc(pname(t.owner)) + ' · ' + esc(dueLabel(t.due)) + '</span></li>';
     const stat = (v, l, cls) => '<div class="card stat"><div class="v ' + (cls || '') + '">' + v + '</div><div class="l">' + l + '</div></div>';
-    const li = (x) => '<li><span>' + esc(x.title) + '</span><span class="r">' + esc(pname(x.owner).split(' ')[1] || '—') + ' · ' + dueLabel(x.due) + '</span></li>';
-    const ds = S.dirSummary;
-    const isDir = S.role === 'director';
-    return '<div class="sec-head"><div><h2 class="sec">Управленческие итоги недели</h2><p class="sec-lead">' + (isDir ? 'По всей компании.' : 'Только ваш участок — роль «' + esc(role().label) + '».') + ' Неделя 9–13 ноября 2026.</p></div>' +
-      '<div class="actions no-print"><button class="btn" data-act="print">Печать</button>' + (isDir ? '<button class="btn btn-primary" data-act="dir">Итог для директора за 30 секунд</button>' : '') + '</div></div>' +
-      (ds ? '<div class="ai-note" style="margin-bottom:16px"><div class="ai-ava">ИИ</div><div class="ai-body">' + (ds.loading ? '<p class="muted typing">Собираю итог</p>' : rich(ds.text) + provLine(ds.r)) + '</div></div>' : '') +
-      '<div class="stats">' + stat(f.all.length, 'решений и задач в контроле') + stat(f.done.length, 'выполнено', 'delta-up') + stat(f.over.length, 'просрочено', f.over.length ? 'delta-down' : '') + stat(S.meetings.length, 'протоколов утверждено') + '</div>' +
-      '<div class="two" style="margin-top:14px">' +
-      '<div class="card"><h3>Горит</h3><ul class="list">' + (f.over.length ? f.over.map(li).join('') : '<li class="empty">Просрочек нет</li>') + '</ul></div>' +
-      '<div class="card"><h3>Сроки на этой неделе</h3><ul class="list">' + (f.soon.length ? f.soon.map(li).join('') : '<li class="empty">Нет сроков на ближайшие 7 дней</li>') + '</ul></div>' +
-      '<div class="card"><h3>Сделано</h3><ul class="list">' + (f.done.length ? f.done.map(li).join('') : '<li class="empty">Пока ничего</li>') + '</ul></div>' +
-      '<div class="card"><h3>Ожидаемый эффект решений</h3><ul class="list">' + (f.effects.length ? f.effects.map((d) => '<li><span>' + esc(d.title) + '</span><span class="r">' + esc(d.effect) + '</span></li>').join('') : '<li class="empty">Нет решений с оценкой эффекта</li>') + '</ul></div>' +
-      '</div>' +
-      '<div class="card" style="margin-top:14px"><h3>Отклонения без решения</h3><p class="muted" style="font-size:13.5px;margin:2px 0 6px">Показатели хуже плана, по которым никто пока не отвечает. Их стоит поставить в повестку.</p><ul class="list">' +
-      (f.uncovered.length ? f.uncovered.map((x) => '<li><span>' + esc(devLine(x)) + '</span><span class="r">' + esc(pname(AREA_OWNER[x.area]).split(' ')[1]) + '</span></li>').join('') : '<li class="empty">По всем отклонениям есть решения</li>') + '</ul></div>' +
-      (S.meetings.length ? '<div class="card" style="margin-top:14px"><h3>Протоколы</h3><ul class="list">' + S.meetings.map((m) => '<li><span>' + esc(m.title) + '</span><span class="r">' + (m.items || []).length + ' решений · ' + esc(new Date(m.ts).toLocaleDateString('ru-RU')) + '</span></li>').join('') + '</ul></div>' : '');
+    const protos = S.meetings.filter((m) => m.protocol);
+    return '<div class="sec-head"><div><h2 class="sec">Управленческий обзор</h2><p class="sec-lead">' + (S.me.role === 'director' ? 'По всей компании.' : 'Только ваш участок.') +
+      ' Источник: реестр задач и протоколы помощника · данные на ' + esc(new Date().toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })) + '.</p></div></div>' +
+      '<div class="stats">' + stat(S.tasks.length, 'задач в контроле') + stat(over.length, 'просрочено', over.length ? 'delta-down' : '') + stat(need.length, 'требует уточнения') + stat(protos.length, 'протоколов утверждено') + '</div>' +
+      '<div class="two" style="margin-top:14px"><div class="card"><h3>Просрочено</h3><ul class="list">' + (over.length ? over.map(li).join('') : '<li class="empty">Просрочек нет</li>') + '</ul></div>' +
+      '<div class="card"><h3>Сроки на 7 дней</h3><ul class="list">' + (soon.length ? soon.map(li).join('') : '<li class="empty">Нет сроков</li>') + '</ul></div>' +
+      '<div class="card"><h3>Требует уточнения</h3><ul class="list">' + (need.length ? need.map(li).join('') : '<li class="empty">Всё назначено</li>') + '</ul></div>' +
+      '<div class="card"><h3>Сделано</h3><ul class="list">' + (done.length ? done.map(li).join('') : '<li class="empty">Пока ничего</li>') + '</ul></div></div>' +
+      '<p class="locked-note" style="margin-top:14px">Показатели компании и просроченные решения пульта появятся здесь, когда пульт отдаст их через <span class="code">GET /api/context</span> — с источником и временем актуальности.</p>';
   }
 
   /* ================= ЗАЩИТА ================= */
-  const MASK_SAMPLE = 'Встреча с поставщиком: ООО «Фотобум-Снаб», УНП 999000111, директор Кравец Олег Николаевич, тел. +375 29 000-11-22, sales@fotobum.example. ' +
-    'Просим скидку 8 % при заказе 50 рулонов на 9 300 BYN. От нас — Ирина Лисовская и Сергей Морозов.';
+  const MASK_SAMPLE = 'Встреча с поставщиком: ООО «Бумтех», УНП 999000222, директор Кравец Олег Николаевич, тел. +375 29 000-11-22, sales@bumtech.example. ' +
+    'Просим скидку 6 % при закупке на 60 000 BYN. От нас — Лозовая Т. К. и Гринь Д. А.';
+  async function loadSecurity() {
+    const jobs = [call('/api/assistant/audit').then((r) => { S.audit = r.items; })];
+    if (['director', 'analyst'].includes(S.me.role)) jobs.push(call('/api/assistant/access').then((r) => { S.access = r; }));
+    await Promise.all(jobs);
+  }
+  async function probe(code) {
+    code = String(code || '').trim();
+    if (!code) return;
+    try { const d = await call('/api/assistant/docs/' + encodeURIComponent(code)); S.probe = { code, ok: true, title: d.title }; } catch (e) { S.probe = { code, ok: false, msg: e.message, status: e.status }; }
+    await loadSecurity(); render();
+  }
   async function setMode(mode) {
-    await api.mode(mode);
+    try { await api.mode(mode); } catch (e) { fail(e); }
     await loadHealth();
     S.localState = null;
     if (mode === 'local') {
       S.localState = { loading: true }; render();
-      const r = await api.ai({ system: 'Ответь одним словом.', user: 'Скажи «готово».', who: who(), title: 'Проверка локальной модели', max_tokens: 10, timeout: 8000 }, 'нет');
+      const r = await api.ai({ system: 'Ответь одним словом.', user: 'Скажи «готово».', who: S.me.name, title: 'Проверка локальной модели', max_tokens: 10, timeout: 8000 }, 'нет');
       S.localState = r.fallback ? { ok: false } : { ok: true, model: r.model, ms: r.ms };
     }
-    toast({ cloud: 'Облако с маскированием', local: 'Локальная модель', off: 'ИИ выключен — работает встроенная логика' }[mode]);
-    S.audit = await api.list('audit');
-    render();
+    await loadSecurity(); render();
   }
   async function checkMask() {
     const ta = document.getElementById('mtext');
     const text = ta ? ta.value : MASK_SAMPLE;
     S.maskCheck = { text, loading: true }; render();
-    const r = await api.ai({ system: 'Перескажи текст в одном предложении. Метки в квадратных скобках оставь как есть.', user: text, mask: true, who: who(), title: 'Проверка маскирования', max_tokens: 200 },
+    const r = await api.ai({ system: 'Перескажи текст в одном предложении. Метки в квадратных скобках оставь как есть.', user: text, mask: true, who: S.me.name, title: 'Проверка маскирования', max_tokens: 200 },
       'Модель не вызывалась — ниже видно, что ушло бы наружу.');
-    S.maskCheck = { text, r };
-    S.audit = await api.list('audit');
-    render();
+    S.maskCheck = { text, r }; render();
   }
   function renderSecurity() {
     const mode = S.health.mode;
-    const modes = [
-      ['cloud', 'Облако с маскированием', 'DeepSeek через сервер компании. Перед отправкой ФИО, телефоны, УНП, почта и суммы заменяются метками, ответ собирается обратно на сервере.'],
-      ['local', 'Локальная модель на своём сервере', 'Ollama или LM Studio в контуре компании. Наружу не уходит ничего — даже метки.'],
-      ['off', 'Без ИИ', 'Поиск по документам, бриф и протокол работают на встроенной логике. Ничего не отправляется.'],
-    ];
-    const ls = S.localState;
-    const mc = S.maskCheck;
-    let cmp = '';
-    if (mc) {
-      const sent = mc.r && mc.r.masked ? mc.r.masked.sent_preview : '';
-      cmp = mc.loading ? '<p class="muted typing" style="margin-top:10px">Проверяю</p>' :
-        '<div class="cmp"><div><div class="eyebrow">Было у нас</div><pre>' + esc(mc.text) + '</pre></div>' +
-        '<div><div class="eyebrow">Ушло в модель</div><pre>' + esc(sent).replace(/\[[А-ЯЁ]+_\d+\]/g, (x) => '<mark>' + x + '</mark>') + '</pre></div></div>' +
-        '<div class="ai-note" style="margin-top:10px"><div class="ai-ava">ИИ</div><div class="ai-body"><p>' + esc(mc.r.text) + '</p>' +
-        '<p class="ai-src">' + (mc.r.fallback ? 'Модель не вызывалась (' + esc(mode === 'off' ? 'ИИ выключен' : mc.r.reason || 'нет ответа') + ').' : 'Модель видела только метки: ' + esc((mc.r.masked && mc.r.masked.labels || []).join(', ')) + '. Настоящие значения подставил сервер компании.') + '</p></div></div>';
+    const modes = [['cloud', 'Облако с маскированием', 'DeepSeek через сервер компании. Имена, телефоны, УНП, почта и суммы заменяются метками; в протоколах имена — кодами сотрудников.'],
+      ['local', 'Локальная модель', 'Ollama или LM Studio в контуре компании. Наружу не уходит ничего.'],
+      ['off', 'Без модели', 'Поиск, ответы со ссылками и протокол работают на встроенной логике сервера.']];
+    const ls = S.localState, mc = S.maskCheck, pr = S.probe;
+    const cmp = !mc ? '' : mc.loading ? '<p class="muted typing" style="margin-top:10px">Проверяю</p>' :
+      '<div class="cmp"><div><div class="eyebrow">Было у нас</div><pre>' + esc(mc.text) + '</pre></div><div><div class="eyebrow">Ушло бы в модель</div><pre>' +
+      esc(mc.r.masked ? mc.r.masked.sent_preview : '').replace(/\[[А-ЯЁ]+_\d+\]/g, (x) => '<mark>' + x + '</mark>') + '</pre></div></div>';
+    let matrix = '';
+    if (S.access) {
+      const us = S.access.users;
+      matrix = '<div class="card"><h3>Кто какие документы видит</h3><p class="muted" style="font-size:13.5px;margin:2px 0 8px">Права проверяет сервер. Закрытый документ не попадает ни в поиск, ни в ответ, ни в модель.</p><div style="overflow-x:auto"><table class="table matrix"><thead><tr><th>Документ</th>' +
+        us.map((u) => '<th title="' + esc(u.title) + '">' + esc(u.name.split(' ')[0]) + '</th>').join('') + '</tr></thead><tbody>' +
+        S.access.docs.map((d) => '<tr><td>' + esc(d.code) + (d.sensitive ? ' 🔒' : '') + '</td>' + us.map((u) => '<td>' + (d.allowed.includes(u.id) ? '<span class="yes">✓</span>' : '<span class="no">—</span>') + '</td>').join('') + '</tr>').join('') +
+        '</tbody></table></div><p class="hint">🔒 — содержит зарплаты: помощник не использует его в ответах ни для кого.</p></div>';
     }
-    const roleCols = ROLE_IDS.map((r) => '<th>' + esc(ROLES[r].label) + '</th>').join('');
-    const matrix = '<table class="table matrix"><thead><tr><th>Документ</th>' + roleCols + '</tr></thead><tbody>' + allDocs().map((d) => '<tr><td>' + esc(d.short || d.title) + '</td>' +
-      ROLE_IDS.map((r) => '<td>' + (d.access.includes(r) ? '<span class="yes">✓</span>' : '<span class="no">—</span>') + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
-    const audit = S.audit.slice().reverse().slice(0, 40);
-    return '<div class="sec-head"><div><h2 class="sec">Защищённый контур</h2><p class="sec-lead">Где думает помощник, что уходит наружу, кто что видит и кто что спрашивал.</p></div></div>' +
-      '<div class="sec-grid">' +
-      '<div class="card"><h3>Где работает модель</h3><div class="modes" role="radiogroup" style="margin-top:10px">' + modes.map(([k, t, p]) =>
+    const audit = S.audit.slice().reverse().slice(0, 50);
+    return '<div class="sec-head"><div><h2 class="sec">Защищённый контур</h2><p class="sec-lead">Где думает помощник, что уходит наружу, кто что видит и что записано в журнал.</p></div></div>' +
+      '<div class="sec-grid"><div class="card"><h3>Где работает модель</h3><div class="modes" role="radiogroup" style="margin-top:10px">' + modes.map(([k, t, p]) =>
         '<button class="mode" role="radio" aria-checked="' + (mode === k) + '" data-act="mode" data-mode="' + k + '"><span class="r"></span><span><b>' + t + '</b><p>' + p + '</p></span></button>').join('') + '</div>' +
-      (ls ? '<div class="mode-state">' + (ls.loading ? '<span class="spin"></span> Проверяю локальную модель…' : ls.ok ? '<span class="chip chip-ok">Локальная модель отвечает · ' + esc(ls.model) + ' · ' + ls.ms + ' мс</span>' :
-        '<div class="locked-note"><b>Локальная модель на этом ноутбуке не запущена</b> — помощник продолжает работать на встроенной логике: поиск по документам, бриф и протокол. ' +
-        'Чтобы включить, достаточно поднять Ollama (<span class="code">ollama run qwen2.5:7b</span>) или LM Studio — сервер подключится сам по <span class="code">LOCAL_LLM_URL</span>.</div>') + '</div>' : '') + '</div>' +
-      '<div class="card"><h3>Проверить, что уйдёт наружу</h3><p class="muted" style="font-size:13.5px;margin-top:2px">Вставьте любой текст — сервер покажет, что увидит модель.</p>' +
-      '<textarea class="textarea" id="mtext" style="margin-top:10px;min-height:96px">' + esc(mc ? mc.text : MASK_SAMPLE) + '</textarea>' +
-      '<div class="actions" style="margin-top:10px"><button class="btn btn-primary" data-act="maskcheck">Проверить</button></div>' + cmp + '</div>' +
-      '<div class="card"><h3>Кто какие документы видит</h3><p class="muted" style="font-size:13.5px;margin:2px 0 8px">Закрытые документы не участвуют в поиске и не попадают в модель. В MVP права проверяет интерфейс; в рабочей версии — сервер по учётной записи сотрудника.</p><div style="overflow-x:auto">' + matrix + '</div></div>' +
-      '<div class="card"><h3>Где живут данные</h3><ul class="where" style="margin-top:8px">' +
-      '<li>Документы, задачи, протоколы и журнал — на сервере компании, не в облаке.</li>' +
-      '<li>Ключ модели хранится только на сервере, браузер его не видит.</li>' +
-      '<li>В облако уходит только текст запроса после маскирования; ответ собирается обратно у вас.</li>' +
-      '<li>На локальной модели наружу не уходит ничего.</li>' +
-      '<li>Каждый запрос к модели и смена режима — в журнале с именем и ролью.</li></ul></div>' +
-      '</div>' +
-      '<div class="card" style="margin-top:14px"><div class="row" style="justify-content:space-between"><h3>Журнал обращений</h3><button class="btn btn-sm" data-act="audit">Обновить</button></div>' +
-      '<div class="audit" style="margin-top:8px">' + (audit.length ? '<table class="table"><thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Наружу</th></tr></thead><tbody>' +
+      (ls ? '<div class="mode-state">' + (ls.loading ? '<span class="spin"></span> Проверяю локальную модель…' : ls.ok ? '<span class="chip chip-ok">Локальная модель отвечает · ' + esc(ls.model) + ' · ' + ls.ms + ' мс</span>'
+        : '<div class="locked-note">Локальная модель не запущена — помощник работает на встроенной логике. Поднимите Ollama (<span class="code">ollama run qwen2.5:7b</span>), сервер подключится по <span class="code">LOCAL_LLM_URL</span>.</div>') + '</div>' : '') + '</div>' +
+      '<div class="card"><h3>Проверить права</h3><p class="muted" style="font-size:13.5px;margin-top:2px">Попробуйте открыть документ по коду, например <span class="code">ШР-01</span> или <span class="code">ОТ-Q3</span>. Отказ запишется в журнал.</p>' +
+      '<form class="ask" data-act="probe" style="margin-top:10px"><label class="sr" for="pc">Код документа</label><input class="input" id="pc" placeholder="Код документа" value="' + esc(pr ? pr.code : '') + '"><button class="btn btn-primary" type="submit">Открыть</button></form>' +
+      (pr ? (pr.ok ? '<p class="chip chip-ok" style="margin-top:10px">Доступ есть: ' + esc(pr.title) + '</p>' : '<p class="err" role="alert" style="margin-top:10px">' + esc(pr.msg) + (pr.status === 403 ? ' — попытка записана в журнал с результатом «отказ».' : '') + '</p>') : '') + '</div>' +
+      '<div class="card"><h3>Что уйдёт наружу</h3><p class="muted" style="font-size:13.5px;margin-top:2px">Сервер покажет, что увидит облачная модель после маскирования.</p>' +
+      '<textarea class="textarea" id="mtext" style="margin-top:10px;min-height:90px">' + esc(mc ? mc.text : MASK_SAMPLE) + '</textarea><div class="actions" style="margin-top:10px"><button class="btn btn-primary" data-act="maskcheck">Проверить</button></div>' + cmp + '</div>' +
+      '<div class="card"><h3>Хранение и удаление</h3><ul class="where" style="margin-top:8px">' +
+      '<li>Запросы, расшифровки, протоколы, задачи и журнал хранятся на сервере компании (папка data/), срок — 90 дней.</li>' +
+      '<li>Тестовые данные удаляются кнопкой «Сбросить демо-данные» на главной.</li><li>Ключ модели — только в переменной окружения сервера.</li>' +
+      '<li>Внешний провайдер в облачном режиме — DeepSeek (Китай); уходит только текст после маскирования.</li></ul></div>' +
+      matrix + '</div>' +
+      '<div class="card" style="margin-top:14px"><div class="row" style="justify-content:space-between"><h3>Журнал действий' + (S.me.role === 'director' || S.me.role === 'analyst' ? '' : ' · ваш участок') + '</h3><button class="btn btn-sm" data-act="audit">Обновить</button></div>' +
+      '<div class="audit" style="margin-top:8px">' + (audit.length ? '<table class="table"><thead><tr><th>Когда</th><th>Кто</th><th>Действие</th><th>Объект</th><th>Результат</th></tr></thead><tbody>' +
         audit.map((a) => '<tr><td class="mono" style="white-space:nowrap">' + esc(fmt.dt(a.ts)) + '</td><td>' + esc(a.who) + '</td><td><b style="font-weight:500">' + esc(a.action) + '</b><br><span class="faint">' + esc(a.detail) + '</span></td>' +
-          '<td>' + (a.outside ? '<span class="chip chip-warn">облако, после маскирования</span>' : '<span class="chip chip-ok">внутри</span>') + '</td></tr>').join('') + '</tbody></table>'
-        : '<p class="empty">Пока пусто — задайте вопрос по документам или подготовьте бриф.</p>') + '</div></div>';
+          '<td>' + esc(a.object || '') + '</td><td>' + (a.result === 'отказ' ? '<span class="chip chip-bad">отказ</span>' : a.result === 'не найдено' ? '<span class="chip chip-warn">не найдено</span>' : '<span class="chip chip-ok">' + esc(a.result || 'ok') + '</span>') +
+          (a.outside ? ' <span class="chip chip-warn">облако</span>' : '') + '</td></tr>').join('') + '</tbody></table>' : '<p class="empty">Пока пусто.</p>') + '</div></div>';
   }
 
-  /* ================= общий рендер и события ================= */
+  /* ================= модальное окно ================= */
+  function openModal(html) {
+    modalEl.innerHTML = '<div class="modal-back" data-act="close-back"><div class="modal" role="dialog" aria-modal="true">' + html + '</div></div>';
+    const f = modalEl.querySelector('button, select, input'); if (f) f.focus();
+  }
+  function closeModal() { modalEl.innerHTML = ''; }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modalEl.innerHTML) closeModal(); });
+
+  /* ================= общий рендер ================= */
   function render() {
+    if (!S.me) return;
     document.querySelectorAll('.t3-nav .tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)));
-    document.getElementById('role').value = S.role;
     const views = { meetings: renderMeetings, docs: renderDocs, tasks: renderTasks, summary: renderSummary, security: renderSecurity };
-    app.innerHTML = (views[S.tab] || renderMeetings)();
-    const n = document.getElementById('notes');
-    if (n) n.addEventListener('input', () => { S.notes[S.meetingId] = n.value; });
-    const up = document.getElementById('upload');
-    if (up) up.addEventListener('change', onUpload);
-    if (S.tab === 'docs' && S.hl) { const el = document.getElementById('it-' + S.hl); if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    app.innerHTML = (S.err ? '<p class="err" role="alert" style="margin-bottom:12px">' + esc(S.err) + ' <button class="btn btn-sm" data-act="reload">Повторить</button></p>' : '') + (views[S.tab] || renderMeetings)();
+    if (S.tab === 'docs' && S.hl && S.hl.length) { const el = document.getElementById('it-' + S.hl[0]); if (el) el.scrollIntoView({ block: 'nearest' }); }
+    if (S.tab === 'meetings' && S.hlLine != null) { const el = document.getElementById('ln-' + S.hlLine); if (el) el.scrollIntoView({ block: 'center' }); }
+    if (S.tab === 'tasks' && S.focusTask) { const el = document.getElementById('task-' + S.focusTask); if (el) el.scrollIntoView({ block: 'center' }); }
   }
-
+  async function loadHealth() {
+    S.health = await api.health();
+    const chip = document.getElementById('aiChip');
+    const map = { cloud: ['chip chip-accent', 'Облако + маскирование'], local: ['chip chip-ok', 'Локальная модель'], off: ['chip', 'Без модели · встроенная логика'] };
+    const [cls, txt] = map[S.health.mode] || ['chip', 'Сервер не отвечает'];
+    chip.className = cls; chip.querySelector('span:last-child').textContent = txt;
+  }
   async function goTab(tab) {
-    S.tab = tab;
+    S.tab = tab; S.err = null;
     const u = new URL(location); u.searchParams.set('tab', tab); history.replaceState(null, '', u);
-    if (tab === 'meetings' || tab === 'tasks' || tab === 'summary') await loadStore();
-    if (tab === 'security') S.audit = await api.list('audit');
+    try {
+      if (tab === 'meetings') { await Promise.all([loadMeetings(), loadTasks()]); await loadTranscript(S.meetings.find((m) => m.id === S.meetingId)); }
+      if (tab === 'docs' && !S.docs.length) await loadDocs();
+      if (tab === 'tasks' || tab === 'summary') await Promise.all([loadTasks(), loadMeetings()]);
+      if (tab === 'security') await loadSecurity();
+    } catch (e) { S.err = e.message; }
     render();
   }
 
-  let recog = null;
-  function toggleMic() {
-    const R = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!R) return;
-    if (S.recOn && recog) { recog.stop(); S.recOn = false; render(); return; }
-    recog = new R(); recog.lang = 'ru-RU'; recog.continuous = true; recog.interimResults = false;
-    const mid = S.meetingId;
-    recog.onresult = (e) => {
-      for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) {
-        S.notes[mid] = ((S.notes[mid] || '') + (S.notes[mid] ? '\n' : '') + e.results[i][0].transcript.trim());
-        const n = document.getElementById('notes'); if (n) n.value = S.notes[mid];
-      }
-    };
-    recog.onend = () => { if (S.recOn) { S.recOn = false; render(); } };
-    recog.onerror = (e) => { toast('Микрофон: ' + (e.error || 'ошибка')); };
-    recog.start(); S.recOn = true; render();
-  }
-
-  function onUpload(e) {
-    const f = e.target.files[0];
-    if (!f) return;
-    const rd = new FileReader();
-    rd.onload = () => {
-      const txt = String(rd.result).replace(/\r/g, '');
-      const parts = txt.split(/\n\s*\n|\n(?=\s*\d+[.)]\s)/).map((s) => s.replace(/^\s*#+\s*/, '').replace(/^\s*\d+[.)]\s*/, '').trim()).filter((s) => s.length > 2);
-      const id = 'u' + (S.extraDocs.length + 1);
-      S.extraDocs.push({ id, short: f.name.replace(/\.(txt|md)$/i, '').slice(0, 30), title: f.name, code: 'загружен', kind: 'Файл', local: true,
-        access: ROLE_IDS.slice(), items: parts.slice(0, 200).map((t, i) => ({ n: String(i + 1), text: t.slice(0, 1200) })) });
-      S.docId = id; S.hl = null; render();
-      toast('Документ добавлен: ' + parts.length + ' ' + plural(parts.length, 'пункт', 'пункта', 'пунктов'));
-    };
-    rd.readAsText(f);
-  }
-
+  /* ================= события ================= */
   document.querySelector('.t3-nav').addEventListener('click', (e) => { const b = e.target.closest('.tab'); if (b) goTab(b.dataset.tab); });
-  document.getElementById('role').addEventListener('change', (e) => {
-    S.role = e.target.value; S.answer = null; S.dirSummary = null; S.filter = 'all';
-    const u = new URL(location); u.searchParams.set('role', S.role); history.replaceState(null, '', u);
-    render();
-    toast('Вы — ' + role().label + ': видно ' + visibleDocs().length + ' из ' + allDocs().length + ' документов');
-  });
-
-  app.addEventListener('submit', (e) => { if (e.target.dataset.act === 'ask') { e.preventDefault(); askDocs(document.getElementById('q').value); } });
-  app.addEventListener('change', (e) => {
-    const t = e.target;
-    if (t.dataset.act === 'check') {
-      const run = S.run[S.meetingId] = S.run[S.meetingId] || { start: null, checked: [] };
-      const i = +t.dataset.i;
-      run.checked = t.checked ? run.checked.concat(i) : run.checked.filter((x) => x !== i);
-      t.closest('li').classList.toggle('done', t.checked);
-    }
-    if (t.dataset.act === 'filter') { S.filter = t.value; render(); }
-    if (t.dataset.pi != null) { const d = S.drafts[S.meetingId]; d.items[+t.dataset.pi][t.dataset.f] = t.value || (t.dataset.f === 'owner' ? null : ''); }
+  document.getElementById('me').addEventListener('click', (e) => { if (e.target.closest('[data-act="logout"]')) signOut(false); });
+  app.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const act = e.target.dataset.act;
+    if (act === 'login') signIn(document.getElementById('lg').value, document.getElementById('pw').value);
+    if (act === 'ask') ask(document.getElementById('q').value);
+    if (act === 'probe') probe(document.getElementById('pc').value);
   });
   app.addEventListener('input', (e) => {
-    const t = e.target;
-    if (t.dataset.pi != null && t.tagName === 'INPUT' && t.type !== 'date') S.drafts[S.meetingId].items[+t.dataset.pi][t.dataset.f] = t.value;
-    if (t.dataset.act === 'psum') S.drafts[S.meetingId].summary = t.value;
+    const t = e.target, d = S.drafts[S.meetingId];
+    if (t.id === 'q') S.qText = t.value;
+    if (!d) return;
+    if (t.dataset.f === 'summary') d.summary = t.value;
+    if (t.dataset.pt != null && t.tagName === 'INPUT') d.points[+t.dataset.pt].text = t.value;
+    if (t.dataset.tk != null && t.tagName === 'INPUT' && t.type !== 'date') d.tasks[+t.dataset.tk].title = t.value;
+    saveDrafts();
   });
-  app.addEventListener('click', async (e) => {
+  app.addEventListener('change', (e) => {
+    const t = e.target, d = S.drafts[S.meetingId];
+    if (t.dataset.act === 'filter') { S.filter = t.value; render(); return; }
+    if (!d) return;
+    if (t.dataset.pt != null && t.dataset.f === 'status') d.points[+t.dataset.pt].status = t.value;
+    if (t.dataset.tk != null && t.dataset.f === 'owner') { d.tasks[+t.dataset.tk].owner = t.value || null; saveDrafts(); render(); return; }
+    if (t.dataset.tk != null && t.dataset.f === 'due') { d.tasks[+t.dataset.tk].due = t.value || null; saveDrafts(); render(); return; }
+    saveDrafts();
+  });
+  async function onClick(e) {
     const b = e.target.closest('[data-act]');
-    if (!b || b.tagName === 'FORM' || b.tagName === 'SELECT' || b.tagName === 'TEXTAREA' || (b.tagName === 'INPUT' && b.type === 'checkbox')) return;
+    if (!b || ['FORM', 'SELECT', 'TEXTAREA', 'INPUT'].includes(b.tagName)) return;
     const act = b.dataset.act;
-    const m = MEETINGS.find((x) => x.id === S.meetingId);
-    if (act === 'meeting') { S.meetingId = b.dataset.id; await loadStore(); render(); }
-    if (act === 'view') { S.view[S.meetingId] = b.dataset.v; render(); }
-    if (act === 'brief') makeBrief(m);
-    if (act === 'timer') { const run = S.run[m.id] = S.run[m.id] || { checked: [] }; run.start = run.start ? null : Date.now(); render(); }
-    if (act === 'demo') { S.notes[m.id] = DEMO_TEXT[m.id] || ''; render(); }
-    if (act === 'mic') toggleMic();
-    if (act === 'protocol') { const n = document.getElementById('notes'); if (n) S.notes[m.id] = n.value; makeProtocol(m); }
-    if (act === 'prow-del') { S.drafts[m.id].items.splice(+b.dataset.i, 1); render(); }
-    if (act === 'prow-add') { S.drafts[m.id].items.push({ title: '', owner: null, due: '' }); render(); }
-    if (act === 'approve') approve(m);
-    if (act === 'tg') {
-      if (b.dataset.s === 'question') { toast('Исполнитель задал вопрос — он придёт постановщику в Telegram'); return; }
-      await api.update('tasks', b.dataset.id, { status: b.dataset.s }); await loadStore(); render(); toast('Исполнитель принял задачу — статус уже на доске');
-    }
-    if (act === 'tab') goTab(b.dataset.tab);
-    if (act === 'cite') { S.tab = 'docs'; S.docId = b.dataset.doc; S.hl = b.dataset.n; render(); }
-    if (act === 'doc') { S.docId = b.dataset.id; S.hl = null; render(); }
-    if (act === 'sugg') { askDocs(b.textContent); }
-    if (act === 'st') {
-      await api.update(b.dataset.kind === 'decision' ? 'decisions' : 'tasks', b.dataset.id, { status: b.dataset.s });
-      await loadStore(); render();
-    }
-    if (act === 'dir') directorSummary();
-    if (act === 'print') window.print();
-    if (act === 'mode') setMode(b.dataset.mode);
-    if (act === 'maskcheck') checkMask();
-    if (act === 'audit') { S.audit = await api.list('audit'); render(); }
-  });
-  setInterval(() => { const el = document.getElementById('timer'); const m = MEETINGS.find((x) => x.id === S.meetingId); if (el && m && S.run[m.id] && S.run[m.id].start) el.firstChild.textContent = timerText(m); }, 1000);
-  document.addEventListener('visibilitychange', async () => { if (!document.hidden && ['meetings', 'tasks', 'summary'].includes(S.tab)) { await loadStore(); render(); } });
+    const m = S.meetings.find((x) => x.id === S.meetingId);
+    const d = m && S.drafts[m.id];
+    try {
+      if (act === 'meeting') { S.meetingId = b.dataset.id; S.hlLine = null; await loadTranscript(S.meetings.find((x) => x.id === S.meetingId)); render(); }
+      if (act === 'mview') { S.mview[m.id] = b.dataset.v; render(); }
+      if (act === 'draft' || act === 'redraft') makeDraft(m);
+      if (act === 'discard' && confirm('Удалить черновик протокола? Сохранённое в системе не изменится.')) { delete S.drafts[m.id]; saveDrafts(); render(); }
+      if (act === 'pt-del') { d.points[+b.dataset.i].skip = !d.points[+b.dataset.i].skip; saveDrafts(); render(); }
+      if (act === 'pt-add') { d.points.push({ text: '', status: 'решено', line: null }); saveDrafts(); render(); }
+      if (act === 'tk-del') { d.tasks[+b.dataset.i].skip = !d.tasks[+b.dataset.i].skip; saveDrafts(); render(); }
+      if (act === 'tk-add') { d.tasks.push({ title: '', owner: null, due: null, line: null, skip: false }); saveDrafts(); render(); }
+      if (act === 'sug-owner') { const t = d.tasks[+b.dataset.i]; t.owner = t.suggested_owner; saveDrafts(); render(); }
+      if (act === 'sug-due') { const t = d.tasks[+b.dataset.i]; t.due = t.suggested_due; saveDrafts(); render(); }
+      if (act === 'preview') previewModal(m);
+      if (act === 'confirm') confirmSave(b.dataset.m);
+      if (act === 'close' || (act === 'close-back' && e.target === b)) closeModal();
+      if (act === 'line') {
+        S.tab = 'meetings'; S.meetingId = b.dataset.m; S.mview[b.dataset.m] = 'transcript'; S.hlLine = b.dataset.l === '' ? null : +b.dataset.l;
+        await loadMeetings(); await loadTranscript(S.meetings.find((x) => x.id === S.meetingId)); render();
+      }
+      if (act === 'goto-task') { S.focusTask = b.dataset.id; goTab('tasks'); }
+      if (act === 'doc') { S.docId = b.dataset.id; S.hl = null; render(); }
+      if (act === 'cite') { S.tab = 'docs'; if (!S.docs.length) await loadDocs(); S.docId = b.dataset.doc; S.hl = [b.dataset.n]; render(); }
+      if (act === 'sugg') ask(b.textContent);
+      if (act === 'retry') ask(S.qText);
+      if (act === 'fb') sendFeedback(b.closest('.fb').dataset.ref, +b.dataset.r);
+      if (act === 'st') updateTask(b.dataset.id, { status: b.dataset.s });
+      if (act === 'fix') fixModal(b.dataset.id, false);
+      if (act === 'apply-sug') fixModal(b.dataset.id, true);
+      if (act === 'fix-save') {
+        const owner = document.getElementById('fo').value || null, due = document.getElementById('fd').value || null;
+        closeModal(); updateTask(b.dataset.id, { owner, due });
+      }
+      if (act === 'mode') setMode(b.dataset.mode);
+      if (act === 'maskcheck') checkMask();
+      if (act === 'audit') { await loadSecurity(); render(); }
+      if (act === 'reload') goTab(S.tab);
+    } catch (err) { fail(err); }
+  }
+  app.addEventListener('click', onClick);
+  modalEl.addEventListener('click', onClick);
 
-  /* ---------- старт ---------- */
-  (async function init() {
-    await Promise.all([loadHealth(), loadStore()]);
-    if (S.tab === 'security') S.audit = await api.list('audit');
-    render();
-    // параметры для показа и проверки: ?tab=docs&q=..., ?m=m1&view=brief&auto=1, ?view=run&demo=1, ?view=protocol&demo=1&auto=1
-    const m = MEETINGS.find((x) => x.id === S.meetingId);
-    if (qs.get('demo') && m) { S.notes[m.id] = DEMO_TEXT[m.id]; render(); }
-    if (qs.get('q')) { S.tab = 'docs'; askDocs(qs.get('q')); }
-    if (qs.get('auto') && m) {
-      if (S.view[m.id] === 'protocol') { await makeProtocol(m); if (qs.get('approve') && S.drafts[m.id]) await approve(m); } else makeBrief(m);
+  /* ================= старт ================= */
+  async function boot() {
+    try {
+      const r = await call('/api/assistant/people');
+      S.me = r.me; S.people = r.people;
+    } catch (e) {
+      if (e.status === 403) { sessionStorage.removeItem(TOKEN_KEY); renderLogin('Помощник руководителя доступен только сотрудникам компании.'); return; }
+      if (!token()) { renderLogin(''); return; }
+      renderLogin(e.message); return;
     }
-    if (qs.get('dir') && S.tab === 'summary') directorSummary();
-    if (qs.get('mask') && S.tab === 'security') checkMask();
-  })();
+    const meEl = document.getElementById('me');
+    meEl.hidden = false;
+    meEl.innerHTML = '<span class="person">' + ava(S.me.id) + '<span><b>' + esc(S.me.name) + '</b><br><span class="faint">' + esc(S.me.title) + '</span></span></span><button class="btn btn-sm btn-ghost" data-act="logout">Выйти</button>';
+    document.getElementById('nav').hidden = false;
+    await loadHealth();
+    await goTab(S.tab);
+  }
+  if (token()) boot(); else { loadHealth(); renderLogin(''); }
 })();

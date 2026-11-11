@@ -13,18 +13,10 @@
   <a class="brand" href="/"><span class="brand-dot">Ф</span>Фотопринт <small>Помощник руководителя · Трек 3</small></a>
   <span class="spacer"></span>
   <span class="chip" id="aiChip" title="Где сейчас думает помощник"><span class="dot"></span><span>Проверяю ИИ…</span></span>
-  <label class="role-pick">
-    <span class="faint">Роль</span>
-    <select class="select" id="role" aria-label="Роль пользователя">
-      <option value="director">Директор</option>
-      <option value="production">Начальник цеха</option>
-      <option value="salons">Управляющая салонами</option>
-      <option value="employee">Сотрудник</option>
-    </select>
-  </label>
+  <span class="me" id="me" hidden></span>
 </header>
 
-<nav class="t3-nav" aria-label="Разделы">
+<nav class="t3-nav" aria-label="Разделы" id="nav" hidden>
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" data-tab="meetings">Встречи</button>
     <button class="tab" role="tab" data-tab="docs">Документы</button>
@@ -32,14 +24,13 @@
     <button class="tab" role="tab" data-tab="summary">Итоги</button>
     <button class="tab" role="tab" data-tab="security">Защита</button>
   </div>
-  <span class="demo-badge">Демо-компания «Проявка» · данные выдуманы</span>
+  <span class="demo-badge">Демо-данные ООО «Фотопринт» · люди и цифры выдуманы</span>
 </nav>
 
-<main id="app" class="t3-main"></main>
+<main id="app" class="t3-main" aria-live="polite"></main>
+<div id="modal"></div>
 
-<script src="/shared/company.js"></script>
 <script src="/shared/api.js"></script>
-<script src="/t3/docs.js"></script>
 <script src="/t3/app.js"></script>
 </body>
 </html>

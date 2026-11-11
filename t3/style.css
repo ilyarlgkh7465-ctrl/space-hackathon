@@ -191,3 +191,46 @@ h2.sec { font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
 @media (max-width: 420px) {
   .t3-nav .tab { padding: 7px 9px; font-size: 13.5px; }
 }
+
+/* ---- вход, пользователь, ошибки ---- */
+.login { max-width: 460px; margin: 40px auto; }
+.me { display: flex; align-items: center; gap: 10px; font-size: 13px; line-height: 1.25; }
+.err { color: var(--bad); background: var(--bad-soft); border: 1px solid var(--bad-line); border-radius: 12px; padding: 9px 12px; font-size: 14px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.h4 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink3); font-weight: 500; margin-bottom: 8px; }
+:focus-visible { outline: 3px solid var(--accent-line); outline-offset: 2px; }
+
+/* ---- расшифровка ---- */
+.transcript { display: flex; flex-direction: column; gap: 2px; max-height: 560px; overflow: auto; }
+.tline { display: grid; grid-template-columns: 52px 190px 1fr; gap: 10px; padding: 8px 10px; border-radius: 10px; font-size: 14.5px; align-items: start; }
+.tline:nth-child(odd) { background: var(--canvas); }
+.tline.hl { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn); }
+.tline .t { color: var(--ink3); font-size: 12.5px; padding-top: 2px; }
+.tline .who { display: flex; gap: 6px; align-items: center; font-weight: 500; font-size: 13.5px; }
+@media (max-width: 720px) { .tline { grid-template-columns: 44px 1fr; } .tline .tx { grid-column: 1 / -1; } }
+
+/* ---- протокол ---- */
+.proto .ptable td { vertical-align: top; }
+.proto .ptable input, .proto .ptable select { width: 100%; min-height: 36px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 14px; background: var(--bg); }
+.proto .ptable tr.skipped td { opacity: .45; }
+.proto .ptable tr.skipped input { text-decoration: line-through; }
+.flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.sugg-chip { border: 1px dashed var(--accent-line); background: var(--accent-soft); color: var(--accent-ink); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; cursor: pointer; }
+.sugg-chip:hover { border-style: solid; }
+.fb { display: flex; gap: 6px; align-items: center; font-size: 13px; margin-top: 8px; }
+
+/* ---- ответы ---- */
+.sources { margin-top: 10px; display: grid; gap: 6px; }
+.src-row { display: flex; gap: 8px; align-items: baseline; font-size: 13px; color: var(--ink2); flex-wrap: wrap; }
+
+/* ---- доска задач на 5 колонок ---- */
+.board5 { grid-template-columns: repeat(5, minmax(200px, 1fr)); overflow-x: auto; }
+@media (max-width: 900px) { .board5 { grid-template-columns: 1fr; } }
+/* строки протокола — карточками: формулировка во всю ширину, ниже ответственный, срок, основание */
+.proto .ptable, .proto .ptable tbody { display: block; width: 100%; }
+.proto .ptable thead { display: none; }
+.proto .ptable tr { display: grid; grid-template-columns: minmax(150px, 1fr) 150px auto auto; gap: 6px 8px; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid var(--line); }
+.proto .ptable td { display: block; padding: 0; border: 0; width: auto !important; }
+.proto .ptable td:first-child { grid-column: 1 / -1; }
+.proto .ptable.tasks tr { grid-template-columns: minmax(150px, 1fr) 150px auto auto; }

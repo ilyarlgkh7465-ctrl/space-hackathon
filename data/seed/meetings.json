@@ -1,1 +1,14 @@
-[]
+[
+ {"id": "mt-1", "title": "Планёрка руководителей", "start": "2026-11-10T09:00:00+03:00", "minutes": 60, "status": "held", "transcript_id": "tr-1",
+  "organizer": "u-dir", "participants": ["u-dir", "u-prod", "u-sales", "u-sup", "u-log", "u-fin", "u-hr", "u-an"],
+  "goal": "Вернуть долю заказов в срок к плану 92 % до начала новогоднего сезона", "source": "t3"},
+ {"id": "mt-2", "title": "Разбор участка сборки и переплёта", "start": "2026-11-11T11:00:00+03:00", "minutes": 45, "status": "held", "transcript_id": "tr-2",
+  "organizer": "u-prod", "participants": ["u-prod", "u-op1", "u-op2", "u-hr"],
+  "goal": "Снизить перепечатки на переплёте с 4,1 % до нормы 2,5 %", "source": "t3"},
+ {"id": "mt-3", "title": "Поддержка и доставка: сроки в сезон", "start": "2026-11-11T16:00:00+03:00", "minutes": 30, "status": "held", "transcript_id": "tr-3",
+  "organizer": "u-dir", "participants": ["u-dir", "u-sup", "u-log", "u-sales"],
+  "goal": "Чтобы клиенты узнавали о задержке заказа от нас, а не сами", "source": "t3"},
+ {"id": "mt-4", "title": "Финансовая встреча: премии и расходы сезона", "start": "2026-11-13T10:00:00+03:00", "minutes": 45, "status": "planned", "transcript_id": null,
+  "organizer": "u-dir", "participants": ["u-dir", "u-fin", "u-hr", "u-prod"],
+  "goal": "Решить, как считать премии переплётчикам в сезон и уложиться в фонд оплаты", "source": "t3"}
+]
