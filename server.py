@@ -222,6 +222,13 @@ def ask_model(system: str, user: str, want_json: bool, max_tokens: int) -> dict:
         body["response_format"] = {"type": "json_object"}
     if "deepseek.com" in prov["base_url"]:
         body["thinking"] = {"type": "disabled"}
+    if mode == "local":
+        # Локальная Qwen3: короткие ответы (чат, голос) — без «размышлений», чтобы не было задержки;
+        # большие разборы (протокол встречи, max_tokens от 1500) — с размышлениями: маленькой модели без них не хватает точности.
+        think = max_tokens >= 1500 and os.environ.get("LOCAL_LLM_THINK", "1") != "0"
+        body["chat_template_kwargs"] = {"enable_thinking": think}
+        if think:
+            body["max_tokens"] = max_tokens + int(os.environ.get("LOCAL_LLM_THINK_TOKENS", "2500"))
     headers = {"Content-Type": "application/json"}
     if prov["api_key"]:
         headers["Authorization"] = "Bearer " + prov["api_key"]
@@ -229,17 +236,18 @@ def ask_model(system: str, user: str, want_json: bool, max_tokens: int) -> dict:
                                  data=json.dumps(body).encode(), headers=headers, method="POST")
     t0 = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=45) as r:
+        with urllib.request.urlopen(req, timeout=240 if mode == "local" else 45) as r:
             data = json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="ignore")[:200]
         # некоторые модели не знают поле thinking — повторить без него
-        if e.code == 400 and "thinking" in body:
-            body.pop("thinking")
+        if e.code == 400 and ("thinking" in body or "chat_template_kwargs" in body):
+            body.pop("thinking", None)
+            body.pop("chat_template_kwargs", None)
             req = urllib.request.Request(prov["base_url"] + "/chat/completions",
                                          data=json.dumps(body).encode(), headers=headers, method="POST")
             try:
-                with urllib.request.urlopen(req, timeout=45) as r:
+                with urllib.request.urlopen(req, timeout=240 if mode == "local" else 45) as r:
                     data = json.loads(r.read().decode())
             except Exception as e2:  # noqa: BLE001
                 return {"ok": False, "reason": "{}: {}".format(prov["name"], e2)}

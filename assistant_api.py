@@ -528,11 +528,17 @@ def model_protocol(core, meeting, tr, people):
     n = len(tr["lines"])
     line = lambda v: v if isinstance(v, int) and 0 <= v < n else None  # noqa: E731
     stat = {"решено", "предложено", "обсуждалось", "требует уточнения"}
+
+    def own(v):
+        """Модели поменьше возвращают владельца как «@u-hr» или с пробелами — приводим к коду сотрудника."""
+        v = str(v or "").strip().lstrip("@").strip()
+        return v if v in ids else None
+
     out = {
         "summary": re.sub(r"@(u-[a-z0-9]+)", lambda m: (person(core, m.group(1)) or {}).get("name", m.group(0)), str(j.get("summary") or "")),
         "points": [{"text": str(p.get("text", "")), "status": p.get("status") if p.get("status") in stat else "обсуждалось", "line": line(p.get("line"))}
                    for p in j.get("points") or [] if isinstance(p, dict) and p.get("text")],
-        "tasks": [{"title": str(t.get("title", "")), "owner": t.get("owner") if t.get("owner") in ids else None,
+        "tasks": [{"title": str(t.get("title", "")), "owner": own(t.get("owner")),
                    "due": t.get("due") if re.match(r"^\d{4}-\d{2}-\d{2}$", str(t.get("due") or "")) else None, "line": line(t.get("line"))}
                   for t in j.get("tasks") or [] if isinstance(t, dict) and t.get("title")],
         "risks": [{"text": str(x.get("text", "")), "line": line(x.get("line"))} for x in j.get("risks") or [] if isinstance(x, dict) and x.get("text")],
