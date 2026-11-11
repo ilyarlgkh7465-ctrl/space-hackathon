@@ -18,6 +18,7 @@
   POST /api/assistant/feedback {ref, rating, comment} — оценка ответа (AI-07)
   GET  /api/assistant/audit                  — журнал в пределах роли
   GET  /api/assistant/access                 — матрица «документ × роль» (директор и аналитик)
+  /api/assistant/voice/...                   — голосовой чат с роботом (assistant_voice.py)
 """
 import datetime
 import json
@@ -718,6 +719,10 @@ def handle(handler, method, path, core):
         return True
     sub = path[len("/api/assistant/"):].strip("/")
     parts = sub.split("/") if sub else []
+
+    if sub.startswith("voice/"):
+        import assistant_voice
+        return assistant_voice.handle(handler, method, sub, core, user)
 
     if method == "GET" and sub == "people":
         handler._json({"people": staff(core), "me": user, "depts": DEPT_NAMES})

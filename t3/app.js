@@ -88,7 +88,7 @@
   }
   function signOut(expired) {
     try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* */ }
-    S.me = null; S.answer = null; S.audit = []; S.access = null;
+    S.me = null; S.answer = null; S.audit = []; S.access = null; window.FPVoice.reset();
     renderLogin(expired ? 'Сессия закончилась — войдите снова.' : '');
   }
 
@@ -472,8 +472,9 @@
   function render() {
     if (!S.me) return;
     document.querySelectorAll('.t3-nav .tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)));
-    const views = { meetings: renderMeetings, docs: renderDocs, tasks: renderTasks, summary: renderSummary, security: renderSecurity };
+    const views = { voice: () => window.FPVoice.html(), meetings: renderMeetings, docs: renderDocs, tasks: renderTasks, summary: renderSummary, security: renderSecurity };
     app.innerHTML = (S.err ? '<p class="err" role="alert" style="margin-bottom:12px">' + esc(S.err) + ' <button class="btn btn-sm" data-act="reload">Повторить</button></p>' : '') + (views[S.tab] || renderMeetings)();
+    if (S.tab === 'voice') window.FPVoice.mount(app, { call, token, goTab });
     if (S.tab === 'docs' && S.hl && S.hl.length) { const el = document.getElementById('it-' + S.hl[0]); if (el) el.scrollIntoView({ block: 'nearest' }); }
     if (S.tab === 'meetings' && S.hlLine != null) { const el = document.getElementById('ln-' + S.hlLine); if (el) el.scrollIntoView({ block: 'center' }); }
     if (S.tab === 'tasks' && S.focusTask) { const el = document.getElementById('task-' + S.focusTask); if (el) el.scrollIntoView({ block: 'center' }); }
@@ -486,6 +487,7 @@
     chip.className = cls; chip.querySelector('span:last-child').textContent = txt;
   }
   async function goTab(tab) {
+    if (S.tab === 'voice' && tab !== 'voice') window.FPVoice.leave();
     S.tab = tab; S.err = null;
     const u = new URL(location); u.searchParams.set('tab', tab); history.replaceState(null, '', u);
     try {
@@ -551,7 +553,7 @@
       }
       if (act === 'goto-task') { S.focusTask = b.dataset.id; goTab('tasks'); }
       if (act === 'doc') { S.docId = b.dataset.id; S.hl = null; render(); }
-      if (act === 'cite') { S.tab = 'docs'; if (!S.docs.length) await loadDocs(); S.docId = b.dataset.doc; S.hl = [b.dataset.n]; render(); }
+      if (act === 'cite') { if (S.tab === 'voice') window.FPVoice.leave(); S.tab = 'docs'; if (!S.docs.length) await loadDocs(); S.docId = b.dataset.doc; S.hl = [b.dataset.n]; render(); }
       if (act === 'sugg') ask(b.textContent);
       if (act === 'retry') ask(S.qText);
       if (act === 'fb') sendFeedback(b.closest('.fb').dataset.ref, +b.dataset.r);

@@ -16,12 +16,12 @@
    - llama.cpp — `https://github.com/ggml-org/llama.cpp` (релизы или сборка из исходников);
    - whisper.cpp — `https://github.com/ggml-org/whisper.cpp`, модели — `https://huggingface.co/ggerganov/whisper.cpp`;
    - Qwen3 — `https://huggingface.co/Qwen/Qwen3-8B-GGUF` (и `Qwen/Qwen3-4B-GGUF`, `Qwen/Qwen3-14B-GGUF` для запасных вариантов);
-   - Piper — `pip install piper-tts` (проект `OHF-Voice/piper1-gpl`), голоса — `https://huggingface.co/rhasspy/piper-voices`;
+   - синтез голоса — модель Silero `https://models.silero.ai/models/tts/ru/v4_ru.pt`, PyTorch для процессора — с `https://download.pytorch.org/whl/cpu` или PyPI; запасной Piper — `pip install piper-tts`, голоса — `https://huggingface.co/rhasspy/piper-voices`;
    - драйверы — из репозиториев ОС или с amd.com.
    Если для файла опубликована контрольная сумма — сверь.
 2. **Не делай без подтверждения человека:** переустановку или обновление ОС и драйверов с перезагрузкой, удаление чужих файлов и программ, изменение настроек безопасности, брандмауэра и учётных записей, открытие портов наружу из локальной сети.
 3. **Пароли и ключи не вводишь сам.** Нужен вход в GitHub (`gh auth login`), пароль sudo или ключ облачной модели — попроси человека ввести его.
-4. **Без обходов:** никаких VPN и прокси для обхода региональных ограничений. Никакого клонирования голосов реальных людей — только стандартные голоса Piper.
+4. **Без обходов:** никаких VPN и прокси для обхода региональных ограничений. Никакого клонирования голосов реальных людей — только стандартные голоса Silero или Piper.
 5. Все службы слушают только `127.0.0.1`, кроме нашего сервера (он в локальную сеть — через `--lan`).
 6. Если шаг не получается — не подменяй решение молча. Запиши, что пробовал, и иди по запасному варианту из раздела «Если не работает».
 
@@ -31,6 +31,7 @@
 - Определи ОС и версию. Рекомендуемая — **Ubuntu 24.04** (драйвер Mesa RADV уже есть). Windows 10/11 тоже подходит (драйвер AMD Adrenalin).
 - Проверь, что обе карты видны через Vulkan: `vulkaninfo --summary` (Ubuntu: пакет `vulkan-tools`; Windows: из Vulkan SDK или по выводу `llama-server --list-devices`). Должно быть два устройства RX 580 / Polaris.
 - Свободное место на диске — нужно не меньше **20 ГБ**.
+- Сразу запусти в фоне загрузку модели голоса Silero (шаг 4): её сервер бывает очень медленным (замечали ~40 КБ/с), 40 МБ могут качаться минут двадцать.
 - Поставь, если нет: `git`, `python3` 3.10+, `pip`, `ffmpeg`, `cmake` и компилятор (для сборки), `curl`.
 
 ### 1. Репозиторий
@@ -58,15 +59,24 @@ llama-server -m ~/fp-ai/models/Qwen3-8B-Q4_K_M.gguf --device Vulkan0 -ngl 99 -c 
 whisper-server -m ~/fp-ai/models/ggml-large-v3-turbo-q5_0.bin -l ru --host 127.0.0.1 --port 8090
 ```
 
-### 4. Синтез голоса — Piper, процессор
+### 4. Синтез голоса — Silero, процессор
+Сервис синтеза уже есть в репозитории: `tools/tts_server.py`. Ставишь только его зависимости и модель.
 ```bash
-python3 -m venv ~/fp-ai/piper && ~/fp-ai/piper/bin/pip install "piper-tts[http]"
-cd ~/fp-ai/voices && ~/fp-ai/piper/bin/python -m piper.download_voices ru_RU-denis-medium ru_RU-irina-medium
-~/fp-ai/piper/bin/python -m piper.http_server -m ru_RU-denis-medium --data-dir ~/fp-ai/voices --host 127.0.0.1 --port 5000
+python3 -m venv ~/fp-ai/tts
+~/fp-ai/tts/bin/pip install torch numpy --index-url https://download.pytorch.org/whl/cpu   # Windows: pip install torch numpy
+mkdir -p ~/fp-ai/models && curl -L -o ~/fp-ai/models/v4_ru.pt https://models.silero.ai/models/tts/ru/v4_ru.pt
+~/fp-ai/tts/bin/python ~/space-hackathon/tools/tts_server.py --engine silero --model ~/fp-ai/models/v4_ru.pt --speaker aidar --port 5050
 ```
-- Команды сверь с `--help` установленной версии.
-- Параметры голоса: `length_scale` 1.0, `noise_scale` 0.667, `noise_w` 0.8, пауза между предложениями 0.2 с.
-- Из файлов `MODEL_CARD` обоих голосов выпиши лицензию — она нужна в отчёт.
+- Проверка: `curl http://127.0.0.1:5050/` → `{"ok": true, "engine": "silero", ...}`; `curl -X POST -d '{"text":"Добрый день! Требуют решения: 5."}' http://127.0.0.1:5050/synthesize -o test.wav` — файл звучит, цифры прочитаны словами.
+- **Образцы для выбора на слух:** сделай одну и ту же фразу голосами `aidar`, `eugene`, `baya`, `xenia` в `~/fp-ai/samples/`. Голос выбирает человек; выбранный — в автозапуск (`--speaker`).
+- Лицензия Silero — CC BY-NC-SA 4.0 (только некоммерческое использование): запиши в отчёт.
+- **Запасной вариант — Piper**, если Silero не ставится или звучит медленнее реального времени:
+```bash
+python3 -m venv ~/fp-ai/piper && ~/fp-ai/piper/bin/pip install piper-tts
+cd ~/fp-ai/voices && ~/fp-ai/piper/bin/python -m piper.download_voices ru_RU-denis-medium
+~/fp-ai/piper/bin/python ~/space-hackathon/tools/tts_server.py --engine piper --model ~/fp-ai/voices/ru_RU-denis-medium.onnx --port 5050
+```
+  Piper ставь в папку с коротким путём (`~/fp-ai`): при длинном пути он не находит данные произношения (`phontab`).
 
 ### 5. Наш сервер
 ```bash
@@ -74,7 +84,7 @@ cd ~/space-hackathon
 LOCAL_LLM_URL=http://127.0.0.1:8080/v1 LOCAL_LLM_MODEL=qwen3-8b AI_MODE=local python3 server.py --lan
 ```
 - Порт 8800. Кода не правь — сервер ходит в модель по OpenAI-совместимому адресу.
-- Когда в сервере появятся переменные `STT_URL` и `TTS_URL` (их добавляет Лёша), передай `STT_URL=http://127.0.0.1:8090` и `TTS_URL=http://127.0.0.1:5000`.
+- Голосовой чат по умолчанию ищет распознавание на `http://127.0.0.1:8090` и синтез на `http://127.0.0.1:5050`; если порты другие — передай `STT_URL` и `TTS_URL`. Проверка: `GET /api/assistant/voice/status` после входа должен вернуть `stt: true, tts: true`.
 
 ### 6. Автозапуск
 - Ubuntu: четыре службы systemd (`fp-llm`, `fp-stt`, `fp-tts`, `fp-server`) с `Restart=on-failure`; сервер стартует после трёх остальных.
@@ -87,7 +97,7 @@ LOCAL_LLM_URL=http://127.0.0.1:8080/v1 LOCAL_LLM_MODEL=qwen3-8b AI_MODE=local py
 |---|---|---|---|
 | 1 | Модель отвечает | `curl http://127.0.0.1:8080/v1/chat/completions` с вопросом по-русски | связный ответ на русском |
 | 2 | Скорость модели | `tokens per second` в логе `llama-server` | **не меньше 10**, хорошо — 15+ |
-| 3 | Синтез | Piper: «Добрый день, я помощник компании Фотопринт.» → `test.wav` | файл звучит, создан быстрее длительности фразы |
+| 3 | Синтез | `POST http://127.0.0.1:5050/synthesize` «Добрый день, я помощник компании Фотопринт. Требуют решения: 5.» → `test.wav` | файл звучит, цифры словами, создан быстрее длительности фразы |
 | 4 | Распознавание | `curl -F file=@test.wav -F response_format=json http://127.0.0.1:8090/inference` | тот же текст, допустимы мелкие расхождения |
 | 5 | Карты заняты по плану | лог запуска обеих программ | LLM на Vulkan0, whisper на Vulkan1 |
 | 6 | Наш сервер | `http://127.0.0.1:8800/api/health` | `"mode": "local"` |
@@ -101,16 +111,17 @@ LOCAL_LLM_URL=http://127.0.0.1:8080/v1 LOCAL_LLM_MODEL=qwen3-8b AI_MODE=local py
 - **Скорость модели ниже 10 слов в секунду** → `Qwen3-4B-Q4_K_M.gguf` на Vulkan0; запиши обе скорости в отчёт.
 - **Нужна модель поумнее и скорость позволяет** → `Qwen3-14B-Q4_K_M.gguf` на обе карты (`--device Vulkan0,Vulkan1 --split-mode layer --tensor-split 1,1`), whisper тогда на процессоре. Оставь основным вариантом только если скорость не меньше 10.
 - **whisper.cpp не собирается с Vulkan** → собери без Vulkan (процессор) с моделью `ggml-small-q5_1.bin` или `large-v3-turbo-q5_0`, замерь, за сколько распознаётся 5 секунд речи (норма — меньше 2 секунд).
+- **Silero не ставится, модель не скачивается или синтез медленнее реального времени** → Piper через тот же `tools/tts_server.py --engine piper` (шаг 4).
 - **Не хватает места или памяти** → удали только то, что сам скачал в `~/fp-ai/`.
 
 ## Отчёт
 
 В конце создай `~/fp-ai/ОТЧЁТ.md`:
-- ОС, версии драйвера, llama.cpp, whisper.cpp, Piper;
+- ОС, версии драйвера, llama.cpp, whisper.cpp, PyTorch, Silero или Piper;
 - какие модели стоят (файлы, размеры, откуда скачаны);
 - таблица проверки с фактическими цифрами (скорость модели, время распознавания и синтеза);
 - что пошло не по плану и какой запасной вариант выбран;
-- лицензии голосов Piper;
+- какой движок и голос синтеза выбран, его лицензия;
 - как запустить и остановить всё руками и где лежат скрипты автозапуска.
 
 Если что-то из таблицы проверки не прошло — скажи об этом прямо в начале отчёта.

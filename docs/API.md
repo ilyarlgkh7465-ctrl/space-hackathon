@@ -23,6 +23,19 @@
 | `GET /api/assistant/audit` | Журнал действий | директор и аналитик — весь; руководитель — свой отдел; сотрудник — свои |
 | `GET /api/assistant/access` | Матрица «документ × сотрудник» | директор, аналитик |
 
+### Голосовой чат с роботом — `/api/assistant/voice/…`
+
+Файл `assistant_voice.py`. Ответы строятся теми же функциями, что и экран помощника, поэтому права роли те же. Голосом ничего не меняется: на просьбу «создай», «назначь», «перенеси» робот отвечает, что действие подтверждается кнопкой на экране. Звук не сохраняется; в журнал пишется текст вопроса после маскирования.
+
+| Метод и адрес | Что делает |
+|---|---|
+| `GET /api/assistant/voice/status` | `{stt, tts, ffmpeg}` — запущены ли распознавание и синтез речи |
+| `POST /api/assistant/voice/chat` `{q}` | Ответ `{text, speech, intent, cites, source, link}`. `intent`: `pulse` (сводка пульта с источником и временем), `tasks`, `meetings`, `docs`, `action` (отказ выполнять голосом), `howto`, `hello` |
+| `POST /api/assistant/voice/stt` `{audio: base64, mime}` | Звук из браузера → `{text, seconds, ms}`. Сервер переводит запись в WAV 16 кГц через ffmpeg и отправляет в whisper.cpp. Не запущено → `503` |
+| `POST /api/assistant/voice/tts` `{text, voice: "robot"}` | Текст → `audio/wav` (Silero или Piper). Не запущено → `503` с `fallback: "browser"`, интерфейс тогда говорит голосом браузера |
+
+Настройки сервера: `STT_URL` (по умолчанию `http://127.0.0.1:8090`, whisper.cpp), `TTS_URL` (`http://127.0.0.1:5050`, сервис `tools/tts_server.py` — Silero или Piper), `TTS_VOICE_ROBOT` (`ru_RU-denis-medium`), `FFMPEG` (путь к ffmpeg, если его нет в PATH).
+
 ### Правила доступа к документам (`data/seed/documents.json`, поле `access`)
 
 - `all` — все сотрудники; `heads` — руководители отделов; `analyst` — аналитик;
