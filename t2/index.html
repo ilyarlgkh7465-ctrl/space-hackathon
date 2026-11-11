@@ -17,25 +17,27 @@
 <link rel="stylesheet" href="/shared/fonts/fonts.css">
 <link rel="stylesheet" href="/shared/ui.css">
 <link rel="stylesheet" href="/t2/style.css">
+<link rel="stylesheet" href="/t2/picpac.css">
 </head>
 <body>
 <div class="stage">
   <aside class="side side-left" aria-label="Шаги заказа">
-    <span class="chip chip-accent">Трек 2 · мобильный канал заказа</span>
+    <span class="chip chip-accent">picPac · мобильное приложение</span>
     <h1>Печать с телефона</h1>
-    <p class="lead">Путь от фотографий в галерее до оформленного заказа — без регистрации, редактора и Snapseed.</p>
+    <p class="lead">От фотографий в галерее до заказа и статуса печати — несколько касаний, без редактора и регистрации.</p>
     <ol class="steps" id="sideSteps">
-      <li data-s="0"><div><b>Выбрать фото</b><span>Из галереи телефона, в любом браузере и в Telegram</span></div></li>
-      <li data-s="1"><div><b>Проверка кадров</b><span>Размытые, дубли, тёмные — отсеяны прямо на телефоне</span></div></li>
-      <li data-s="2"><div><b>Формат</b><span>Кадрирует 3:4 → 2:3 сама и честно говорит, хватит ли пикселей</span></div></li>
-      <li data-s="3"><div><b>Корзина</b><span>Самовывоз из салона или доставка, оплата при получении</span></div></li>
-      <li data-s="4"><div><b>Готово</b><span>Статус в реальном времени; заказ сразу на пульте руководителя (Т1)</span></div></li>
+      <li data-s="0"><div><b>Каталог</b><span>Продукты, варианты и цены приходят с сервера</span></div></li>
+      <li data-s="1"><div><b>Фото</b><span>Из галереи, порядок и кадрирование; черновик сохраняется сам</span></div></li>
+      <li data-s="2"><div><b>Проверка</b><span>Мало пикселей, размытые, пустые места — понятным языком</span></div></li>
+      <li data-s="3"><div><b>Корзина</b><span>Получение, промокод, заказ без списания денег</span></div></li>
+      <li data-s="4"><div><b>Статус</b><span>Лента из событий; этапы отмечает производство</span></div></li>
     </ol>
   </aside>
 
   <div class="phone">
     <div class="app in-frame" id="app">
       <header class="app-head" id="head"></header>
+      <div class="net" id="net" role="status" hidden></div>
       <main class="screen" id="screen"></main>
       <footer class="actionbar" id="bar"></footer>
     </div>
@@ -65,10 +67,9 @@
   </aside>
 </div>
 
-<input type="file" id="file" class="file-input" accept="image/*" multiple>
-<script src="/shared/company.js"></script>
+<input type="file" id="file" class="file-input" accept="image/jpeg,image/png" multiple>
 <script src="/shared/api.js"></script>
+<script src="/t2/demo.js"></script>
 <script src="/t2/app.js"></script>
-<script src="https://telegram.org/js/telegram-web-app.js" async onload="window.__tgReady && window.__tgReady()"></script>
 </body>
 </html>

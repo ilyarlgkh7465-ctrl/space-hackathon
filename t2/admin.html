@@ -3,123 +3,78 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Мобильные заказы · салон</title>
-<link rel="icon" href="/t2/icon.svg" type="image/svg+xml">
+<title>picPac · экран производства</title>
 <link rel="stylesheet" href="/shared/fonts/fonts.css">
 <link rel="stylesheet" href="/shared/ui.css">
 <style>
-  main { max-width: 1120px; margin: 0 auto; padding: 24px 20px 60px; }
-  .head h1 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; }
-  .head p { color: var(--ink2); margin-top: 4px; }
-  .stats { margin-top: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-  .stat .v { font-family: var(--mono); font-size: 26px; font-weight: 500; margin-top: 4px; letter-spacing: -.02em; }
-  .stat .s { font-size: 12.5px; color: var(--ink3); margin-top: 2px; }
-  .bar { margin-top: 22px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ok); }
-  .live .dot { animation: pulse 1.6s infinite; }
-  @keyframes pulse { 50% { opacity: .3; } }
-  .list { margin-top: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
-  .o { display: flex; flex-direction: column; gap: 10px; }
-  .o.fresh { animation: fresh 1.8s var(--ease); }
-  @keyframes fresh { from { box-shadow: 0 0 0 4px var(--accent-line); } }
-  .o-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-  .o-num { font-family: var(--mono); font-size: 18px; font-weight: 600; }
-  .o-time { font-size: 12.5px; color: var(--ink3); }
-  .o-who { font-size: 14px; }
-  .o-lines { font-size: 14px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 0; display: flex; flex-direction: column; gap: 4px; }
-  .o-lines div { display: flex; justify-content: space-between; gap: 10px; }
-  .o-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-  .o-total { font-family: var(--mono); font-weight: 600; font-size: 16px; }
-  .thumbs { display: flex; gap: 6px; }
-  .thumbs i { width: 44px; height: 44px; border-radius: 8px; background-size: cover; background-position: center; background-color: var(--sunk); }
-  .empty { padding: 50px 20px; text-align: center; color: var(--ink2); grid-column: 1 / -1; }
-  @media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } .list { grid-template-columns: 1fr; } }
+  body { background: var(--canvas); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 60px; display: flex; flex-direction: column; gap: 14px; }
+  .wrap h1 { font-size: 24px; font-weight: 600; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .ord { display: flex; flex-direction: column; gap: 10px; }
+  .ord .top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+  .ord b { font-size: 17px; }
+  .ord small { color: var(--ink2); display: block; font-size: 14px; }
+  .form { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
+  .btn { min-height: 48px; }
+  .err { color: var(--bad); font-size: 14px; }
+  .btn-bad { color: var(--bad); }
 </style>
 </head>
 <body>
-<header class="topbar">
-  <a class="brand" href="/"><span class="brand-dot">Ф</span>Фотопринт <small>Трек 2 · экран салона и цеха</small></a>
-  <span class="spacer"></span>
-  <a class="btn btn-sm" href="/t2/" target="_blank" rel="noopener">Экран клиента →</a>
-</header>
-<main>
-  <section class="head">
-    <h1>Мобильные заказы</h1>
-    <p>Заказы с телефона приходят сюда сразу. Смена статуса видна клиенту на его экране и на пульте руководителя.</p>
-  </section>
-  <section class="stats" id="stats"></section>
-  <div class="bar">
-    <div class="tabs" role="tablist" id="tabs"></div>
-    <span class="spacer" style="flex:1"></span>
-    <span class="live"><span class="dot"></span>обновляется каждые 3 с</span>
-  </div>
-  <section class="list" id="list"></section>
-</main>
-<script src="/shared/company.js"></script>
+<main class="wrap" id="app"></main>
 <script src="/shared/api.js"></script>
 <script>
 (function () {
-  const ST = [
-    { id: 'new', name: 'Принят', chip: 'chip-accent', next: 'printing', btn: 'В печать' },
-    { id: 'printing', name: 'В печати', chip: 'chip-warn', next: 'ready', btn: 'Готов' },
-    { id: 'ready', name: 'Готов', chip: 'chip-ok', next: 'done', btn: 'Выдан' },
-    { id: 'done', name: 'Выдан', chip: '', next: null },
-  ];
-  const localIso = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19); };
-  const stOf = (id) => ST.find((s) => s.id === id) || ST[0];
-  let filter = 'active', orders = [], seen = new Set(), first = true;
-  const mmss = (s) => Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
-  const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 1 ? 'только что' : m < 60 ? m + ' мин назад' : fmt.dt(iso); };
+  const $ = (s) => document.querySelector(s);
+  let S = { tok: sessionStorage.getItem('pp_staff'), user: null, data: null, err: '', filter: 'mine' };
+  const NAME = { accepted: 'Принят', moderation: 'Модерация', production: 'Производство', quality: 'Контроль качества', shipped: 'Передан в доставку', done: 'Завершён' };
+  const STATE = { pending: 'ждёт', started: 'в работе', defect: 'брак', passed: 'сдан' };
 
-  async function load() {
-    const all = await api.list('orders');
-    orders = all.filter((o) => o.channel === 'mobile').sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
-    render();
+  async function call(method, path, body) {
+    const r = await fetch(path, { method, headers: Object.assign({ 'Content-Type': 'application/json' }, S.tok ? { Authorization: 'Bearer ' + S.tok } : {}), body: body ? JSON.stringify(body) : undefined });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw Object.assign(new Error(d.error || 'Ошибка ' + r.status), { status: r.status });
+    return d;
   }
-  function render() {
-    const today = localIso().slice(0, 10);
-    const tod = orders.filter((o) => String(o.ts).slice(0, 10) === today);
-    const avg = orders.length ? orders.reduce((s, o) => s + (o.timeSec || 0), 0) / orders.length : 0;
-    const cnt = (id) => orders.filter((o) => o.status === id).length;
-    document.getElementById('stats').innerHTML = [
-      ['Заказов сегодня', fmt.n(tod.length), 'всего с телефона: ' + orders.length],
-      ['Выручка сегодня', fmt.money2(tod.reduce((s, o) => s + (o.total || 0), 0)), 'оплата при получении'],
-      ['В работе', fmt.n(cnt('new') + cnt('printing')), cnt('ready') + ' ждут выдачи'],
-      ['Время оформления', orders.length ? mmss(avg) : '—', 'в среднем, от выбора фото'],
-    ].map(([t, v, s]) => `<div class="card stat"><span class="eyebrow">${t}</span><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
-
-    const tabs = [['active', 'В работе'], ['new', 'Новые'], ['printing', 'В печати'], ['ready', 'Готовы'], ['done', 'Выданы'], ['all', 'Все']];
-    document.getElementById('tabs').innerHTML = tabs.map(([id, n]) => `<button class="tab" role="tab" data-f="${id}" aria-selected="${filter === id}">${n}</button>`).join('');
-    document.querySelectorAll('[data-f]').forEach((b) => { b.onclick = () => { filter = b.dataset.f; render(); }; });
-
-    const list = orders.filter((o) => filter === 'all' ? true : filter === 'active' ? o.status !== 'done' : o.status === filter);
-    document.getElementById('list').innerHTML = list.length ? list.map((o) => {
-      const st = stOf(o.status), fresh = !first && !seen.has(o.id);
-      const where = o.branch ? 'Самовывоз · ' + o.branch.name : (o.delivery ? o.delivery.name : '') + (o.address ? ' · ' + o.address : '');
-      return `<article class="card o ${fresh ? 'fresh' : ''}">
-        <div class="o-top"><div><div class="o-num">${esc(o.number || o.id)}</div><div class="o-time">${ago(o.ts)} · оформлен за ${mmss(o.timeSec || 0)}</div></div>
-          <span class="chip ${st.chip}"><span class="dot"></span>${st.name}</span></div>
-        <div class="o-who"><b>${esc(o.name)}</b> · ${esc(o.phone)}<br><span class="muted">${esc(where)}</span></div>
-        <div class="o-lines">${(o.items || []).map((it) => `<div><span>${esc(it.name)}${it.fit ? ' · с полями' : ''}</span><span class="num">${it.qty > 1 ? it.qty + ' шт' : it.photos + ' фото'} · ${fmt.money2(it.sum)}</span></div>`).join('')}</div>
-        ${o.thumbs && o.thumbs.length ? `<div class="thumbs">${o.thumbs.map((t) => `<i style="background-image:url(${t})"></i>`).join('')}<span class="faint" style="font-size:12.5px;align-self:center">${o.photos} фото</span></div>` : ''}
-        <div class="o-foot"><span class="o-total">${fmt.money2(o.total || 0)}</span>
-          ${st.next ? `<button class="btn btn-primary btn-sm" data-id="${o.id}" data-next="${st.next}">${st.btn}</button>` : '<span class="faint">Заказ закрыт</span>'}</div>
-      </article>`;
-    }).join('') : '<div class="empty">Пока пусто. Оформите заказ на экране клиента — он появится здесь сразу.</div>';
-    list.forEach((o) => seen.add(o.id)); orders.forEach((o) => seen.add(o.id)); first = false;
-    document.querySelectorAll('[data-next]').forEach((b) => {
+  async function load() {
+    try { S.data = await call('GET', '/api/app/staff/orders'); S.user = S.user || await call('GET', '/api/me'); S.err = ''; }
+    catch (e) { if (e.status === 401) { S.tok = null; sessionStorage.removeItem('pp_staff'); } S.err = e.message; S.data = null; }
+    draw();
+  }
+  function draw() {
+    const a = $('#app');
+    if (!S.tok || !S.data) {
+      a.innerHTML = `<h1>Экран производства</h1><p class="muted">Войдите под учётной записью сотрудника (operator или quality).</p>
+        <form class="form" id="f"><div><label for="lg">Логин</label><input class="input" id="lg" value="operator" autocomplete="username"></div>
+        <div><label for="pw">Пароль</label><input class="input" id="pw" type="password" placeholder="demo2026" autocomplete="current-password"></div>
+        ${S.err ? `<p class="err" role="alert">${esc(S.err)}</p>` : ''}<button class="btn btn-primary btn-lg" type="submit">Войти</button></form>
+        <a href="/t2/" class="btn btn-ghost" style="align-self:flex-start">← Приложение клиента</a>`;
+      $('#f').onsubmit = async (e) => {
+        e.preventDefault();
+        try { const d = await call('POST', '/api/login', { login: $('#lg').value.trim(), password: $('#pw').value }); S.tok = d.token; S.user = d.user; sessionStorage.setItem('pp_staff', d.token); load(); }
+        catch (er) { S.err = er.message; draw(); }
+      };
+      return;
+    }
+    const D = S.data, mine = D.orders.filter((o) => o.can), list = S.filter === 'mine' ? mine : D.orders;
+    a.innerHTML = `<div class="row" style="justify-content:space-between"><h1>Очередь: ${D.stages.map((s) => NAME[s]).join(', ') || 'просмотр'}</h1><button class="btn btn-ghost" id="out">Выйти</button></div>
+      <p class="muted">${esc(S.user.name)} · ${esc(S.user.title)}</p>
+      <div class="row"><button class="chip" data-f="mine" aria-pressed="${S.filter === 'mine'}">Мои этапы · ${mine.length}</button><button class="chip" data-f="all" aria-pressed="${S.filter === 'all'}">Все · ${D.orders.length}</button></div>
+      ${S.err ? `<p class="err" role="alert">${esc(S.err)}</p>` : ''}
+      ${list.map((o) => `<div class="card ord"><div class="top"><div><b>${esc(o.number)}</b><small>${(o.items || []).map((i) => esc(i.name) + ' × ' + i.qty).join(', ')} · ${o.photos} фото</small><small>${esc(o.pickup_point ? o.pickup_point.name : (o.delivery || {}).name || '')}</small></div>
+        <div style="text-align:right"><span class="chip chip-accent">${NAME[o.stage]}</span><small>${STATE[o.stage_status] || ''}</small></div></div>
+        ${o.can ? `<div class="row"><button class="btn btn-primary" data-a="accept" data-id="${o.id}" ${o.stage_status === 'started' ? 'disabled' : ''}>Принял</button><button class="btn" data-a="handoff" data-id="${o.id}" ${o.stage_status !== 'started' ? 'disabled' : ''}>Сдал</button><button class="btn btn-bad" data-a="defect" data-id="${o.id}">Брак</button></div>` : '<small>Этот этап вам отмечать нельзя</small>'}</div>`).join('') || '<div class="card"><p class="muted">Заказов в очереди нет.</p></div>'}`;
+    $('#out').onclick = () => { S.tok = null; S.data = null; S.user = null; sessionStorage.removeItem('pp_staff'); draw(); };
+    a.querySelectorAll('[data-f]').forEach((b) => { b.onclick = () => { S.filter = b.dataset.f; draw(); }; });
+    a.querySelectorAll('[data-a]').forEach((b) => {
       b.onclick = async () => {
-        b.disabled = true;
-        const o = orders.find((x) => x.id === b.dataset.id);
-        const hist = (o.history || []).concat([{ ts: localIso(), status: b.dataset.next }]);
-        await api.update('orders', o.id, { status: b.dataset.next, history: hist });
-        toast(o.number + ': ' + stOf(b.dataset.next).name);
+        try { await call('POST', '/api/app/staff/orders/' + b.dataset.id + '/mark', { action: b.dataset.a }); toast('Отмечено'); } catch (e) { S.err = e.message; }
         load();
       };
     });
   }
-  load();
-  setInterval(load, 3000);
+  load(); setInterval(() => { if (S.tok) load(); }, 5000);
 })();
 </script>
 </body>
