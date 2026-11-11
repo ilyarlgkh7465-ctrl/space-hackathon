@@ -309,3 +309,8 @@
 .dept.wide { grid-column: span 2; }
 .more { align-self: flex-start; }
 @media (max-width: 760px) { .dept.wide { grid-column: auto; } }
+
+/* живые данные приложения */
+.dept.full { grid-column: 1 / -1; background: linear-gradient(120deg, rgba(255,255,255,.9), rgba(226,243,233,.55)); }
+.dept.full ul { max-width: 760px; }
+.dept.full p { font-size: 14px; }

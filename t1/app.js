@@ -107,7 +107,7 @@
     f.login.focus();
   }
   function logout(silent) {
-    S.token = null; S.user = null; S.pulse = null; S.cache = {}; S.chat = [];
+    S.token = null; S.user = null; S.pulse = null; S.cache = {}; S.chat = []; clearInterval(S.timer);
     store.set('fp-token', null);
     renderLogin(silent ? 'Сеанс закончился, войдите снова' : '');
   }
@@ -154,6 +154,14 @@
     $('#fab').onclick = openChat;
     renderTop(); movePill(false);
     window.addEventListener('resize', () => movePill(false));
+    clearInterval(S.timer);
+    S.timer = setInterval(async () => {                      // новые заказы и отметки из приложения — без перезагрузки
+      if (document.hidden || $('#layer').innerHTML || !S.pulse || !S.pulse.app || !['pulse', 'sales', 'production'].includes(S.view)) return;
+      try {
+        const a = await api('/api/pult/app?days=' + S.days), sig = appSig(a);
+        if (sig !== S.appSig) { S.appSig = sig; S.pulse.app = a; const y = window.scrollY; await renderView(); window.scrollTo(0, y); toast('Пришли новые данные из приложения'); }
+      } catch (e) { /* сеть моргнула — попробуем в следующий раз */ }
+    }, 6000);
   }
   /* «Перетекающий» указатель раздела: край по ходу движения едет быстро, второй его догоняет. */
   function movePill(animate = true) {
@@ -198,7 +206,7 @@
   async function load() {
     S.err = null;
     if (!S.pulse) $('#view').innerHTML = `<div class="skel" style="height:64px"></div><div class="grid2"><div class="skel" style="height:420px"></div><div class="skel" style="height:420px"></div></div>`;
-    try { S.pulse = await api('/api/pult/pulse?' + q()); } catch (e) { S.err = e; }
+    try { S.pulse = await api('/api/pult/pulse?' + q()); S.appSig = appSig(S.pulse.app); } catch (e) { S.err = e; }
     renderTop(); renderView();
   }
   function errorBox(e, retry = 'load') {
@@ -304,7 +312,45 @@
           <div class="big">${esc(c.metrics[0][1].replace(' %', ''))}<small> %</small></div><p>${esc(c.metrics[0][0])} — главный показатель компании. План 96 %.</p></div>
           <ul>${c.metrics.slice(1).map((m) => `<li><b>${esc(m[1])}</b><span>${esc(m[0])}</span></li>`).join('')}<li><b>${p.pulse.critical}</b><span>показателей требуют решения</span></li></ul></button>`
       : `<button class="glass-flat dept${c.note ? ' wide' : ''}" data-go="${c.view}"><header><h3>${esc(c.name)}</h3>${chip(c.status)}</header>
-          <ul>${c.metrics.map((m) => `<li><b>${esc(m[1])}</b><span>${esc(m[0])}</span></li>`).join('')}</ul>${c.note ? `<small>${esc(c.note)}</small>` : ''}</button>`).join('')}</section>`;
+          <ul>${c.metrics.map((m) => `<li><b>${esc(m[1])}</b><span>${esc(m[0])}</span></li>`).join('')}</ul>${c.note ? `<small>${esc(c.note)}</small>` : ''}</button>`).join('')}${S.dept ? '' : appCard(p)}</section>`;
+  }
+  /* Живые данные мобильного приложения: заказ, оформленный с телефона, виден здесь через несколько секунд. */
+  const mins = (v) => v == null ? '—' : v < 1 ? 'меньше 1' : fmt(v);
+  const appSig = (a) => a ? JSON.stringify([a.sessions, a.orders && a.orders.count, a.orders && a.orders.by_stage, a.stages, a.funnel, a.support]) : '';
+  function appCard(p) {
+    const a = p.app; if (!a || !a.orders) return '';
+    const o = a.orders, nums = [];
+    if (a.see.sales) nums.push(['Открыли приложение', fmt(a.sessions)], ['Оформили заказ', fmt(o.count)], ['Оформляют заказ за', o.time_sec ? fmt(o.time_sec) + ' с' : '—']);
+    else nums.push(['Заказов из приложения', fmt(o.count)]);
+    nums.push(['Сейчас в работе', fmt(o.in_work)]);
+    const empty = !o.count && !(a.sessions > 0);
+    return `<button class="glass-flat dept full" data-go="${a.see.sales ? 'sales' : 'production'}"><header><h3>Приложение picPac</h3><span class="chip live"><i></i>живые данные</span></header>
+      ${empty ? '<p class="muted">Пока никто не заходил. Оформите тестовый заказ в приложении — он появится здесь через несколько секунд.</p>'
+        : `<ul style="grid-template-columns:repeat(${nums.length}, minmax(0, 1fr))">${nums.map((m) => `<li><b>${esc(m[1])}</b><span>${esc(m[0])}</span></li>`).join('')}</ul>`}
+      <small>${esc(a.drop || 'Шаги клиента и отметки этапов приходят из приложения в общий слой событий.')}</small></button>`;
+  }
+  function liveSales(a) {
+    if (!a || !a.see.sales) return '';
+    const max = Math.max(...a.funnel.map((r) => r.count), 1), o = a.orders;
+    return `<section class="glass panel"><header><h2>Приложение picPac — живые данные</h2><span class="chip live"><i></i>обновляется само</span><span class="spacer"></span><a class="btn btn-sm" href="/t2/" target="_blank" rel="noopener">Открыть приложение</a></header>
+      <div class="grid2"><div><p class="eyebrow" style="margin-bottom:10px">Воронка за ${a.days} дн. · дошли до заказа ${fmt(a.conversion)} %</p>
+          <div class="funnel" style="min-height:170px">${a.funnel.map((r, i) => `<div class="fstep"><b>${fmt(r.count)}</b><div class="col" style="height:${Math.max(4, (r.count / max) * 110).toFixed(0)}px;animation-delay:${i * 50}ms"></div><span>${esc(r.name)}</span>
+            <small>${r.pass != null ? 'проходит ' + fmt(r.pass) + ' %' : 'вход'}</small></div>`).join('')}</div>${a.drop ? `<p class="note" style="margin-top:12px">${esc(a.drop)}</p>` : ''}</div>
+        <div><p class="eyebrow" style="margin-bottom:10px">Заказы: ${fmt(o.count)} на ${fmt(o.total)} BYN · в работе ${fmt(o.in_work)}</p>
+          <div class="scroll-x"><table class="tbl"><thead><tr><th>Заказ</th><th>Когда</th><th>Этап</th><th class="n">Оформлен за</th><th class="n">Сумма, BYN</th></tr></thead><tbody>
+          ${o.list.map((x) => `<tr><td class="num">${esc(x.number)}</td><td class="num">${ftime(x.ts)}</td><td>${esc(x.stage)} <span class="faint">${esc(x.stage_status)}</span></td><td class="n">${x.time_sec ? fmt(x.time_sec) + ' с' : '—'}</td><td class="n">${fmt(x.total)}</td></tr>`).join('') || '<tr><td colspan="5" class="faint">Заказов из приложения пока нет</td></tr>'}</tbody></table></div></div></div>
+      <p class="src">Обращений из приложения: ${a.support.count}, открыто ${a.support.open}, привязано к заказу ${a.support.linked}. Источник: ${esc(a.source)}. Данные на ${ftime(a.asof)}.</p></section>`;
+  }
+  function liveProd(a) {
+    if (!a || !a.see.prod) return '';
+    const st = Object.fromEntries(a.orders.by_stage.map((x) => [x.id, x]));
+    return `<section class="glass panel"><header><h2>Заказы из приложения: этапы и отметки</h2><span class="chip live"><i></i>обновляется само</span><span class="spacer"></span><a class="btn btn-sm" href="/t2/admin.html" target="_blank" rel="noopener">Экран участка</a></header>
+      <div class="grid2"><div class="scroll-x"><table class="tbl"><thead><tr><th>Этап</th><th class="n">Сейчас</th><th class="n">В работе</th><th class="n">Пройдено</th><th class="n">Ждал, мин</th><th class="n">Работа, мин</th><th class="n">Брак</th></tr></thead><tbody>
+          ${a.stages.map((x) => `<tr><td>${esc(x.name)}</td><td class="n">${(st[x.id] || {}).count || 0}</td><td class="n">${(st[x.id] || {}).started || 0}</td><td class="n">${x.passed}</td><td class="n">${mins(x.wait_min)}</td><td class="n">${mins(x.work_min)}</td><td class="n ${x.defect ? 'st-bad' : 'faint'}">${x.defect || '—'}</td></tr>`).join('')}</tbody></table></div>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>Кто отметил</th><th>Должность</th><th class="n">Отметок «Сдал»</th><th class="n">Работа, мин</th><th class="n">Брак</th></tr></thead><tbody>
+          ${a.people.map((x) => `<tr><td>${esc(x.name)}</td><td class="muted">${esc(x.title)}</td><td class="n">${x.marks}</td><td class="n">${mins(x.work_min)}</td><td class="n ${x.defect ? 'st-bad' : 'faint'}">${x.defect || '—'}</td></tr>`).join('') || '<tr><td colspan="5" class="faint">Этапы пока никто не отмечал</td></tr>'}</tbody></table></div></div>
+      <p class="note" style="margin-top:12px">Время считается от «Принял» до «Сдал». Быстрее — не значит лучше: смотрите его вместе с браком.</p>
+      <p class="src">Источник: ${esc(a.source)}. Данные на ${ftime(a.asof)}.</p></section>`;
   }
   function alertCard(a) {
     return `<article class="glass-flat alert ${a.level}"><div class="row">${chip(a.level)}<span class="who">${esc(a.dept_name)}</span></div>
@@ -350,7 +396,7 @@
         </section>`;
       }
       return `<header class="page-head"><div><h1>Продажи и клиент</h1><p class="lead">Воронка, конверсия, средний чек, повторные покупки, каналы и сегменты. Обращения и ответы — данные из действующей системы клиентского сервиса: мы её не заменяем, а подключаемся к ней.</p></div></header>
-        <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${body}`;
+        <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${liveSales(p.app)}${body}`;
     },
     async production(p) {
       const own = p.kpis.filter((k) => k.dept === 'production' || k.dept === 'logistics');
@@ -376,7 +422,7 @@
             <tbody>${st.orders.map((o) => `<tr><td class="num">${esc(o.id)}</td><td>${esc(o.product)}</td><td>${esc(o.stage)}</td><td>${esc(o.defect || '—')}</td><td class="n">${fmt(o.hours)}</td></tr>`).join('') || '<tr><td colspan="5" class="faint">Таких заказов нет</td></tr>'}</tbody></table></div></section>`;
       }
       return `<header class="page-head"><div><h1>Производство и качество</h1><p class="lead">План и факт выпуска, очередь, время изготовления, загрузка, брак и перепечатка, доставка.</p></div></header>
-        <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${body}`;
+        <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${liveProd(p.app)}${body}`;
     },
     async finance(p) {
       const f = await cached('finance', '/api/pult/finance');

@@ -5,6 +5,7 @@
   GET  /api/pult/drill?kpi=on_time&by=stage     — детализация показателя до причины
   GET  /api/pult/forecast                       — спрос и мощность на 6 недель, неделя дефицита
   GET  /api/pult/finance                        — план-факт доходов и расходов, штат, вакансии (по правам)
+  GET  /api/pult/app?days=14                    — живые данные приложения: воронка, заказы по этапам, время участков
   GET  /api/pult/my                             — личная страница сотрудника участка: только его цифры
   GET  /api/pult/quality                        — свежесть источников, пропуски, дубли, сверка с 1С
   GET  /api/pult/decisions                      — реестр решений (по правам)
@@ -827,6 +828,118 @@ def my_page(core, P, user):
     return out
 
 
+# ---------- живые данные мобильного приложения ----------
+# Приложение (app_api.py) пишет в общий слой событий: шаги клиента (app_step) и отметки этапов заказа (order_status).
+# Здесь из них собирается воронка, заказы по этапам и время работы участков — без отдельных расчётов на стороне приложения.
+
+APP_STEPS = [("catalog", "Каталог"), ("photos", "Выбор фото"), ("layout", "Макет"), ("check", "Проверка"), ("cart", "Корзина"), ("paid", "Заказ оформлен")]
+APP_STAGES = [("moderation", "Модерация"), ("production", "Производство"), ("quality", "Контроль качества"), ("shipped", "Доставка"), ("done", "Завершён")]
+
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def app_live(core, user, days=14):
+    sc = _scope(user)
+    if not sc:
+        return None
+    see_sales = sc["all"] or sc["dept"] in ("sales", "support")
+    see_prod = sc["all"] or sc["dept"] in ("production", "logistics")
+    if not (see_sales or see_prod):
+        return None
+    now = _dt(core.now())
+    since = now - dt.timedelta(days=days)
+
+    def fresh(x):
+        try:
+            return _dt(x.get("ts")) >= since
+        except (TypeError, ValueError):
+            return False
+
+    events = [e for e in core.load("events") if fresh(e)]
+    orders = [o for o in core.load("orders") if o.get("channel") == "mobile" and fresh(o)]
+    out = {"asof": core.now(), "days": days, "see": {"sales": see_sales, "prod": see_prod},
+           "source": "Приложение picPac: шаги клиента и отметки этапов — единый слой событий"}
+
+    if see_sales:
+        idx = {sid: i for i, (sid, _) in enumerate(APP_STEPS)}
+        reach = {}                                           # сессия → самый дальний шаг
+        for e in events:
+            if e.get("type") == "app_step" and e.get("step") in idx:
+                who = e.get("session") or e.get("uid") or e.get("order_id") or e.get("id")
+                reach[who] = max(reach.get(who, -1), idx[e["step"]])
+        funnel, prev = [], None
+        for i, (sid, name) in enumerate(APP_STEPS):
+            n = sum(1 for v in reach.values() if v >= i)
+            row = {"id": sid, "name": name, "count": n}
+            if prev:
+                row["pass"] = _r(100 * n / prev) if prev else None
+            funnel.append(row)
+            prev = n
+        out["funnel"] = funnel
+        out["sessions"] = funnel[0]["count"]
+        out["conversion"] = _r(100 * funnel[-1]["count"] / funnel[0]["count"]) if funnel[0]["count"] else None
+        drops = [r for r in funnel[1:] if r.get("pass") is not None and funnel[0]["count"] >= 5 and funnel[-1]["count"] >= 1]
+        if drops:
+            w = min(drops, key=lambda r: r["pass"])
+            out["drop"] = "Больше всего клиентов уходит на шаге «%s»: дальше проходит %s %%." % (w["name"], _fmt(w["pass"]))
+        inter = [x for x in core.load("interactions") if fresh(x)]
+        out["support"] = {"count": len(inter), "open": sum(1 for x in inter if x.get("status") == "open"),
+                          "linked": sum(1 for x in inter if x.get("order_id"))}
+
+    total = sum(_num(o.get("total")) for o in orders)
+    times = [o["time_sec"] for o in orders if o.get("time_sec")]
+    names = dict(APP_STAGES)
+    by_stage = [{"id": sid, "name": nm, "count": sum(1 for o in orders if o.get("stage") == sid and not (sid == "done" and o.get("stage_status") != "passed")),
+                 "started": sum(1 for o in orders if o.get("stage") == sid and o.get("stage_status") == "started")} for sid, nm in APP_STAGES]
+    in_work = sum(1 for o in orders if not (o.get("stage") == "done" and o.get("stage_status") == "passed"))
+    out["orders"] = {"count": len(orders), "in_work": in_work, "by_stage": by_stage,
+                     "list": [{"number": o.get("number"), "ts": o.get("ts"), "stage": names.get(o.get("stage"), o.get("stage")),
+                               "stage_status": {"pending": "ждёт", "started": "в работе", "passed": "готово", "defect": "брак"}.get(o.get("stage_status"), ""),
+                               "photos": o.get("photos") or 0, "time_sec": o.get("time_sec"),
+                               "total": _r(_num(o.get("total"))) if see_sales else None} for o in orders[::-1][:12]]}
+    if see_sales:
+        out["orders"].update({"total": _r(total), "avg": _r(total / len(orders)) if orders else None,
+                              "time_sec": _r(statistics.median(times)) if times else None})
+
+    if see_prod:
+        ids = {o["id"] for o in orders}
+        by_order = {}
+        for e in events:
+            if e.get("type") == "order_status" and e.get("order_id") in ids:
+                by_order.setdefault((e["order_id"], e.get("stage")), {})[e.get("status")] = e
+        users = {u["login"]: u for u in core.load("users")}
+        stages, people = {}, {}
+        for (oid, st), ev in by_order.items():
+            x = stages.setdefault(st, {"wait": [], "work": [], "passed": 0, "defect": 0})
+            if "pending" in ev and "started" in ev:
+                x["wait"].append(_h(_dt(ev["pending"]["ts"]), _dt(ev["started"]["ts"])) * 60)
+            if "started" in ev and "passed" in ev:
+                mins = _h(_dt(ev["started"]["ts"]), _dt(ev["passed"]["ts"])) * 60
+                x["work"].append(mins)
+                who = ev["passed"].get("actor")
+                pp = people.setdefault(who, {"marks": 0, "work": [], "defect": 0})
+                pp["marks"] += 1
+                pp["work"].append(mins)
+            if "passed" in ev:
+                x["passed"] += 1
+            if "defect" in ev:
+                x["defect"] += 1
+                people.setdefault(ev["defect"].get("actor"), {"marks": 0, "work": [], "defect": 0})["defect"] += 1
+        med = lambda v: _r(statistics.median(v)) if v else None
+        out["stages"] = [{"id": sid, "name": nm, "passed": stages.get(sid, {}).get("passed", 0), "defect": stages.get(sid, {}).get("defect", 0),
+                          "wait_min": med(stages.get(sid, {}).get("wait", [])), "work_min": med(stages.get(sid, {}).get("work", []))}
+                         for sid, nm in APP_STAGES]
+        out["people"] = sorted(({"name": (users.get(k) or {}).get("name", k), "title": (users.get(k) or {}).get("title", ""),
+                                 "marks": v["marks"], "work_min": med(v["work"]), "defect": v["defect"]}
+                                for k, v in people.items() if k and k not in ("system", "client")), key=lambda r: -r["marks"])
+    return out
+
+
 # ---------- решения ----------
 
 def _can_decision(user, d):
@@ -990,7 +1103,11 @@ def handle(handler, method, path, core):
 
     if method == "GET" and path == "/api/pult/pulse":
         dept = arg("dept") if arg("dept") in DEPTS else ""
-        handler._json(pulse(P, user, days, product, dept))
+        data = pulse(P, user, days, product, dept)
+        data["app"] = app_live(core, user, days)
+        handler._json(data)
+    elif method == "GET" and path == "/api/pult/app":
+        handler._json(app_live(core, user, days) or {})
     elif method == "GET" and path == "/api/pult/drill":
         d, err = drill(P, user, arg("kpi"), arg("by"), days, product)
         if err == "denied":
