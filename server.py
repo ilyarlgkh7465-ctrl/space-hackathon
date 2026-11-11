@@ -312,6 +312,19 @@ class Handler(SimpleHTTPRequestHandler):
                 return True
         return False
 
+    def _trusted(self) -> bool:
+        """Служебные адреса (хранилище, модель, сброс, Telegram) открыты только с этого компьютера.
+        С других устройств — после входа сотрудником: иначе в общей сети ими мог бы пользоваться кто угодно."""
+        if self.client_address[0] in ("127.0.0.1", "::1"):
+            return True
+        user = current_user(self)
+        if user and user.get("role") != "customer":
+            return True
+        audit(user["name"] if user else self.client_address[0], "служебный адрес с другого устройства",
+              self.path.split("?")[0], obj="сервер", result="отказ")
+        self._json({"error": "Нужно войти под учётной записью сотрудника"}, 401)
+        return False
+
     def do_GET(self):
         path = self.path.split("?")[0]
         if path.startswith("/data/") or path.endswith(".py"):
@@ -329,6 +342,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"mode": STATE["mode"]})
         m = re.match(r"^/api/store/([a-z]+)$", path)
         if m:
+            if not self._trusted():
+                return
             if m.group(1) not in COLLECTIONS:
                 return self._json({"error": "нет такой коллекции"}, 404)
             with LOCK:
@@ -348,6 +363,10 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"error": "неверный логин или пароль"}, 401)
             audit(user["name"], "вход", user["title"], obj="сессия")
             return self._json({"token": token, "user": user})
+
+        if path in ("/api/reset", "/api/ai/mode", "/api/ai", "/api/telegram") or path.startswith("/api/store/"):
+            if not self._trusted():
+                return
 
         if path == "/api/reset":
             with LOCK:
