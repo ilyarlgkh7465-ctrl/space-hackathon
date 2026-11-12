@@ -429,7 +429,7 @@ def qr_svg(text: str):
         return None
     buf = io.BytesIO()
     segno.make(text, error="m").save(buf, kind="svg", scale=8, border=2, xmldecl=False, svgns=True, nl=False,
-                                     dark="#263B39", light="#ffffff")
+                                     dark="#141414", light="#ffffff")
     return buf.getvalue()
 
 
@@ -484,6 +484,13 @@ for _prefix, _name in (("/api/assistant/", "assistant_api"), ("/api/app/", "app_
 # ---------- HTTP ----------
 
 STATIC_TOP = {"index.html", "connect.html", "t1", "t2", "t3", "shared", "get", "helper", "favicon.ico"}
+
+class Server(ThreadingHTTPServer):
+    """Страница пульта запрашивает десяток файлов и адресов разом. Стандартная очередь входящих — 5 соединений: лишние сбрасывались,
+    скрипт не догружался и экран оставался пустым. Очередь увеличена; потоки запросов не мешают остановке сервера."""
+    request_queue_size = 128
+    daemon_threads = True
+
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
@@ -723,7 +730,7 @@ def main():
     port = int(ports[0]) if ports else 8800
     host = "0.0.0.0" if lan else "127.0.0.1"
     DATA.mkdir(exist_ok=True)
-    srv = ThreadingHTTPServer((host, port), Handler)
+    srv = Server((host, port), Handler)
     NET.update(lan=lan, port=port)
     crt, key = CERTS / "server.crt", CERTS / "server.key"
     if lan and crt.exists() and key.exists():
@@ -732,7 +739,7 @@ def main():
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(str(crt), str(key))
-        tls = ThreadingHTTPServer((host, HTTPS_PORT), Handler)
+        tls = Server((host, HTTPS_PORT), Handler)
         tls.socket = ctx.wrap_socket(tls.socket, server_side=True)
         threading.Thread(target=tls.serve_forever, daemon=True).start()
         NET["https"] = True

@@ -9,8 +9,8 @@
   const esc = (v) => F().esc(v);
   const fmt = (v) => F().fmt(v);
   /* категориальная палитра проверена на различимость (в т.ч. при нарушениях цветового зрения) — порядок не менять */
-  const PAL = ['#1F7FA8', '#E0644B', '#7466B8', '#3F9361', '#C9931C', '#C2558A'];
-  const ONE = '#2F6F8F';                                     // один ряд — один цвет
+  const PAL = ['#141414', '#FFC400', '#8C8C8C', '#E0A800', '#BDBDBD', '#5A5A5A'];
+  const ONE = '#141414';                                     // один ряд — один цвет
   const svg = (d, w = 18) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const IC = {
     bar: '<path d="M4 6h11M4 12h16M4 18h7"/>', column: '<path d="M6 20V11M12 20V5M18 20v-6"/>', line: '<path d="M3 17l5-6 4 3 6-8 3 3"/>',

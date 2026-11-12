@@ -9,12 +9,12 @@ N = 1024
 
 def orb():
     """Шар помощника — тот же, что в интерфейсе: тёплый градиент, три цветных пятна, блик."""
-    bg = Image.new("RGB", (N, N), "#FAF7F5")
+    bg = Image.new("RGB", (N, N), "#FFFFFF")
     r = int(N * 0.31)
     cx = cy = N // 2
-    core = Image.new("RGB", (N, N), "#DD6A5F")
+    core = Image.new("RGB", (N, N), "#FFC400")
     px = core.load()
-    stops = [(0.0, (255, 248, 244)), (0.34, (251, 220, 211)), (0.68, (240, 168, 152)), (1.0, (221, 106, 95))]
+    stops = [(0.0, (255, 253, 240)), (0.34, (255, 240, 168)), (0.68, (255, 221, 51)), (1.0, (255, 196, 0))]
     fx, fy, fr = cx - r * 0.36, cy - r * 0.56, r * 2.0
     for y in range(cy - r, cy + r):
         for x in range(cx - r, cx + r):
@@ -25,7 +25,7 @@ def orb():
                     px[x, y] = tuple(int(ca[i] + (cb[i] - ca[i]) * k) for i in range(3))
                     break
     # каждое пятно — свой слой на прозрачной основе того же цвета: иначе размытие темнит края
-    for (bx, by, br, col) in ((-0.42, 0.30, 0.66, (201, 184, 240, 215)), (0.52, -0.40, 0.58, (246, 217, 166, 205)), (0.10, 0.62, 0.52, (185, 224, 203, 195))):
+    for (bx, by, br, col) in ((-0.42, 0.30, 0.66, (255, 255, 255, 200)), (0.52, -0.40, 0.58, (255, 184, 0, 205)), (0.10, 0.62, 0.52, (255, 247, 204, 195))):
         layer = Image.new("RGBA", (N, N), col[:3] + (0,))
         ImageDraw.Draw(layer).ellipse([cx + bx * r - br * r, cy + by * r - br * r, cx + bx * r + br * r, cy + by * r + br * r], fill=col)
         layer = layer.filter(ImageFilter.GaussianBlur(r * 0.26))
@@ -36,8 +36,8 @@ def orb():
     core.paste(hl, (0, 0), hl)
     mask = Image.new("L", (N, N), 0)
     ImageDraw.Draw(mask).ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
-    shadow = Image.new("RGBA", (N, N), (221, 87, 87, 0))
-    ImageDraw.Draw(shadow).ellipse([cx - r * 0.9, cy - r * 0.62, cx + r * 0.9, cy + r * 1.18], fill=(221, 87, 87, 80))
+    shadow = Image.new("RGBA", (N, N), (230, 170, 0, 0))
+    ImageDraw.Draw(shadow).ellipse([cx - r * 0.9, cy - r * 0.62, cx + r * 0.9, cy + r * 1.18], fill=(230, 170, 0, 90))
     shadow = shadow.filter(ImageFilter.GaussianBlur(r * 0.3))
     bg.paste(shadow, (0, 0), shadow)
     bg.paste(core, (0, 0), mask.filter(ImageFilter.GaussianBlur(1.2)))
@@ -45,13 +45,13 @@ def orb():
 
 
 def picpac():
-    """Логотип picPac на белом — как на заставке приложения."""
-    bg = Image.new("RGB", (N, N), "#FFFFFF")
+    """Чёрный логотип picPac на жёлтом — гамма «Фотопринта»."""
+    bg = Image.new("RGB", (N, N), "#FFD400")
     logo = Image.open(ROOT / "t2" / "brand" / "picpac-logo-mask.png").convert("RGBA")
     w = int(N * 0.66)
     h = int(w * logo.height / logo.width)
     alpha = logo.getchannel("A").resize((w, h), Image.LANCZOS)
-    bg.paste(Image.new("RGB", (w, h), "#E2373D"), ((N - w) // 2, (N - h) // 2), alpha)
+    bg.paste(Image.new("RGB", (w, h), "#0E0E10"), ((N - w) // 2, (N - h) // 2), alpha)
     return bg
 
 

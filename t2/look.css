@@ -7,7 +7,7 @@
   --bg0: #FFFFFF; --bg1: #FFFFFF;
   --ink: #0E0E10; --ink2: #3A3A3F; --ink3: #6E6E76; --ink4: #A3A3AB;
   --accent: #0E0E10; --accent-ink: #000000;
-  --brand: #F0444A; --brand2: #FF6A6F; --brand-ink: #D63238;
+  --brand: #FFD400; --brand2: #FFE04A; --brand-ink: #0E0E10; --on-brand: #0E0E10;
   --grad: #0E0E10; --cta: #0E0E10;
   --ok: #1B9452; --warn: #B8700F; --bad: #E2373D; --none: #A3A3AB;
   --ok-bg: #EAF6EF; --warn-bg: #FCF2E2; --bad-bg: #FDECEC;
@@ -50,10 +50,10 @@ body { background: #EDEDF0; }
 .app { background: #fff; }
 .app-head.scrolled { background: rgba(255, 255, 255, .97); box-shadow: 0 1px 0 var(--edge); }
 .logo { font-weight: 800; letter-spacing: -.04em; }
-.logo b { color: var(--brand); }
+.logo b { color: var(--ink); background: linear-gradient(transparent 58%, var(--brand) 58%, var(--brand) 92%, transparent 92%); padding: 0 2px; }
 .ttl h2 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
 .icon-btn { background: #fff; border: 0; box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 6px 18px rgba(0, 0, 0, .08); color: var(--ink); }
-.icon-btn b { min-width: 17px; height: 17px; font: 700 10.5px/17px var(--sans); background: var(--brand); box-shadow: 0 0 0 2px #fff; top: 0; right: 0; }
+.icon-btn b { min-width: 17px; height: 17px; font: 700 10.5px/17px var(--sans); background: var(--brand); color: var(--on-brand); box-shadow: 0 0 0 2px #fff; top: 0; right: 0; }
 .head-link { color: var(--ink); font-weight: 700; }
 .progress i { height: 3px; } .progress i.on { background: var(--ink); }
 .net { background: var(--ink); color: #fff; border-radius: 999px; }
@@ -168,7 +168,8 @@ body { background: #EDEDF0; }
 .tone1, .tone4 { background: #ECECEF; }
 .tcover .chip { background: #fff; color: var(--ink); }
 .like { border: 0; background: var(--glass3); }
-.like.on { color: var(--brand); background: var(--bad-bg); }
+.like.on { color: var(--ink); background: var(--brand); }
 .stars i.on, .rate button.on { color: #F2A91E; }
 .rate button.on { background: #FFF7E6; border-color: #F2A91E; }
 .nitem.new i { background: var(--brand); }
+.side .mark { color: #fff; }      /* в приложении знак чёрный — текст на нём белый */

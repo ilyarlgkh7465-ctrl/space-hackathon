@@ -916,29 +916,38 @@ def _queue(P, product=""):
 
 
 def _flow(P, cur, kpis, a, b, product, sc):
-    """Восемь шагов сквозного потока со слайда заказчика: сигнал → … → возврат."""
+    """Сферы компании для «Пульса»: восемь шагов сквозного потока заказа (в скобках — как шаг назван на слайде заказчика)
+    и три обеспечивающие сферы. У каждой — свои показатели (kpis): по ним считается состояние и раскрываются задачи."""
     st = {k["id"]: k["status"] for k in kpis}
     val = {k["id"]: k.get("value") for k in kpis}
     q = _queue(P, product)
     sess = sum(w["app"]["catalog"] + w["site"]["catalog"] for w in P["web"]["weeks"]
                if a <= dt.datetime.fromisoformat(w["week"] + "T00:00+03:00") < b)
+    rank = {"bad": 3, "warn": 2, "ok": 1, "none": 0}
 
-    def node(n, nid, name, dept, kid, lines, owner):
+    def node(n, nid, name, step, dept, kids, lines, owner):
         locked = not sc["all"] and dept != sc["dept"]
-        return {"n": n, "id": nid, "name": name, "dept": dept, "kpi": kid, "status": st.get(kid, "none"),
-                "lines": [] if locked else lines, "locked": locked, "owner": owner}
+        main = max(kids, key=lambda k: rank.get(st.get(k, "none"), 0))        # главный показатель сферы — самый тревожный
+        return {"n": n, "id": nid, "name": name, "step": step, "dept": dept, "kpi": main, "kpis": kids,
+                "status": "none" if locked else st.get(main, "none"), "lines": [] if locked else lines, "locked": locked, "owner": owner}
+
+    def line(title, kid, unit="%"):
+        return "%s: %s %s" % (title, _fmt(val.get(kid)), unit)
 
     in_prod = q["print"]["count"] + q["binding"]["count"] + q["quality"]["count"]
     stuck_prod = q["print"]["stuck"] + q["binding"]["stuck"] + q["quality"]["stuck"]
     return [
-        node("01", "signal", "Сигнал", "sales", "app_conv", ["Посетителей: %s" % _fmt(sess), "Конверсия приложения: %s %%" % _fmt(val.get("app_conv"))], "Маркетинг"),
-        node("02", "client", "Клиент", "sales", "new_clients", ["Новых: %s" % _fmt(cur["new_clients"]), "Активных: %s" % _fmt(cur["active_clients"])], "Продажи"),
-        node("03", "order", "Заказ", "sales", "revenue", ["Заказов: %s" % _fmt(cur["n"]), "Средний чек: %s BYN" % _fmt(cur["avg_check"])], "Продажи"),
-        node("04", "check", "Проверка", "production", "lead_time", ["На проверке сейчас: %d" % q["moderation"]["count"], "Дольше нормы: %d" % q["moderation"]["stuck"]], "Допечатная подготовка"),
-        node("05", "production", "Производство", "production", "on_time", ["В работе: %d, дольше нормы: %d" % (in_prod, stuck_prod), "В срок: %s %%" % _fmt(val.get("on_time"))], "Производство"),
-        node("06", "delivery", "Доставка", "logistics", "delivery", ["В пути: %d" % q["delivery"]["count"], "В срок: %s %%" % _fmt(val.get("delivery"))], "Логистика"),
-        node("07", "support", "Поддержка", "support", "sla", ["Обращений: %s" % _fmt(cur["tickets"]), "Ответ в срок: %s %%" % _fmt(val.get("sla"))], "Поддержка"),
-        node("08", "return", "Возврат", "sales", "repeat", ["Повторных заказов: %s %%" % _fmt(val.get("repeat"))], "Продажи"),
+        node("01", "signal", "Сайт и приложение", "Сигнал", "sales", ["app_conv"], ["Посетителей: %s" % _fmt(sess), line("Доходят до заказа", "app_conv")], "Маркетинг"),
+        node("02", "client", "Новые клиенты", "Клиент", "sales", ["new_clients"], ["Новых: %s" % _fmt(cur["new_clients"]), "Активных: %s" % _fmt(cur["active_clients"])], "Продажи"),
+        node("03", "order", "Заказы и оборот", "Заказ", "sales", ["revenue", "avg_check"], ["Заказов: %s" % _fmt(cur["n"]), "Средний чек: %s BYN" % _fmt(cur["avg_check"])], "Продажи"),
+        node("04", "check", "Проверка макетов", "Проверка", "production", ["lead_time"], ["На проверке сейчас: %d" % q["moderation"]["count"], "Дольше нормы: %d" % q["moderation"]["stuck"]], "Допечатная подготовка"),
+        node("05", "production", "Производство", "Производство", "production", ["on_time", "defect", "load"], ["В работе: %d, дольше нормы: %d" % (in_prod, stuck_prod), line("В срок", "on_time")], "Производство"),
+        node("06", "delivery", "Доставка", "Доставка", "logistics", ["delivery"], ["В пути: %d" % q["delivery"]["count"], line("В срок", "delivery")], "Логистика"),
+        node("07", "support", "Поддержка клиентов", "Поддержка", "support", ["sla"], ["Обращений: %s" % _fmt(cur["tickets"]), line("Ответ в срок", "sla")], "Поддержка"),
+        node("08", "return", "Повторные заказы", "Возврат", "sales", ["repeat"], [line("Заказывают снова", "repeat")], "Продажи"),
+        node("09", "finance", "Деньги", "", "finance", ["margin", "overdue_recv"], [line("Маржа", "margin"), line("Долги клиентов", "overdue_recv", "BYN")], "Финансы"),
+        node("10", "hr", "Люди", "", "hr", ["staffing", "attendance", "turnover"], [line("Штат закрыт на", "staffing"), line("Явка", "attendance")], "Кадры"),
+        node("11", "office", "Документы", "", "office", ["docs_on_time"], [line("В срок", "docs_on_time")], "Делопроизводство"),
     ]
 
 

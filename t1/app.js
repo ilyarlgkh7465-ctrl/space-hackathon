@@ -8,7 +8,7 @@
   const fdate = (s) => s ? s.slice(8, 10) + '.' + s.slice(5, 7) : '—';
   const ftime = (s) => s ? fdate(s) + ' ' + s.slice(11, 16) : '—';
   const WORD = { ok: 'в норме', warn: 'внимание', bad: 'критично', none: 'нет данных' };
-  const COLOR = { ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)', none: 'var(--none)' };
+  const COLOR = { ok: 'var(--ok)', warn: 'var(--warn-fill)', bad: 'var(--bad)', none: 'var(--none)' };
   const chip = (st) => `<span class="chip chip-${st}"><i></i>${WORD[st] || WORD.none}</span>`;
   const ic = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${d}</svg>`;
   const I = {
@@ -314,9 +314,10 @@
     renderTop();
     $('#view').innerHTML = '<div class="skel" role="status" aria-label="Загрузка данных"></div>';
     try {
-      const [pulse, contours] = await Promise.all([api('/api/pult/pulse?' + q()), api('/api/pult/contours?' + q())]);
+      const [pulse, contours, decisions] = await Promise.all([api('/api/pult/pulse?' + q()), api('/api/pult/contours?' + q()), api('/api/pult/decisions').catch(() => [])]);
       if (seq !== S.loadSeq) return;
       S.pulse = pulse;
+      S.decisions = Array.isArray(decisions) ? decisions : [];      // решения в работе — узлы-задачи на «Пульсе»
       S.appSig = appSig(pulse.app);
       S.contours = contours;
     } catch (e) {
@@ -354,11 +355,11 @@
     const showPlan = k.plan != null && k.unit !== 'BYN' && k.unit !== 'чел.';
     const step = Math.max(1, Math.ceil(n / 6));
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Динамика показателя «${esc(k.name)}» по дням">
-      <defs><linearGradient id="${gradient}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--brand)" stop-opacity=".30"/><stop offset="1" stop-color="var(--brand)" stop-opacity="0"/></linearGradient></defs>
+      <defs><linearGradient id="${gradient}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--brand)" stop-opacity=".55"/><stop offset="1" stop-color="var(--brand)" stop-opacity="0"/></linearGradient></defs>
       ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="var(--edge)"/><text x="${L - 8}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--ink4)" font-family="JetBrains Mono">${fmt(t)}</text>`).join('')}
       ${showPlan ? `<line x1="${L}" x2="${W - R}" y1="${Y(k.plan).toFixed(1)}" y2="${Y(k.plan).toFixed(1)}" stroke="var(--ink3)" stroke-dasharray="5 5" opacity=".7"/><text x="${W - R}" y="${(Y(k.plan) - 6).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--ink3)">план ${fmt(k.plan)}</text>` : ''}
-      <path d="${area}" fill="url(#${gradient})"/><path d="${path}" fill="none" stroke="var(--brand)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-      ${pts.map((p) => `<circle cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="2.4" fill="var(--brand)"><title>${k.labels[p[0]]}: ${fmt(p[1])} ${k.unit}</title></circle>`).join('')}
+      <path d="${area}" fill="url(#${gradient})"/><path d="${path}" fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      ${pts.map((p) => `<circle cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="2.4" fill="var(--ink)"><title>${k.labels[p[0]]}: ${fmt(p[1])} ${k.unit}</title></circle>`).join('')}
       ${k.labels.map((l, i) => i % step === 0 ? `<text x="${X(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--ink4)" font-family="JetBrains Mono">${l}</text>` : '').join('')}
     </svg>`;
   }
@@ -370,119 +371,101 @@
       ${r.extra || r.delta != null ? `<small class="bar-detail">${r.delta != null ? `К прошлому периоду: ${r.delta > 0 ? '+' : ''}${fmt(r.delta)} %` : ''}${r.delta != null && r.extra ? ' · ' : ''}${esc(r.extra)}</small>` : ''}</div>`).join('')}</div>`;
   }
 
-  /* ---------- карта компании ---------- */
+  /* ---------- пульс компании: граф ----------
+     В центре — компания, вокруг — её сферы. Цвет узла — состояние: чёрный в норме, жёлтый — внимание, красный — критично.
+     Наведение на сферу приближает её и раскрывает то, что в ней происходит: показатели, решения в работе и то, что ещё никому не поручено. */
+  const GRAPH = { W: 1000, H: 640, cx: 500, cy: 320, zoom: 1.22 };
+  const cut = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t);
+  function graphKids(p, n) {
+    if (n.locked) return [];
+    const ids = n.kpis || [n.kpi], out = [];
+    const open = (S.decisions || []).filter((d) => d.status !== 'закрыто' && ids.includes(d.kpi));
+    const kp = ids.map((id) => p.kpis.find((x) => x.id === id)).filter((k) => k && !k.locked);
+    for (const k of kp) out.push({ t: 'kpi', id: k.id, st: k.status, name: k.name, sub: `${fmt(k.value)} ${k.unit} · план ${fmt(k.plan)}` });
+    for (const d of open) out.push({ t: 'task', id: d.id, st: d.overdue ? 'bad' : 'ok', name: d.title, sub: `${d.owner} · ${d.overdue ? 'срок прошёл' : 'до'} ${String(d.due || '').slice(8, 10)}.${String(d.due || '').slice(5, 7)}` });
+    for (const k of kp) if (k.status === 'bad' && !open.some((d) => d.kpi === k.id)) out.push({ t: 'add', id: k.id, st: 'none', name: 'Назначить решение', sub: k.name });
+    return out.slice(0, 7);
+  }
   function mapSvg(p) {
-    const W = 960, H = 600, cx = 480, cy = 300, rx = 252, ry = 176;
-    const nodes = p.flow.map((f, i) => {
-      const a = (-90 + i * 45) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
-      const x = cx + rx * c, y = cy + ry * s, cw = 176, ch = 66;
-      let bx, by;
-      if (c > 0.3) { bx = x + 20; by = y - ch / 2; } else if (c < -0.3) { bx = x - 20 - cw; by = y - ch / 2; } else { bx = x - cw / 2; by = s < 0 ? y - 22 - ch : y + 22; }
-      return Object.assign({}, f, { x, y, bx, by, cw, ch, a });
+    const { W, H, cx, cy } = GRAPH, n = p.flow.length;
+    const hubs = p.flow.map((f, i) => {
+      const a = (-90 + i * 360 / n) * Math.PI / 180, far = i % 2 === 0 ? 1 : 0.72;
+      const kids = graphKids(p, f), bad = kids.filter((k) => k.t === 'kpi' && k.st !== 'ok').length;
+      return Object.assign({}, f, { i, a, x: cx + 352 * far * Math.cos(a), y: cy + 226 * far * Math.sin(a), r: f.locked ? 7 : 10 + Math.min(3, bad) * 2.5, kids, side: Math.cos(a) >= -0.15 ? 1 : -1 });
     });
-    const ring = nodes.map((n, i) => (i ? 'L' : 'M') + n.x.toFixed(1) + ' ' + n.y.toFixed(1)).join(' ') + ' Z';
-    const twigs = (n, i) => [-0.34, -0.17, 0, 0.17, 0.34].map((o, j) => {
-      const len = 34 + ((i * 7 + j * 13) % 22), a = n.a + Math.PI + o;
-      const x2 = n.x + Math.cos(a) * len, y2 = n.y + Math.sin(a) * len;
-      return `<line class="twig" x1="${n.x.toFixed(1)}" y1="${n.y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${COLOR[n.status]}"/><circle cx="${x2.toFixed(1)}" cy="${y2.toFixed(1)}" r="${j === 2 ? 2.6 : 1.8}" fill="${COLOR[n.status]}" opacity=".75"/>`;
-    }).join('');
-    const coreColor = COLOR[p.pulse.status];
-    const coreWord = p.pulse.critical ? 'требуют решения' : p.pulse.warn ? 'под вниманием' : 'всё в норме';
-    return `<div class="pulse-stage" id="pulseStage"><svg id="map" viewBox="0 0 ${W} ${H}" role="group" aria-label="Пульс компании: сквозной поток заказа из восьми звеньев">
-      <path class="ring" d="${ring}"/>
-      ${nodes.map((n, i) => `<path class="spoke" data-spoke="${i}" d="M${cx} ${cy} Q${((cx + n.x) / 2 + Math.sin(n.a) * 18).toFixed(1)} ${((cy + n.y) / 2 - Math.cos(n.a) * 18).toFixed(1)} ${n.x.toFixed(1)} ${n.y.toFixed(1)}" stroke="${COLOR[n.status]}"/>`).join('')}
-      ${nodes.map(twigs).join('')}
-      <g class="core" tabindex="0" role="button" data-core aria-label="Пульс компании: ${p.pulse.critical + p.pulse.warn} ${coreWord}. Открыть все отклонения">
-        <circle class="beat" cx="${cx}" cy="${cy}" r="76" fill="none" stroke="${coreColor}" stroke-width="1.5"/>
-        <circle class="beat b2" cx="${cx}" cy="${cy}" r="76" fill="none" stroke="${coreColor}" stroke-width="1.5"/>
-        <circle cx="${cx}" cy="${cy}" r="70" fill="rgba(255,255,255,.94)" stroke="${coreColor}" stroke-width="2"/>
-        <text class="core-t" x="${cx}" y="${cy - 24}" text-anchor="middle">ПУЛЬС</text>
-        <text class="core-v" x="${cx}" y="${cy + 12}" text-anchor="middle">${p.pulse.critical + p.pulse.warn}</text>
-        <text class="core-s" x="${cx}" y="${cy + 34}" text-anchor="middle" fill="${coreColor}">${coreWord}</text></g>
-      ${nodes.map((n, i) => `<g class="node" tabindex="0" role="button" data-node="${n.kpi}" data-i="${i}" aria-label="${esc(n.name)}: ${WORD[n.status]}. ${esc(n.lines.join('. '))}">
-        <rect x="${n.bx.toFixed(1)}" y="${(n.by + 8).toFixed(1)}" width="${n.cw}" height="${n.ch - 16}" rx="14"/>
-        <text class="nm" x="${(n.bx + 14).toFixed(1)}" y="${(n.by + 29).toFixed(1)}">${esc(n.name)}</text>
-        <text class="ln" x="${(n.bx + 14).toFixed(1)}" y="${(n.by + 47).toFixed(1)}">${n.locked ? WORD[n.status] + ' · детали закрыты' : esc(n.lines[n.lines.length - 1] || WORD[n.status])}</text>
-        <circle class="halo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="21" fill="none" stroke="${COLOR[n.status]}" opacity=".35"/>
-        <circle class="dot" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="15" fill="${COLOR[n.status]}"/>
-        <text class="no" x="${n.x.toFixed(1)}" y="${(n.y + 4).toFixed(1)}" text-anchor="middle">${n.n}</text></g>`).join('')}
-    </svg><div class="map-card glass" id="mapCard" role="status" hidden></div></div>
-    <div class="flow-list">${p.flow.map((n) => `<button class="glass-flat flow-item" data-node="${n.kpi}"><span class="no" style="background:${COLOR[n.status]}">${n.n}</span><span><b>${esc(n.name)}</b> · <span class="st-${n.status}">${WORD[n.status]}</span><small>${esc(n.locked ? 'детали закрыты для вашей роли' : n.lines.join(' · '))}</small></span></button>`).join('')}</div>`;
+    const dot = (st) => `fill="${COLOR[st] || COLOR.none}"`;
+    const total = p.pulse.critical + p.pulse.warn;
+    const coreWord = p.pulse.critical ? 'ждут решения' : p.pulse.warn ? 'на контроле' : 'всё в норме';
+    const kidAttr = (k) => (k.t === 'kpi' ? `data-kpi="${k.id}"` : k.t === 'task' ? `data-decision="${k.id}"` : `data-decide="${k.id}"`);
+    const kidWord = { kpi: 'Показатель', task: 'Решение в работе', add: 'Действие' };
+    const kids = (h) => {
+      const m = h.kids.length; if (!m) return '';
+      return `<g class="kids" data-kids="${h.i}" transform="translate(${h.x.toFixed(1)} ${h.y.toFixed(1)})">${h.kids.map((k, j) => {
+        const o = j - (m - 1) / 2, ox = h.side * 92, oy = o * 40, ca = h.a + o * 0.5, cd = h.r + 9 + (j % 2) * 6;
+        return `<path class="klnk" d="M0 0 C${(ox * 0.55).toFixed(1)} 0 ${(ox * 0.45).toFixed(1)} ${oy.toFixed(1)} ${ox} ${oy.toFixed(1)}"/>
+          <g class="kid k-${k.t} st-k-${k.st}" role="button" tabindex="-1" ${kidAttr(k)} aria-label="${kidWord[k.t]}: ${esc(k.name)}. ${esc(k.sub)}"
+            style="--cx:${(Math.cos(ca) * cd).toFixed(1)}px;--cy:${(Math.sin(ca) * cd).toFixed(1)}px;--ox:${ox}px;--oy:${oy.toFixed(1)}px;--d:${j * 40}ms">
+            <rect class="khit" x="${h.side > 0 ? -10 : -236}" y="-18" width="246" height="36" rx="10"/>
+            <circle r="5.5" ${k.t === 'kpi' ? dot(k.st) : ''}/>${k.t === 'add' ? '<path class="kplus" d="M-2.6 0H2.6M0 -2.6V2.6"/>' : ''}
+            <text class="kn" x="${h.side * 13}" y="-2" text-anchor="${h.side > 0 ? 'start' : 'end'}">${esc(cut(k.name, 34))}</text>
+            <text class="ks" x="${h.side * 13}" y="12" text-anchor="${h.side > 0 ? 'start' : 'end'}">${esc(cut(k.sub, 40))}</text><title>${esc(k.name)} — ${esc(k.sub)}</title></g>`;
+      }).join('')}</g>`;
+    };
+    return `<div class="pulse-stage" id="pulseStage"><svg id="map" viewBox="0 0 ${W} ${H}" role="group" aria-label="Пульс компании: ${n} сфер вокруг компании"><g id="mapWorld">
+      ${hubs.slice(0, 8).map((h, i, arr) => (i ? `<line class="chain" x1="${arr[i - 1].x.toFixed(1)}" y1="${arr[i - 1].y.toFixed(1)}" x2="${h.x.toFixed(1)}" y2="${h.y.toFixed(1)}"/>` : '')).join('')}
+      ${hubs.map((h) => `<line class="lnk" data-l="${h.i}" x1="${cx}" y1="${cy}" x2="${h.x.toFixed(1)}" y2="${h.y.toFixed(1)}"/>`).join('')}
+      <g class="core" tabindex="0" role="button" data-core aria-label="Пульс компании: ${total} ${coreWord}. Открыть все отклонения">
+        <circle class="beat" cx="${cx}" cy="${cy}" r="56"/><circle class="beat b2" cx="${cx}" cy="${cy}" r="56"/>
+        <circle class="core-dot" cx="${cx}" cy="${cy}" r="52"/>
+        <text class="core-v" x="${cx}" y="${cy + 6}" text-anchor="middle">${total}</text>
+        <text class="core-s" x="${cx}" y="${cy + 25}" text-anchor="middle">${coreWord}</text></g>
+      ${hubs.map((h) => `<g class="hub st-h-${h.status}${h.locked ? ' locked' : ''}" tabindex="0" role="button" data-node="${h.kpi}" data-i="${h.i}" data-x="${h.x.toFixed(1)}" data-y="${h.y.toFixed(1)}" data-side="${h.side}"
+          aria-label="${esc(h.name)}: ${h.locked ? 'закрыто для вашей роли' : WORD[h.status] + '. ' + esc(h.lines.join('. '))}">
+        <circle class="hit" cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="${(h.r + 18).toFixed(1)}"/>
+        <circle class="halo" cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="${(h.r + 7).toFixed(1)}"/>
+        <circle class="dot" cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="${h.r.toFixed(1)}" ${dot(h.status)}/>
+        <text class="nm" x="${h.x.toFixed(1)}" y="${(h.y + h.r + 21).toFixed(1)}" text-anchor="middle">${esc(h.name)}</text>
+        <text class="ln" x="${h.x.toFixed(1)}" y="${(h.y + h.r + 37).toFixed(1)}" text-anchor="middle">${h.locked ? 'закрыто для вашей роли' : esc(h.lines[h.lines.length - 1] || WORD[h.status])}</text></g>`).join('')}
+      ${hubs.map(kids).join('')}
+    </g></svg></div>
+    <div class="flow-list">${p.flow.map((f) => `<button class="glass-flat flow-item" data-node="${f.kpi}"><span class="no st-n-${f.status}" style="background:${COLOR[f.status]}">${f.n}</span><span><b>${esc(f.name)}</b> · <span class="st-${f.status}">${WORD[f.status]}</span><small>${esc(f.locked ? 'детали закрыты для вашей роли' : f.lines.join(' · '))}</small></span></button>`).join('')}</div>`;
   }
-
-  /* Что показать при наведении на звено пульса: главный показатель, факты, причина и ответственный. */
-  function nodeCard(p, n) {
-    const k = p.kpis.find((x) => x.id === n.kpi), a = p.alerts.find((x) => x.kpi === n.kpi);
-    const head = `<header><span class="mc-no" style="background:${COLOR[n.status]}">${n.n}</span><h3>${esc(n.name)}</h3>${chip(n.status)}</header>`;
-    if (n.locked || !k || k.locked) return `${head}<p class="mc-meta">Детали этого звена закрыты для вашей роли. Отвечает: ${esc(n.owner)}.</p>`;
-    const d = k.prev != null && k.value != null ? k.value - k.prev : null;
-    const inFlow = new Set(p.flow.map((f) => f.kpi));
-    const more = p.kpis.filter((x) => x.dept === n.dept && !x.locked && ['bad', 'warn'].includes(x.status) && !inFlow.has(x.id)).slice(0, 2);
-    return `${head}
-      <div class="mc-kpi"><div><small>${esc(k.name)}</small><p><b>${fmt(k.value)}</b> ${esc(k.unit)}</p></div>${spark(k.series, k.status)}</div>
-      <p class="mc-meta">План ${fmt(k.plan)} ${esc(k.unit)}${d != null && d !== 0 ? ` · <span class="${d * k.dir >= 0 ? 'st-ok' : 'st-bad'}">${d > 0 ? '+' : '−'}${fmt(Math.abs(d))}</span> к прошлому периоду` : ''}</p>
-      ${((li) => li ? `<ul class="mc-lines">${li}</ul>` : '')(`${n.lines.filter((l) => !l.includes(': ' + fmt(k.value) + ' ')).map((l) => `<li>${esc(l)}</li>`).join('')}${more.map((x) => `<li class="st-${x.status}">${esc(x.name)}: ${fmt(x.value)} ${esc(x.unit)} при плане ${fmt(x.plan)}</li>`).join('')}`)}
-      ${a ? `<p class="mc-cause">${esc(a.cause)}</p>` : ''}
-      <p class="mc-meta">Отвечает: ${esc(a ? a.owner : n.owner)}</p>
-      <p class="mc-hint">Нажмите на звено — откроется разбор до причины</p>`;
+  let mapOn = null, mapTouch = false, mapLock = 0;
+  function graphOpen(i) {
+    const svg = $('#map'), world = $('#mapWorld'), hub = $(`#map .hub[data-i="${i}"]`);
+    if (!svg || !world || !hub || mapOn === hub || hub.classList.contains('locked')) return;
+    graphClose(true);
+    mapOn = hub;
+    mapLock = performance.now() + 560;       // пока картинка едет, под неподвижным курсором проезжают соседние узлы — их не открываем
+    hub.classList.add('is-on'); svg.classList.add('has-focus');
+    $(`#map .lnk[data-l="${i}"]`)?.classList.add('is-on');
+    const kids = $(`#map .kids[data-kids="${i}"]`);
+    if (kids) { kids.classList.add('is-open'); $$('.kid', kids).forEach((k) => k.setAttribute('tabindex', '0')); }
+    // сфера чуть приближается и сдвигается к середине — так, чтобы раскрывшимся задачам хватило места
+    const x = +hub.dataset.x, y = +hub.dataset.y, z = GRAPH.zoom;
+    const tx = x + (GRAPH.cx - x) * 0.6 - +hub.dataset.side * 70, ty = y + (GRAPH.cy - y) * 0.6;
+    world.style.transform = `translate(${(tx - z * x).toFixed(1)}px, ${(ty - z * y).toFixed(1)}px) scale(${z})`;
   }
-  function coreCard(p) {
-    const top = p.alerts.slice(0, 3);
-    return `<header><h3>Пульс компании</h3>${chip(p.pulse.status)}</header>
-      <p class="mc-meta">Из ${p.pulse.total} показателей требуют решения ${p.pulse.critical}, под вниманием ${p.pulse.warn}.</p>
-      ${top.length ? `<ul class="mc-lines">${top.map((a) => `<li><b>${esc(a.title)}</b><br><span class="faint">${esc(a.dept_name)} · ${esc(a.owner)}</span></li>`).join('')}</ul>` : ''}
-      <p class="mc-hint">${p.alerts.length ? `Нажмите — все отклонения: ${p.alerts.length}` : 'Отклонений нет'}</p>`;
-  }
-  /* Рамка подписи звена растягивается по самой длинной строке — текст не выходит за края при любом шрифте. */
-  function fitMap() {
-    document.querySelectorAll('#map .node').forEach((g) => {
-      const rect = g.querySelector('rect'), texts = [...g.querySelectorAll('text.nm, text.ln')], dot = g.querySelector('.dot');
-      const w = Math.max(60, ...texts.map((t) => t.getComputedTextLength())) + 28;
-      const x0 = +rect.getAttribute('x'), w0 = +rect.getAttribute('width'), cx = +dot.getAttribute('cx');
-      const mid = x0 + w0 / 2;
-      const x = Math.abs(mid - cx) < 2 ? cx - w / 2 : mid > cx ? x0 : x0 + w0 - w;      // сверху и снизу — по центру, справа — от точки, слева — к точке
-      rect.setAttribute('x', x.toFixed(1)); rect.setAttribute('width', w.toFixed(1));
-      texts.forEach((t) => t.setAttribute('x', (x + 14).toFixed(1)));
-    });
-  }
-  let mapOn = null;
-  function showMapCard(el) {
-    const stage = $('#pulseStage'), card = $('#mapCard'), p = S.pulse;
-    if (!stage || !card || !p || mapOn === el) return;
-    mapOn = el;
-    const core = el.hasAttribute('data-core');
-    card.innerHTML = core ? coreCard(p) : nodeCard(p, p.flow[+el.dataset.i]);
-    card.hidden = false;
+  function graphClose(keep) {
     $$('#map .is-on').forEach((x) => x.classList.remove('is-on'));
-    el.classList.add('is-on');
-    if (!core) $(`#map [data-spoke="${el.dataset.i}"]`)?.classList.add('is-on');
-    $('#map').classList.add('has-focus');
-    /* Место карточки: рядом со звеном, но не поверх него и не поверх ядра. Пробуем справа, слева, снизу, сверху. */
-    const sr = stage.getBoundingClientRect(), nb = el.getBoundingClientRect(), cr = $('#map .core').getBoundingClientRect();
-    const cw = card.offsetWidth, ch = card.offsetHeight, gap = 14;
-    const box = (r) => ({ l: r.left - sr.left, t: r.top - sr.top, r: r.right - sr.left, b: r.bottom - sr.top });
-    const n = box(nb), c = box(cr), mx = (n.l + n.r) / 2, my = (n.t + n.b) / 2;
-    const fab = $('#fab'), f = fab && !fab.classList.contains('hidden') ? box(fab.getBoundingClientRect()) : null;
-    const over = (l, t, o) => !o ? 0 : Math.max(0, Math.min(l + cw, o.r) - Math.max(l, o.l)) * Math.max(0, Math.min(t + ch, o.b) - Math.max(t, o.t));
-    const best = [[n.r + gap, my - ch / 2], [n.l - gap - cw, my - ch / 2], [mx - cw / 2, n.b + gap], [mx - cw / 2, n.t - gap - ch]]
-      .map(([l, t]) => [Math.max(4, Math.min(l, sr.width - cw - 4)), Math.max(4, Math.min(t, sr.height - ch - 4))])
-      .map(([l, t]) => ({ l, t, cost: over(l, t, n) + (core ? 0 : over(l, t, c) * 3) + over(l, t, f) * 2 }))
-      .reduce((a, x) => (x.cost < a.cost ? x : a));
-    card.style.left = best.l + 'px';
-    card.style.top = best.t + 'px';
-  }
-  function hideMapCard() {
+    $$('#map .kids.is-open').forEach((g) => { g.classList.remove('is-open'); $$('.kid', g).forEach((k) => k.setAttribute('tabindex', '-1')); });
     mapOn = null;
-    const card = $('#mapCard'); if (card) card.hidden = true;
-    $$('#map .is-on').forEach((x) => x.classList.remove('is-on'));
+    if (keep) return;
     $('#map')?.classList.remove('has-focus');
+    const world = $('#mapWorld'); if (world) world.style.transform = '';
   }
-  const mapTarget = (e) => e.target.closest && e.target.closest('#map .node, #map .core');
-  let mapTouch = false;
-  document.addEventListener('pointerover', (e) => { const t = mapTarget(e); mapTouch = e.pointerType === 'touch'; if (t) showMapCard(t); });
-  document.addEventListener('pointerout', (e) => { const t = mapTarget(e); if (t && !t.contains(e.relatedTarget) && e.pointerType !== 'touch') hideMapCard(); });
-  document.addEventListener('focusin', (e) => { const t = mapTarget(e); if (t) showMapCard(t); });
-  document.addEventListener('focusout', (e) => { if (mapTarget(e)) hideMapCard(); });
+  const hideMapCard = () => graphClose();
+  const showMapCard = (el) => graphOpen(+el.dataset.i);
+  function fitMap() { /* подписи графа не требуют подгонки */ }
+  document.addEventListener('pointerover', (e) => {
+    mapTouch = e.pointerType === 'touch';
+    if (mapTouch || !e.target.closest) return;
+    const hub = e.target.closest('#map .hub');
+    if (hub) { if (!mapOn || performance.now() > mapLock) graphOpen(+hub.dataset.i); return; }
+    if (!mapOn) return;
+    if (!e.target.closest('#pulseStage') || (e.target.closest('#map .core') && performance.now() > mapLock)) graphClose();   // ушли с карты или вернулись к центру
+  });
+  document.addEventListener('focusin', (e) => { const hub = e.target.closest && e.target.closest('#map .hub'); if (hub) graphOpen(+hub.dataset.i); });
 
   /* ---------- плитки и отклонения ---------- */
   function kpiTile(k, fromPulse = false) {
@@ -699,9 +682,9 @@
       const lead = p.pulse.critical ? `Из ${p.pulse.total} показателей ${p.pulse.critical} требуют решения${p.pulse.warn ? `, ещё ${p.pulse.warn} под вниманием` : ''}.`
         : n ? `Критичного нет, под вниманием ${p.pulse.warn} из ${p.pulse.total} показателей.` : `Все ${p.pulse.total} показателей в норме.`;
       return `<header class="page-head pulse-head"><div><h1>Пульс компании</h1>
-          <p class="lead">${lead} ${matchMedia('(hover: none)').matches ? 'Нажмите' : 'Наведите'} на звено — увидите, что в нём происходит.</p></div><span class="spacer"></span>
-          <div class="legend"><span><i style="background:var(--ok)"></i>в норме</span><span><i style="background:var(--warn)"></i>внимание</span><span><i style="background:var(--bad)"></i>критично</span></div></header>
-        <section class="pulse-map" aria-label="Сквозной поток заказа">${mapSvg(p)}</section>`;
+          <p class="lead">${lead} ${matchMedia('(hover: none)').matches ? 'Нажмите' : 'Наведите'} на сферу — раскроются её показатели и задачи.</p></div><span class="spacer"></span>
+          <div class="legend"><span><i style="background:var(--ok)"></i>в норме</span><span><i style="background:var(--warn-fill)"></i>внимание</span><span><i style="background:var(--bad)"></i>критично</span></div></header>
+        <section class="pulse-map" aria-label="Сферы компании">${mapSvg(p)}</section>`;
     },
     attention(p) {
       return `<header class="page-head"><div><h1>Отклонения</h1><p class="lead">${p.alerts.length ? `Требуют решения: ${p.alerts.length}. У каждого — причина, ответственный и кнопка «Оформить решение».` : 'Все показатели в пределах плана.'}</p></div></header>
@@ -1097,7 +1080,7 @@
   /* ---------- общие нажатия ---------- */
   document.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act],[data-kpi],[data-company-kpi],[data-decide],[data-decision],[data-node],[data-go],[data-pain-link],[data-core]');
-    if (!t) { if (mapTouch) hideMapCard(); return; }
+    if (!t) { if (mapOn) hideMapCard(); return; }
     if (t.hasAttribute('data-core')) { hideMapCard(); return go('attention'); }
     if (t.dataset.act === 'closeLayer') return closeLayer();
     if (t.dataset.act === 'load') return load();
@@ -1133,8 +1116,9 @@
       else if ($('#chat')) $('#chatX').click();
       return;
     }
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#map .node')) { e.preventDefault(); hideMapCard(); openCompanyKpi(e.target.dataset.node); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#map .hub')) { e.preventDefault(); hideMapCard(); openCompanyKpi(e.target.dataset.node); }
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#map .core')) { e.preventDefault(); hideMapCard(); go('attention'); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#map .kid')) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });
   window.addEventListener('offline', () => toast('Нет сети. Данные на экране могли устареть, введённое в формах сохранено.'));
   window.addEventListener('online', () => $('#view') && toast('Сеть вернулась', { label: 'Обновить данные', run: reload }));
