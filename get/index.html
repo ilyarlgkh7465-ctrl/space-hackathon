@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FAF7F5">
+<title>Скачать на телефон · Фотопринт</title>
+<meta name="description" content="Приложение picPac для клиентов и помощник руководителя — установка на экран телефона за полминуты.">
+<link rel="icon" type="image/png" href="/helper/icon-192.png">
+<link rel="stylesheet" href="/shared/fonts/fonts.css">
+<link rel="stylesheet" href="/shared/glass.css">
+<style>
+  main { max-width: 880px; margin: 0 auto; padding: clamp(20px, 5vw, 48px) 18px calc(40px + env(safe-area-inset-bottom)); }
+  .top { display: flex; align-items: center; gap: 10px; margin-bottom: clamp(24px, 6vw, 48px); }
+  .top a { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font-weight: 600; }
+  .mark { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; background: var(--grad); color: #fff; font-weight: 700; }
+  h1 { font-size: clamp(28px, 6vw, 42px); line-height: 1.1; letter-spacing: -.025em; font-weight: 600; text-wrap: balance; }
+  .lead { margin-top: 12px; color: var(--ink2); font-size: 17px; max-width: 56ch; text-wrap: pretty; }
+  .apps { margin-top: clamp(22px, 5vw, 36px); display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .app { padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+  .app-head { display: flex; gap: 14px; align-items: center; }
+  .app-head img { width: 64px; height: 64px; border-radius: 16px; box-shadow: 0 4px 14px rgba(70, 50, 40, .14); flex: none; }
+  .app-head h2 { font-size: 20px; font-weight: 600; line-height: 1.2; }
+  .app-head small { color: var(--ink3); font-size: 14px; }
+  .app p { color: var(--ink2); font-size: 15px; flex: 1; }
+  .qr { align-self: center; width: min(220px, 70%); aspect-ratio: 1; border-radius: 18px; background: #fff; padding: 10px; border: 1px solid var(--edge); }
+  .qr img { width: 100%; height: 100%; display: block; }
+  .qr-note { text-align: center; color: var(--ink3); font-size: 13.5px; }
+  .app .btn { min-height: 52px; font-size: 16px; }
+  .app .open { align-self: center; color: var(--ink3); font-size: 14px; }
+  .how { margin-top: 16px; padding: 18px 22px; display: grid; gap: 6px; color: var(--ink2); font-size: 14.5px; }
+  .how b { color: var(--ink); font-weight: 600; }
+  .phone .qr, .phone .qr-note, .desk .get { display: none; }
+  @media (max-width: 720px) { .apps { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<main id="page" class="desk">
+  <div class="top"><a href="/"><span class="mark" aria-hidden="true">Ф</span>Фотопринт</a></div>
+  <h1>Установите на телефон — и попробуйте сами</h1>
+  <p class="lead" id="lead">Наведите камеру телефона на код. Приложение откроется и предложит добавить себя на экран — без магазина приложений и без регистрации.</p>
+
+  <div class="apps">
+    <section class="glass app">
+      <div class="app-head"><img src="/t2/icon-192.png" alt="" width="64" height="64"><div><h2>picPac</h2><small>для клиентов</small></div></div>
+      <p>Выбрать фото в галерее, собрать заказ и следить, на каком он этапе: печать, сборка, доставка.</p>
+      <div class="qr"><img data-qr="/t2/?install=1" alt="Код для установки приложения picPac"></div>
+      <span class="qr-note">камера телефона → ссылка → «Установить»</span>
+      <a class="btn btn-primary get" href="/t2/?install=1">Установить picPac</a>
+      <a class="open" href="/t2/">или открыть в браузере</a>
+    </section>
+    <section class="glass app">
+      <div class="app-head"><img src="/helper/icon-192.png" alt="" width="64" height="64"><div><h2>Помощник</h2><small>для руководителей</small></div></div>
+      <p>Спросить голосом или текстом, что происходит в компании. Ответ — по данным своей роли, с графиком и источником.</p>
+      <div class="qr"><img data-qr="/helper/?install=1" alt="Код для установки помощника руководителя"></div>
+      <span class="qr-note">камера телефона → ссылка → «Установить»</span>
+      <a class="btn btn-primary get" href="/helper/?install=1">Установить помощника</a>
+      <a class="open" href="/helper/">или открыть в браузере</a>
+    </section>
+  </div>
+
+  <div class="glass-flat how">
+    <span><b>iPhone:</b> откройте ссылку в Safari → «Поделиться» → «На экран „Домой“».</span>
+    <span><b>Android:</b> откройте в Chrome → кнопка «Установить».</span>
+    <span><b>Вход для пробы:</b> на экране входа есть кнопки тестовых ролей — директор, руководители отделов, аналитик. Данные выдуманные.</span>
+  </div>
+</main>
+<script>
+  // На телефоне код не нужен — сразу кнопки установки. На компьютере и проекторе — коды для камеры.
+  const phone = /Android|iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  const page = document.getElementById('page');
+  page.className = phone ? 'phone' : 'desk';
+  if (phone) document.getElementById('lead').textContent = 'Выберите, что поставить. Приложение откроется и подскажет, как добавить его на экран — без магазина приложений и без регистрации.';
+  else document.querySelectorAll('[data-qr]').forEach((img) => {
+    img.src = '/api/qr?text=' + encodeURIComponent(location.origin + img.dataset.qr);
+    img.onerror = () => { img.closest('.qr').outerHTML = '<span class="qr-note">' + location.host + img.dataset.qr.replace('?install=1', '') + '</span>'; };
+  });
+</script>
+</body>
+</html>

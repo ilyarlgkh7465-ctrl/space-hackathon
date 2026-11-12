@@ -33,6 +33,8 @@ import assistant_api as A
 
 STT_URL = os.environ.get("STT_URL", "http://127.0.0.1:8090").rstrip("/")
 TTS_URL = os.environ.get("TTS_URL", "http://127.0.0.1:5050").rstrip("/")
+# Запасное распознавание: служба, которая принимает запись как есть (POST, тело — звук) и отвечает {"text": ...}.
+STT_HTTP_URL = os.environ.get("STT_HTTP_URL", "")
 VOICES = {"robot": {"voice": os.environ.get("TTS_VOICE_ROBOT", "ru_RU-denis-medium"), "length_scale": 1.0}}
 MAX_AUDIO = 4 * 1024 * 1024          # ~2 минуты речи в webm/opus — больше в чат не нужно
 _probe = {}
@@ -67,8 +69,10 @@ def status():
                 tts_engine = json.loads(r.read() or b"{}").get("voice")
         except Exception:
             tts_engine = None
-    return {"stt": alive(STT_URL) and bool(ffmpeg()), "tts": alive(TTS_URL), "ffmpeg": bool(ffmpeg()),
-            "stt_engine": "whisper.cpp (локально)", "tts_engine": tts_engine or "локальный синтез"}
+    own = alive(STT_URL) and bool(ffmpeg())
+    return {"stt": own or bool(STT_HTTP_URL), "tts": alive(TTS_URL), "ffmpeg": bool(ffmpeg()),
+            "stt_engine": "whisper.cpp (локально)" if own else "Whisper на сервере" if STT_HTTP_URL else "нет",
+            "tts_engine": tts_engine or ("локальный синтез" if alive(TTS_URL) else "голос устройства")}
 
 
 # ---------------------------------------------------------------- речь → текст
@@ -80,6 +84,17 @@ def stt(core, user, body):
     if len(raw) > MAX_AUDIO:
         return 413, {"error": "слишком длинная запись — говорите короче"}
     ff = ffmpeg()
+    if (not ff or not alive(STT_URL)) and STT_HTTP_URL:
+        t0 = time.time()
+        req = urllib.request.Request(STT_HTTP_URL, data=raw, method="POST",
+                                     headers={"Content-Type": str(body.get("mime") or "audio/webm").split(";")[0]})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                text = re.sub(r"\s+", " ", str(json.loads(resp.read().decode("utf-8", "replace") or "{}").get("text", ""))).strip()
+        except Exception as e:
+            return 502, {"error": "распознавание речи не ответило: " + type(e).__name__}
+        core.audit(A.who(user), "распознавание речи", "{} символов; звук не сохраняется".format(len(text)), obj="помощник: голос", result="ok")
+        return 200, {"text": text, "ms": int(1000 * (time.time() - t0))}
     if not ff or not alive(STT_URL):
         return 503, {"error": "распознавание речи не запущено на сервере — напишите вопрос текстом"}
     ext = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/wav": ".wav"}.get(str(body.get("mime", "")).split(";")[0], ".webm")

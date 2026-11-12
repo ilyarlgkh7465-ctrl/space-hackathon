@@ -14,6 +14,7 @@
 Без библиотеки или без ключа сервер работает как раньше — на локальной модели, DeepSeek или встроенной логике.
 """
 import json
+import os
 import re
 import threading
 import time
@@ -21,6 +22,7 @@ from collections import deque
 
 MAX_CHARS = 60000            # больше — не отправляем: в запросе не должно быть целых баз
 PER_MINUTE = 60              # обращений к моделям в минуту на весь сервер
+PER_DAY = int(os.environ.get("FP_AI_PER_DAY", "0"))   # обращений в сутки (0 — без ограничения); на открытом стенде бережёт ключи
 PLACEHOLDER = re.compile(r"\[(?:ТЕЛЕФОН|ПОЧТА|УНП|СУММА|ФИО)_\d+\]|\[ШЛЮЗ_[А-Я]+_\d+\]")
 INJECTION = re.compile(r"игнорируй (?:все |предыдущ)|забудь (?:все|предыдущ)|ignore (?:all|previous)|system prompt|ты теперь ", re.I)
 STRICT = ("ТЕЛЕФОН", "ПОЧТА", "УНП")        # что шлюз скрывает сам; имена и суммы маскируют модули — им виднее контекст
@@ -30,6 +32,7 @@ RULES = [
     "Запрос больше %d знаков и больше %d обращений в минуту не пропускаются" % (MAX_CHARS, PER_MINUTE),
     "Попытки подменить инструкции помечаются в журнале",
     "В журнале шлюза — только счётчики и время, без текста запросов и ответов",
+    "Модель выбирается по задаче: вопросы о финансах — только локальная модель, в облако они не уходят",
 ]
 
 
@@ -40,6 +43,7 @@ class Gateway:
         self.recent = deque()
         self.totals = {"calls": 0, "outside": 0, "local": 0, "blocked": 0, "hidden": 0, "auto_hidden": 0, "flagged": 0, "failed": 0}
         self.last = deque(maxlen=40)
+        self.day = ["", 0]
         try:
             saved = json.loads(path.read_text(encoding="utf-8"))
             self.totals.update(saved.get("totals", {}))
@@ -82,6 +86,7 @@ class Gateway:
         """prov: {name, model, outside}; send(system, user, want_json, max_tokens) -> dict ответа модели."""
         text = system + "\n" + user
         entry = {"ts": self.now(), "provider": prov["name"], "model": prov["model"], "outside": bool(prov["outside"]),
+                 "task": prov.get("task", ""),
                  "chars_in": len(text), "chars_out": 0, "hidden": len(set(PLACEHOLDER.findall(text))), "auto_hidden": 0,
                  "flagged": bool(INJECTION.search(user)), "blocked": "", "ok": False, "ms": 0}
         with self.lock:
@@ -89,12 +94,19 @@ class Gateway:
             while self.recent and t - self.recent[0] > 60:
                 self.recent.popleft()
             busy = len(self.recent) >= PER_MINUTE
-            if not busy:
+            today = time.strftime("%Y-%m-%d")
+            if self.day[0] != today:
+                self.day = [today, 0]
+            over = bool(PER_DAY) and self.day[1] >= PER_DAY
+            if not busy and not over:
                 self.recent.append(t)
+                self.day[1] += 1
         if len(text) > MAX_CHARS:
             entry["blocked"] = "запрос больше %d знаков" % MAX_CHARS
         elif busy:
             entry["blocked"] = "больше %d обращений в минуту" % PER_MINUTE
+        elif over:
+            entry["blocked"] = "больше %d обращений в сутки" % PER_DAY
         if entry["blocked"]:
             self._record(entry)
             return {"ok": False, "reason": "ИИ-шлюз не пропустил запрос: " + entry["blocked"], "gateway": "blocked"}
@@ -127,6 +139,12 @@ class Gateway:
         self._record(entry)
         res["gateway"] = {"hidden": entry["hidden"], "auto_hidden": entry["auto_hidden"], "flagged": entry["flagged"]}
         return res
+
+    def note(self, task, why):
+        """Запрос, который шлюз никуда не отправил (например, финансы без локальной модели): виден в журнале."""
+        self._record({"ts": self.now(), "provider": "встроенная логика", "model": "", "outside": False, "task": task,
+                      "chars_in": 0, "chars_out": 0, "hidden": 0, "auto_hidden": 0, "flagged": False, "blocked": "",
+                      "kept": why, "ok": True, "ms": 0})
 
     def snapshot(self):
         with self.lock:

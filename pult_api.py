@@ -1316,9 +1316,18 @@ def ask(core, P, user, body):
     user_text = "ДАННЫЕ (период %s — %s, роль: %s):\n%s\n\nВОПРОС:\n%s" % (
         data["period"]["from"], data["period"]["to"], user["title"], block, q)
     mapping = {}
-    res = core.ask_model(core.mask(system, mapping), core.mask(user_text, mapping), False, 500)
+    brief = bool(body.get("voice"))                    # ответ для голоса — короткий: модель отвечает заметно быстрее
+    if brief:
+        system += " Ответ прозвучит голосом: одно-два коротких предложения, всего до 30 слов, без списков, скобок и сокращений."
+    res = core.ask_model(core.mask(system, mapping), core.mask(user_text, mapping), False, 120 if brief else 500,
+                         core.task_for(q))
     if res.get("ok"):
         text, provider, fb = core.unmask(res["text"], mapping), res.get("provider"), False
+    elif res.get("kept_inside"):
+        top = data["alerts"][:3]
+        text = ("Главные отклонения: " + " ".join("%s. %s" % (a["title"], a["cause"]) for a in top) if top
+                else "Критических отклонений по доступным вам показателям нет.")
+        provider, fb = "встроенная логика · финансы в облако не уходят", True
     else:
         top = data["alerts"][:3]
         text = ("Модель сейчас недоступна, отвечаю по готовым правилам. " + (

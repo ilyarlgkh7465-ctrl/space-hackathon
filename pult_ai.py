@@ -282,12 +282,38 @@ SYSTEM_QA = ("Ты — аналитик данных в пульте руков�
              "Не упоминай графики, диаграммы и таблицы — сразу вывод по цифрам и что сделать.")
 
 
-def _model_text(core, system, data, q, max_tokens=420):
+VOICE_HINT = " Ответ прозвучит голосом: одно-два коротких предложения, всего до 30 слов, без списков, скобок и сокращений."
+
+
+def _model_text(core, system, data, q, max_tokens=420, task="", brief=False):
+    """brief — ответ для голоса: короткий, чтобы модель отвечала за секунду-полторы, а не писала абзац, который всё равно обрежется."""
     mapping = {}
-    res = core.ask_model(core.mask(system, mapping), core.mask("ДАННЫЕ:\n%s\n\nВОПРОС:\n%s" % (data, q), mapping), False, max_tokens)
+    if brief:
+        system, max_tokens = system + VOICE_HINT, 120
+    res = core.ask_model(core.mask(system, mapping), core.mask("ДАННЫЕ:\n%s\n\nВОПРОС:\n%s" % (data, q), mapping), False, max_tokens,
+                         task or core.task_for(q))
     if res.get("ok"):
         return core.unmask(res["text"], mapping).strip(), res.get("provider"), len(mapping), bool(res.get("outside"))
+    if res.get("kept_inside"):
+        return None, "встроенная логика · финансы в облако не уходят", 0, False
     return None, None, 0, False
+
+
+def _kpi_line(ctx, days, kid):
+    """Ответ без модели: показатель, план, прошлый период и причина отклонения, если система её уже нашла."""
+    p = ctx.pulse(days)
+    k = next((x for x in p["kpis"] if x["id"] == kid and not x.get("locked")), None)
+    if not k:
+        return ""
+    st = {"ok": "в норме", "warn": "под вниманием", "bad": "хуже плана"}.get(k["status"], "")
+    s = "%s — %s %s при плане %s" % (k["name"], PA._fmt(k["value"]), k["unit"], PA._fmt(k["plan"]))
+    if k.get("prev") is not None:
+        s += ", в прошлом периоде было %s" % PA._fmt(k["prev"])
+    s += (": %s." % st) if st else "."
+    a = next((x for x in p["alerts"] if x["kpi"] == kid), None)
+    if a:
+        s += " %s Отвечает: %s." % (a["cause"].rstrip(".") + ".", a["owner"].rstrip("."))
+    return s
 
 
 def _rule_comment(spec, d):
@@ -318,6 +344,8 @@ def ask(core, P, user, body):
     locked_kpis = [k for k in match_kpis(q, [x["id"] for x in PA.KPIS]) if k not in allowed]
     last = [w for w in (body.get("last") or []) if isinstance(w, dict) and isinstance(w.get("source"), dict)][:3]
     doc_id = str(body.get("doc") or "")
+    brief = bool(body.get("voice"))
+    fin = "finance" if any((_kpi_def(k) or {}).get("dept") == "finance" for k in kpis) else ""
     out = {"q": q, "route": ["supervisor"], "widgets": [], "cites": [], "results": [], "provider": "встроенная логика",
            "masked": 0, "asof": ctx.pulse(days)["asof"], "days": days}
 
@@ -409,11 +437,14 @@ def ask(core, P, user, body):
         out["widgets"].append(w)
         alert = next((a for a in ctx.pulse(days)["alerts"] if a["kpi"] == kid), None)
         data = _data_block(ctx, days, [(w["title"], w["data"])])
-        text, prov, masked, outside = _model_text(core, SYSTEM_QA + " Объясни причину отклонения и предложи одно действие с владельцем.", data, q)
+        text, prov, masked, outside = _model_text(core, SYSTEM_QA + " Объясни причину отклонения и предложи одно действие с владельцем.", data, q,
+                                                  task=fin, brief=brief)
         if text:
             out.update(text=text, provider=prov, masked=masked)
         else:
-            out["text"] = ("%s. %s Отвечает: %s." % (alert["title"].rstrip("."), alert["cause"], alert["owner"].rstrip(".")) if alert else _rule_comment(w, w["data"]))
+            out["provider"] = prov or out["provider"]
+            out["text"] = ("%s. %s Отвечает: %s." % (alert["title"].rstrip("."), alert["cause"], alert["owner"].rstrip(".")) if alert
+                           else (_kpi_line(ctx, days, kid) + " " + _rule_comment(w, w["data"])).strip())
         out["alert"] = alert
         core.audit(user["name"], "запрос к ИИ: причина", q[:200], obj="показатель " + kid, outside=bool(text and outside))
         return out, 200
@@ -433,8 +464,15 @@ def ask(core, P, user, body):
             out["text"] = "Построил: «%s» — %s за %d дн. %s" % (w["title"], CHARTS[w["type"]].lower(), days, _rule_comment(w, w["data"]))
         else:
             data = _data_block(ctx, days, [(w["title"], w["data"]) for w in out["widgets"]])
-            text, prov, masked, outside = _model_text(core, SYSTEM_QA, data, q)
-            out.update(text=text or " ".join(_rule_comment(w, w["data"]) for w in out["widgets"]), provider=prov or out["provider"], masked=masked)
+            text, prov, masked, outside = _model_text(core, SYSTEM_QA, data, q, task=fin, brief=brief)
+            if not text:      # без модели: показатель с планом и причиной, в чате — ещё и вывод по разбивке
+                parts = []
+                for w in out["widgets"]:
+                    line = _kpi_line(ctx, days, (w.get("source") or {}).get("kpi"))
+                    note = "" if brief else _rule_comment(w, w["data"])
+                    parts += [x for x in (line, "" if note and note in line else note) if x]
+                text = " ".join(parts)
+            out.update(text=text, provider=prov or out["provider"], masked=masked)
         core.audit(user["name"], "запрос к ИИ: графики", q[:200], obj=", ".join(kpis[:3]))
         return out, 200
 
@@ -449,7 +487,7 @@ def ask(core, P, user, body):
 
     # 8. общий вопрос — ответ по данным роли
     out["route"].append("qa")
-    r, code = PA.ask(core, P, user, {"question": q, "days": days, "product": ctx.product})
+    r, code = PA.ask(core, P, user, {"question": q, "days": days, "product": ctx.product, "voice": brief})
     out.update(text=r.get("text") or r.get("error"), provider=r.get("provider"), masked=r.get("masked", 0))
     return out, 200
 

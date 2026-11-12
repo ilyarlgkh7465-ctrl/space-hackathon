@@ -389,11 +389,18 @@
     if (!Vc.status) { try { Vc.status = await F().api('/api/assistant/voice/status'); } catch (e) { Vc.status = { stt: false, tts: false }; } }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const mic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-    Vc.engine = Vc.status.stt && mic && window.MediaRecorder ? 'server' : SR ? 'browser' : '';
-    $('#vEngine').textContent = Vc.engine === 'server' ? 'речь распознаётся на сервере компании' : Vc.engine === 'browser' ? 'речь распознаёт браузер' : 'микрофон недоступен';
+    const server = Vc.status.stt && mic && window.MediaRecorder;
+    // Быстрее всего — распознавание в самом устройстве: текст виден по ходу речи. Сервер — если браузер не умеет или выбран ?stt=server.
+    Vc.engine = (server && /[?&]stt=server/.test(location.search)) || (server && !SR) ? 'server' : SR ? 'browser' : '';
+    Vc.canServer = !!server;
+    vEngine();
     vLevelLoop();
     if (!Vc.engine) { vSet('idle', 'Микрофон в этом браузере недоступен — перейдите в чат и напишите вопрос'); return; }
     listen();
+  }
+  function vEngine(extra) {
+    const el = $('#vEngine'); if (!el) return;
+    el.textContent = (Vc.engine === 'server' ? 'речь распознаётся на сервере компании' : Vc.engine === 'browser' ? 'речь распознаёт устройство' : 'микрофон недоступен') + (extra ? ' · ' + extra : '');
   }
   function voiceStop(silent) {
     Vc.on = false; Vc.run++;
@@ -432,7 +439,12 @@
       const sr = Vc.sr = new SR(); sr.lang = 'ru-RU'; sr.interimResults = true; sr.continuous = false;
       let final = '';
       sr.onresult = (e) => { let t = ''; for (const r of e.results) { t += r[0].transcript; if (r.isFinal) final = t; } const y = $('#vYou'); if (y) y.textContent = t; };
-      sr.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { Vc.muted = true; vSet('idle', 'Нет доступа к микрофону. Разрешите его в браузере или перейдите в чат'); } };
+      sr.onerror = (e) => {
+        if (e.error !== 'not-allowed' && e.error !== 'service-not-allowed') return;
+        // приложение с экрана «Домой» на iPhone может не дать распознавание устройству — тогда запись уходит на сервер
+        if (e.error === 'service-not-allowed' && Vc.canServer && run === Vc.run) { sr.onend = null; Vc.engine = 'server'; vEngine(); return listen(); }
+        Vc.muted = true; vSet('idle', 'Нет доступа к микрофону. Разрешите его в настройках или перейдите в чат');
+      };
       sr.onend = () => { if (run !== Vc.run || !Vc.on) return; const t = (final || ($('#vYou') || {}).textContent || '').trim(); if (t) heard(t); else if (!Vc.muted) setTimeout(() => { if (run === Vc.run) listen(); }, 250); };
       try { sr.start(); } catch (e) { vSet('idle', 'Не получилось включить распознавание речи'); }
       return;
@@ -467,8 +479,10 @@
     stopListening();
     vSet('thinking');
     $('#vAnswer').innerHTML = '';
-    const r = await ask(text);
+    const t0 = performance.now();
+    const r = await ask(text, { voice: true });
     if (run !== Vc.run || !Vc.on) return;
+    vEngine('ответ за ' + ((performance.now() - t0) / 1000).toFixed(1).replace('.', ',') + ' с');
     const full = speakable(r.error || (r.summary ? r.summary.about : r.text) || 'Готово.');
     let say = '';                                                          // голосом — коротко, как в разговоре: первые одно-два предложения
     for (const part of full.match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g) || [full]) { if (say && (say + part).length > 260) break; say += part; }
@@ -483,26 +497,43 @@
     if (Vc.muted) vSet('muted'); else listen();
   }
   const speakable = (t) => String(t || '').replace(/\[D:[^\]]+\]/g, '').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim().slice(0, 700);
+  const phrases = (t) => (t.match(/[^.!?…]+[.!?…]+(?=\s|$)|[^.!?…]+$/g) || [t]).map((x) => x.trim()).filter(Boolean);
+  const ttsFetch = async (text) => {
+    const r = await fetch('/api/assistant/voice/tts', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + F().S.token }, body: JSON.stringify({ text, voice: 'robot' }) });
+    if (!r.ok) throw new Error('tts');
+    return audioCtx().decodeAudioData(await r.arrayBuffer());
+  };
+  const ruVoice = () => {
+    const vs = window.speechSynthesis.getVoices().filter((x) => /^ru/i.test(x.lang));
+    return vs.find((x) => /google|milena|enhanced|premium|natural/i.test(x.name)) || vs[0];
+  };
   async function speak(text, run) {
     if (!text) return;
+    const parts = phrases(text);
     if (Vc.status && Vc.status.tts) {
       try {
-        const r = await fetch('/api/assistant/voice/tts', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + F().S.token }, body: JSON.stringify({ text, voice: 'robot' }) });
-        if (r.ok && run === Vc.run) {
-          const ac = audioCtx(), buf = await ac.decodeAudioData(await r.arrayBuffer());
+        const ac = audioCtx();
+        if (!Vc.outAn) { Vc.outAn = ac.createAnalyser(); Vc.outAn.fftSize = 1024; Vc.outAn.connect(ac.destination); }
+        let next = ttsFetch(parts[0]);
+        for (let i = 0; i < parts.length; i++) {
+          const buf = await next;
           if (run !== Vc.run) return;
-          if (!Vc.outAn) { Vc.outAn = ac.createAnalyser(); Vc.outAn.fftSize = 1024; Vc.outAn.connect(ac.destination); }
+          next = i + 1 < parts.length ? ttsFetch(parts[i + 1]) : null;      // следующая фраза готовится, пока звучит эта
+          if (next) next.catch(() => { });
           await new Promise((res) => { const src = Vc.src = ac.createBufferSource(); src.buffer = buf; src.connect(Vc.outAn); src.onended = res; src.start(); });
-          return;
+          if (run !== Vc.run) return;
         }
-      } catch (e) { /* нет синтеза на сервере — голос устройства */ }
+        return;
+      } catch (e) { Vc.status.tts = false; /* синтез на сервере не ответил — дальше голос устройства */ }
     }
     if (!window.speechSynthesis) return new Promise((res) => setTimeout(res, Math.min(9000, 900 + text.length * 45)));
     await new Promise((res) => {
-      const u = new SpeechSynthesisUtterance(text); u.lang = 'ru-RU'; u.rate = 1.03;
-      const v = window.speechSynthesis.getVoices().find((x) => /^ru/i.test(x.lang)); if (v) u.voice = v;
-      u.onend = u.onerror = res;
-      window.speechSynthesis.speak(u);
+      const v = ruVoice();
+      parts.forEach((p, i) => {                                             // по фразам: голос устройства начинает без паузы и не обрывается на длинном тексте
+        const u = new SpeechSynthesisUtterance(p); u.lang = 'ru-RU'; u.rate = 1.05; if (v) u.voice = v;
+        if (i === parts.length - 1) u.onend = u.onerror = res;
+        window.speechSynthesis.speak(u);
+      });
       setTimeout(res, Math.min(60000, 4000 + text.length * 110));          // на случай, если браузер не сообщит об окончании
     });
   }

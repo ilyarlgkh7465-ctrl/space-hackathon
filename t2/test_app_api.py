@@ -30,7 +30,7 @@ class Api(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = Path(tempfile.mkdtemp())
-        for f in ("server.py", "app_api.py"):
+        for f in ("server.py", "app_api.py", "llm_gateway.py"):
             shutil.copy(ROOT / f, cls.tmp / f)
         shutil.copytree(ROOT / "data" / "seed", cls.tmp / "data" / "seed")
         s = socket.socket(); s.bind(("127.0.0.1", 0)); cls.port = s.getsockname()[1]; s.close()

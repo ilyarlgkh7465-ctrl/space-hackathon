@@ -75,7 +75,9 @@
   }
   const DEMO = [['director', 'Директор'], ['production', 'Руководитель производства'], ['sales', 'Руководитель продаж'], ['support', 'Руководитель поддержки'], ['logistics', 'Руководитель логистики'], ['finance', 'Руководитель финансов'], ['hr', 'Руководитель по персоналу'], ['office', 'Руководитель делопроизводства'], ['operator', 'Мастер участка'], ['analyst', 'Аналитик']];
 
-  const store = { get: (k) => { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v == null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch (e) { /* закрытое окно */ } } };
+  // В приложении помощника (экран «Домой») вход запоминается на устройстве; в браузере — только до закрытия вкладки.
+  const keep = window.FP_START ? window.localStorage : window.sessionStorage;
+  const store = { get: (k) => { try { return keep.getItem(k) || sessionStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v == null ? (keep.removeItem(k), sessionStorage.removeItem(k)) : keep.setItem(k, v); } catch (e) { /* закрытое окно */ } } };
   const S = { token: store.get('fp-token'), user: null, view: '', pain: null, contours: [], contour: null, openCount: null,
     days: 14, product: '', pulse: null, cache: {}, err: null, chat: [], seq: 0, loadSeq: 0 };
 
@@ -117,8 +119,8 @@
     $('#layer').innerHTML = '';
     $('#app').innerHTML = `<main class="login"><form class="glass login-card" id="loginForm" autocomplete="off">
       <span class="logo" aria-hidden="true">Ф</span>
-      <div><p class="eyebrow">Фотопринт · единая система</p><h1>Пульт руководителя</h1></div>
-      <p class="muted">Состояние компании, причины отклонений и ответственные — в одном окне. Данные тестовые.</p>
+      <div><p class="eyebrow">Фотопринт · единая система</p><h1>${window.FP_START === 'assistant' ? 'Помощник руководителя' : 'Пульт руководителя'}</h1></div>
+      <p class="muted">${window.FP_START === 'assistant' ? 'Спросите голосом или текстом — ответ по данным вашей роли. Данные тестовые.' : 'Состояние компании, причины отклонений и ответственные — в одном окне. Данные тестовые.'}</p>
       <label class="field">Логин<input class="input" name="login" required autocapitalize="none" spellcheck="false"></label>
       <label class="field">Пароль<input class="input" name="password" type="password" required></label>
       <p class="err" role="alert">${esc(msg)}</p>
@@ -142,7 +144,7 @@
   function logout(silent) {
     if (!silent) history.replaceState(null, '', location.pathname + location.search);
     S.seq++; S.loadSeq++;
-    S.token = null; S.user = null; S.pulse = null; S.cache = {}; S.chat = []; S.contours = []; S.contour = null; S.openCount = null; S.draft = null;
+    S.token = null; S.user = null; S.started = false; S.pulse = null; S.cache = {}; S.chat = []; S.contours = []; S.contour = null; S.openCount = null; S.draft = null;
     if (window.Studio) { window.Studio.close(); window.Studio.reset(); }
     clearInterval(S.timer);
     store.set('fp-token', null);
@@ -165,6 +167,7 @@
     Object.assign(S, routeView(params), routeFilters(params));
     renderShell();
     load();
+    if (window.FP_START === 'assistant' && !S.started) { S.started = true; window.Studio.open(); }   // приложение помощника открывается сразу на нём
   }
   function renderShell() {
     const initials = S.user.name.split(' ').map((p) => p[0]).slice(0, 2).join('');
@@ -738,23 +741,28 @@
   /* ИИ-шлюз: одна точка выхода к моделям. Показываем, куда сейчас идут запросы, правила и счётчики — без текста запросов. */
   function gatewayPanel(g) {
     const st = g.state, t = g.totals, av = st.available;
-    const modes = [['local', '', 'Локальная модель', 'на этом компьютере, наружу ничего не уходит', true],
+    const TASK = { finance: 'Финансы', complex: 'Сложный разбор', simple: 'Короткий ответ' };
+    const modes = [['auto', '', 'По задаче', 'шлюз сам выбирает модель под каждый запрос', true],
+      ['local', '', 'Локальная модель', 'на компьютере компании, наружу ничего не уходит', true],
       ['cloud', 'claude', 'Claude', av.claude ? 'облако, данные скрыты метками' : av.claude_note, av.claude],
       ['cloud', 'deepseek', 'DeepSeek', av.deepseek ? 'облако, данные скрыты метками' : 'нет ключа', av.deepseek],
       ['off', '', 'Без модели', 'только встроенные правила', true]];
     const cur = (m, c) => st.mode === m && (m !== 'cloud' || st.cloud === c);
     const canSwitch = S.user.role === 'director';
-    return `<section class="glass panel gate"><header><h2>ИИ-шлюз</h2><span class="chip ${st.outside ? 'chip-warn' : 'chip-ok'}"><i></i>${st.outside ? 'запросы уходят в облако' : st.mode === 'off' ? 'модель выключена' : 'запросы не покидают компьютер'}</span>
+    return `<section class="glass panel gate"><header><h2>ИИ-шлюз</h2><span class="chip ${st.mode === 'auto' ? 'chip-ok' : st.outside ? 'chip-warn' : 'chip-ok'}"><i></i>${st.mode === 'auto' ? 'финансы — только внутри, остальное — в облако со скрытыми данными' : st.outside ? 'запросы уходят в облако' : st.mode === 'off' ? 'модель выключена' : 'запросы не покидают компьютер'}</span>
         <span class="spacer"></span><span class="faint" style="font-size:13px">сейчас отвечает: ${esc(st.provider)}${st.model ? ' · ' + esc(st.model) : ''}</span></header>
       <div class="gate-modes" role="group" aria-label="Куда идут запросы к модели">${modes.map(([m, c, name, note, ok]) => `<button class="glass-flat gate-mode" data-gate-mode="${m}" data-gate-cloud="${c}" aria-pressed="${cur(m, c)}"${ok && canSwitch ? '' : ' disabled'}>
         <b>${name}</b><small>${esc(note)}</small></button>`).join('')}</div>
+      ${(st.routes || []).length ? `<div class="scroll-x"><table class="tbl gate-routes"><thead><tr><th>Задача</th><th>Кто отвечает</th><th>Куда уходит</th><th>Запасной вариант</th></tr></thead><tbody>
+        ${st.routes.map((r) => `<tr><td><b>${esc(r.title)}</b></td><td>${esc(r.provider)}${r.model ? ` <span class="faint">${esc(r.model)}</span>` : ''}</td>
+          <td>${r.outside ? 'облако, данные скрыты метками' : 'не покидает компанию'}${r.note ? ` <span class="faint">· ${esc(r.note)}</span>` : ''}</td><td class="muted">${esc(r.reserve || (r.task === 'finance' ? 'встроенные правила' : '—'))}</td></tr>`).join('')}</tbody></table></div>` : ''}
       <div class="facts gate-facts"><div class="fact"><small>Запросов к моделям</small><b>${fmt(t.calls)}</b></div><div class="fact"><small>Из них в облако</small><b>${fmt(t.outside)}</b></div>
         <div class="fact"><small>Скрыто значений</small><b>${fmt(t.hidden)}</b> <span class="faint">шлюзом: ${fmt(t.auto_hidden)}</span></div>
         <div class="fact"><small>Не пропущено</small><b class="${t.blocked ? 'st-bad' : ''}">${fmt(t.blocked)}</b> <span class="faint">помечено: ${fmt(t.flagged)}</span></div></div>
       <ul class="gate-rules">${g.rules.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
-      <details class="section-details glass-flat"><summary>Последние обращения<span class="cnt">${g.last.length}</span></summary><div class="section-details-body scroll-x"><table class="tbl"><thead><tr><th>Время</th><th>Модель</th><th>Куда</th><th class="n">Скрыто</th><th class="n">Знаков</th><th class="n">Время, с</th><th>Итог</th></tr></thead><tbody>
-        ${g.last.map((x) => `<tr><td class="num">${ftime(x.ts)}</td><td>${esc(x.provider)}</td><td>${x.outside ? 'облако' : 'локально'}</td><td class="n">${x.hidden}</td><td class="n">${fmt(x.chars_in)}</td><td class="n">${fmt(x.ms / 1000)}</td>
-          <td class="${x.blocked ? 'st-bad' : x.ok ? '' : 'st-warn'}">${x.blocked ? 'не пропущен: ' + esc(x.blocked) : x.ok ? 'ответ получен' : 'модель не ответила'}${x.flagged ? ' · помечен' : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="faint">Обращений пока не было</td></tr>'}</tbody></table></div></details>
+      <details class="section-details glass-flat"><summary>Последние обращения<span class="cnt">${g.last.length}</span></summary><div class="section-details-body scroll-x"><table class="tbl"><thead><tr><th>Время</th><th>Задача</th><th>Модель</th><th>Куда</th><th class="n">Скрыто</th><th class="n">Знаков</th><th class="n">Время, с</th><th>Итог</th></tr></thead><tbody>
+        ${g.last.map((x) => `<tr><td class="num">${ftime(x.ts)}</td><td>${esc(TASK[x.task] || '—')}</td><td>${esc(x.provider)}</td><td>${x.outside ? 'облако' : 'внутри'}</td><td class="n">${x.hidden}</td><td class="n">${fmt(x.chars_in)}</td><td class="n">${fmt(x.ms / 1000)}</td>
+          <td class="${x.blocked ? 'st-bad' : x.ok ? '' : 'st-warn'}">${x.blocked ? 'не пропущен: ' + esc(x.blocked) : x.kept ? esc(x.kept) : x.ok ? 'ответ получен' : 'модель не ответила'}${x.flagged ? ' · помечен' : ''}</td></tr>`).join('') || '<tr><td colspan="8" class="faint">Обращений пока не было</td></tr>'}</tbody></table></div></details>
       ${canSwitch ? '' : '<p class="src">Переключать модель может директор.</p>'}</section>`;
   }
   document.addEventListener('click', async (e) => {

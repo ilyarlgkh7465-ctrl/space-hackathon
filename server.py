@@ -18,7 +18,9 @@
   POST /api/ai           — запрос к модели: {system, user, json, mask, max_tokens, who}
                            mask=true — ФИО, телефоны, УНП, почта и суммы заменяются метками до отправки
                            и возвращаются обратно в ответе; в журнал audit пишется, что ушло наружу
-  GET/POST /api/ai/mode  — cloud | local | off (переключатель «защищённого контура» для демо); cloud: claude | deepseek
+  GET/POST /api/ai/mode  — auto | cloud | local | off; cloud: claude | deepseek
+                           auto — шлюз сам выбирает модель по задаче: финансы → только локальная модель,
+                           сложные разборы → Claude, короткие ответы → DeepSeek
   GET  /api/gateway      — ИИ-шлюз: правила, счётчики и последние обращения к моделям (директор и аналитик)
   GET  /api/connect      — адреса сервера в сети и есть ли https (для страницы /connect.html)
   GET  /api/qr?text=     — QR-код адреса (SVG), если установлена библиотека segno
@@ -100,8 +102,10 @@ CLAUDE = {
 }
 CLAUDE["official"] = CLAUDE["base_url"] == "https://api.anthropic.com"
 _cloud = _env("CLOUD_PROVIDER") or ("claude" if llm_gateway.claude_ready(CLAUDE)[0] else "deepseek")
-STATE = {"mode": os.environ.get("AI_MODE", "cloud" if (CLOUD["api_key"] or CLAUDE["api_key"]) else "off"),
+STATE = {"mode": os.environ.get("AI_MODE", "auto" if (CLOUD["api_key"] or CLAUDE["api_key"]) else "off"),
          "cloud": _cloud if _cloud in ("claude", "deepseek") else "deepseek"}
+# Публичный стенд (сервер стоит за обратным прокси): запросы приходят с 127.0.0.1, но доверять им по адресу нельзя.
+PUBLIC = os.environ.get("FP_PUBLIC", "") == "1"
 
 
 # ---------- хранилище ----------
@@ -227,27 +231,99 @@ def unmask(text: str, mapping: dict) -> str:
 
 # ---------- запрос к модели ----------
 
-def ask_model(system: str, user: str, want_json: bool, max_tokens: int) -> dict:
+# Маршрут по задаче (режим auto). Класс задачи называет модуль (task=...), иначе он определяется по размеру запроса.
+#   finance — вопросы о деньгах компании: только локальная модель; если она не запущена — встроенная логика, в облако не уходит
+#   complex — протокол встречи, краткое содержание документа, длинные разборы: Claude, при отказе — DeepSeek
+#   simple  — короткие ответы, выбор показателя, чат приложения: DeepSeek, при отказе — Claude
+TASKS = {"finance": "Финансы", "complex": "Сложный разбор", "simple": "Короткий ответ"}
+FIN_RX = re.compile(r"прибыл|убыт|марж|дебитор|кредитор|себестоим|бюджет|финанс|бухгалт|налог|зарплат|фонд оплаты|"
+                    r"1с\b|p&l|денежн|контрагент|остатк\w* на (?:счет|счёт|начало|конец)", re.I)
+_local_probe = {"ts": 0.0, "ok": False}
+_claude_down = {"until": 0.0, "why": ""}
+
+
+def task_for(question: str, default: str = "") -> str:
+    """Класс задачи по тексту вопроса: о деньгах — finance (уйдёт только в локальную модель)."""
+    return "finance" if FIN_RX.search(str(question or "")) else default
+
+
+def local_alive() -> bool:
+    """Отвечает ли локальная модель (проверка раз в 15 секунд, чтобы не задерживать запросы)."""
+    if time.time() - _local_probe["ts"] < 15:
+        return _local_probe["ok"]
+    try:
+        req = urllib.request.Request(LOCAL["base_url"] + "/models",
+                                     headers={"Authorization": "Bearer " + LOCAL["api_key"]} if LOCAL["api_key"] else {})
+        urllib.request.urlopen(req, timeout=0.7).close()
+        ok = True
+    except urllib.error.HTTPError:
+        ok = True
+    except Exception:  # noqa: BLE001
+        ok = False
+    _local_probe.update(ts=time.time(), ok=ok)
+    return ok
+
+
+def _claude_ok() -> bool:
+    return llm_gateway.claude_ready(CLAUDE)[0] and time.time() >= _claude_down["until"]
+
+
+def route(task: str) -> list:
+    """Какие модели и в каком порядке пробуем для задачи: [("local"|"claude"|"deepseek"), ...]."""
+    mode = STATE["mode"]
+    if mode == "off":
+        return []
+    if mode == "local":
+        return ["local"]
+    if mode == "cloud":
+        return [STATE["cloud"]]
+    if task == "finance":
+        return ["local"] if local_alive() else []
+    first, second = ("claude", "deepseek") if task == "complex" else ("deepseek", "claude")
+    return [m for m in (first, second) if (m == "claude" and _claude_ok()) or (m == "deepseek" and CLOUD["api_key"])]
+
+
+def ask_model(system: str, user: str, want_json: bool, max_tokens: int, task: str = "") -> dict:
     """Единственный вход к моделям для всех модулей. Дальше — ИИ-шлюз (llm_gateway.py): правила, скрытие данных, журнал."""
     mode = STATE["mode"]
     if mode == "off":
         return {"ok": False, "reason": "ИИ выключен — работает встроенная логика"}
-    if mode == "cloud" and STATE["cloud"] == "claude":
-        ok, why = llm_gateway.claude_ready(CLAUDE)
-        if not ok:
-            return {"ok": False, "reason": why}
-        return GATEWAY.call(dict(CLAUDE, outside=True), system, user, want_json, max_tokens,
-                            lambda s, u, j, m: llm_gateway.ask_claude(CLAUDE, s, u, j, m))
-    prov = LOCAL if mode == "local" else CLOUD
-    if mode == "cloud" and not prov["api_key"]:
+    if task not in TASKS:
+        task = "complex" if (max_tokens >= 700 or len(user) > 5000) else "simple"
+    chain = route(task)
+    if not chain:
+        if mode == "auto" and task == "finance":
+            GATEWAY.note(task, "локальная модель не подключена — финансы в облако не отправлены")
+            return {"ok": False, "task": task, "kept_inside": True,
+                    "reason": "финансовые вопросы обрабатывает только локальная модель; сейчас она не подключена — ответ по встроенным правилам"}
         return {"ok": False, "reason": "нет ключа модели"}
-    return GATEWAY.call(dict(prov, outside=mode == "cloud"), system, user, want_json, max_tokens, _ask_openai)
+    res = {"ok": False, "reason": "модель не ответила"}
+    for name in chain:
+        if name == "claude":
+            ok, why = llm_gateway.claude_ready(CLAUDE)
+            if not ok:
+                res = {"ok": False, "reason": why}
+                continue
+            res = GATEWAY.call(dict(CLAUDE, outside=True, task=task), system, user, want_json, max_tokens,
+                               lambda s, u, j, m: llm_gateway.ask_claude(CLAUDE, s, u, j, m))
+            if not res.get("ok") and res.get("gateway") != "blocked":
+                # Claude недоступен (сеть, регион, лимит) — пять минут не тратим на него время, отвечает следующая модель
+                _claude_down.update(until=time.time() + 300, why=str(res.get("reason", ""))[:160])
+        else:
+            prov = LOCAL if name == "local" else CLOUD
+            if name == "deepseek" and not prov["api_key"]:
+                res = {"ok": False, "reason": "нет ключа модели"}
+                continue
+            res = GATEWAY.call(dict(prov, outside=name != "local", task=task), system, user, want_json, max_tokens,
+                               lambda s, u, j, m, prov=prov, name=name: _ask_openai(prov, name == "local", s, u, j, m))
+        res["task"] = task
+        if res.get("ok") or res.get("gateway") == "blocked":
+            break
+    return res
 
 
-def _ask_openai(system: str, user: str, want_json: bool, max_tokens: int) -> dict:
+def _ask_openai(prov: dict, local: bool, system: str, user: str, want_json: bool, max_tokens: int) -> dict:
     """Локальная модель и DeepSeek: общий формат chat/completions."""
-    mode = STATE["mode"]
-    prov = LOCAL if mode == "local" else CLOUD
     body = {
         "model": prov["model"],
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -258,7 +334,7 @@ def _ask_openai(system: str, user: str, want_json: bool, max_tokens: int) -> dic
         body["response_format"] = {"type": "json_object"}
     if "deepseek.com" in prov["base_url"]:
         body["thinking"] = {"type": "disabled"}
-    if mode == "local":
+    if local:
         # Локальная Qwen3: короткие ответы (чат, голос) — без «размышлений», чтобы не было задержки;
         # большие разборы (протокол встречи, max_tokens от 1500) — с размышлениями: маленькой модели без них не хватает точности.
         think = max_tokens >= 1500 and os.environ.get("LOCAL_LLM_THINK", "1") != "0"
@@ -272,7 +348,7 @@ def _ask_openai(system: str, user: str, want_json: bool, max_tokens: int) -> dic
                                  data=json.dumps(body).encode(), headers=headers, method="POST")
     t0 = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=240 if mode == "local" else 45) as r:
+        with urllib.request.urlopen(req, timeout=240 if local else 45) as r:
             data = json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="ignore")[:200]
@@ -283,17 +359,19 @@ def _ask_openai(system: str, user: str, want_json: bool, max_tokens: int) -> dic
             req = urllib.request.Request(prov["base_url"] + "/chat/completions",
                                          data=json.dumps(body).encode(), headers=headers, method="POST")
             try:
-                with urllib.request.urlopen(req, timeout=240 if mode == "local" else 45) as r:
+                with urllib.request.urlopen(req, timeout=240 if local else 45) as r:
                     data = json.loads(r.read().decode())
             except Exception as e2:  # noqa: BLE001
                 return {"ok": False, "reason": "{}: {}".format(prov["name"], e2)}
         else:
             return {"ok": False, "reason": "{} ответил {}: {}".format(prov["name"], e.code, detail)}
     except Exception as e:  # noqa: BLE001 — сеть, таймаут, нет локальной модели
+        if local:
+            _local_probe.update(ts=time.time(), ok=False)
         return {"ok": False, "reason": "{} недоступна: {}".format(prov["name"], e)}
     text = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
     out = {"ok": bool(text), "text": text, "provider": prov["name"], "model": prov["model"],
-           "ms": int((time.time() - t0) * 1000), "outside": mode == "cloud"}
+           "ms": int((time.time() - t0) * 1000), "outside": not local}
     if want_json and text:
         try:
             out["json"] = json.loads(re.sub(r"^```(?:json)?|```$", "", text.strip()).strip())
@@ -355,10 +433,25 @@ def qr_svg(text: str):
 def ai_state() -> dict:
     """Что сейчас отвечает на запросы: для панели «ИИ-шлюз» и /api/health."""
     mode = STATE["mode"]
-    prov = None if mode == "off" else LOCAL if mode == "local" else CLAUDE if STATE["cloud"] == "claude" else CLOUD
-    return {"mode": mode, "cloud": STATE["cloud"], "provider": prov["name"] if prov else "встроенная логика",
-            "model": prov["model"] if prov else None, "outside": mode == "cloud",
-            "available": {"claude": llm_gateway.claude_ready(CLAUDE)[0], "claude_note": llm_gateway.claude_ready(CLAUDE)[1],
+    names = {"local": LOCAL, "claude": CLAUDE, "deepseek": CLOUD}
+    ready, note = llm_gateway.claude_ready(CLAUDE)
+    if ready and time.time() < _claude_down["until"]:
+        note = "сейчас недоступен: " + _claude_down["why"]
+    routes = []
+    if mode == "auto":
+        for task, title in TASKS.items():
+            chain = route(task)
+            routes.append({"task": task, "title": title, "provider": names[chain[0]]["name"] if chain else "встроенная логика",
+                           "model": names[chain[0]]["model"] if chain else None, "outside": bool(chain) and chain[0] != "local",
+                           "reserve": names[chain[1]]["name"] if len(chain) > 1 else None,
+                           "note": "в облако не уходит никогда" + ("" if chain else "; локальная модель сейчас не подключена") if task == "finance" else ""})
+    prov = None if mode in ("off", "auto") else LOCAL if mode == "local" else CLAUDE if STATE["cloud"] == "claude" else CLOUD
+    return {"mode": mode, "cloud": STATE["cloud"],
+            "provider": "по задаче" if mode == "auto" else prov["name"] if prov else "встроенная логика",
+            "model": prov["model"] if prov else None,
+            "outside": mode == "cloud" or (mode == "auto" and any(r["outside"] for r in routes)),
+            "routes": routes, "local_alive": local_alive() if mode in ("auto", "local") else None,
+            "available": {"claude": ready and time.time() >= _claude_down["until"], "claude_note": note,
                           "deepseek": bool(CLOUD["api_key"]), "local": LOCAL["model"]}}
 
 
@@ -369,6 +462,7 @@ def ai_state() -> dict:
 # handler._json(obj, code) — ответ; handler._body() — JSON из тела; handler.rfile — сырые данные (файлы).
 CORE = types.SimpleNamespace(ask_model=ask_model, mask=mask, unmask=unmask, audit=audit, load=_load, save=_save,
                              lock=LOCK, now=_now, user=current_user, can_see=can_see, collections=COLLECTIONS,
+                             task_for=task_for,
                              mode=lambda: STATE["mode"],
                              root=ROOT, data=DATA)
 MODULES = []
@@ -380,6 +474,8 @@ for _prefix, _name in (("/api/assistant/", "assistant_api"), ("/api/app/", "app_
 
 # ---------- HTTP ----------
 
+STATIC_TOP = {"index.html", "connect.html", "t1", "t2", "t3", "shared", "get", "helper", "favicon.ico"}
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(ROOT), **kw)
@@ -389,8 +485,28 @@ class Handler(SimpleHTTPRequestHandler):
             sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store")
+        # ответы API не кэшируются; файлы экранов браузер хранит, но каждый раз сверяет свежесть (ответ 304 — мгновенный)
+        self.send_header("Cache-Control", "no-store" if self.path.startswith("/api/") else "no-cache")
         super().end_headers()
+
+    def _static_ok(self, path: str) -> bool:
+        """Наружу отдаются только экраны системы. Код сервера, ключи, документы и рабочие данные — нет."""
+        parts = [x for x in path.split("/") if x]
+        if not parts:
+            return True
+        if parts[0] not in STATIC_TOP or any(x.startswith(".") for x in parts):
+            return False
+        return not path.lower().endswith((".py", ".md", ".env", ".key", ".sh", ".bat", ".ps1", ".command"))
+
+    def _local(self) -> bool:
+        """Запрос с этого же компьютера. За обратным прокси все запросы приходят с 127.0.0.1 — там по адресу не доверяем."""
+        return (not PUBLIC and not self.headers.get("X-Forwarded-For")
+                and self.client_address[0] in ("127.0.0.1", "::1"))
+
+    def do_HEAD(self):
+        if not self._static_ok(self.path.split("?")[0]):
+            return self._json({"error": "нет доступа"}, 403)
+        return super().do_HEAD()
 
     def _json(self, obj, code=200):
         raw = json.dumps(obj, ensure_ascii=False).encode()
@@ -420,7 +536,7 @@ class Handler(SimpleHTTPRequestHandler):
     def _trusted(self) -> bool:
         """Служебные адреса (хранилище, модель, сброс, Telegram) открыты только с этого компьютера.
         С других устройств — после входа сотрудником: иначе в общей сети ими мог бы пользоваться кто угодно."""
-        if self.client_address[0] in ("127.0.0.1", "::1"):
+        if self._local():
             return True
         user = current_user(self)
         if user and user.get("role") != "customer":
@@ -432,7 +548,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
-        if path.startswith("/data/") or path.endswith(".py"):
+        if not path.startswith("/api/") and path != "/ca.crt" and not self._static_ok(path):
             return self._json({"error": "нет доступа"}, 403)
         if self._module("GET", path):
             return
@@ -465,6 +581,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(user) if user else self._json({"error": "нужно войти"}, 401)
         if path == "/api/health":
             cloud = CLAUDE if STATE["cloud"] == "claude" else CLOUD
+            if STATE["mode"] == "auto" and not cloud["api_key"]:
+                cloud = CLOUD if CLOUD["api_key"] else CLAUDE
             return self._json({"ok": True, "mode": STATE["mode"], "cloud": STATE["cloud"], "cloud_key": bool(cloud["api_key"]),
                                "cloud_model": cloud["model"], "local_model": LOCAL["model"],
                                "telegram": bool(os.environ.get("TG_BOT_TOKEN") and os.environ.get("TG_CHAT_ID"))})
@@ -505,6 +623,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
         if path == "/api/reset":
+            who = current_user(self)
+            if not self._local() and (not who or who.get("role") not in ("director", "analyst")):
+                return self._json({"error": "Вернуть демо-данные может директор или аналитик"}, 403)
             with LOCK:
                 for c in COLLECTIONS:
                     p = _path(c)
@@ -514,8 +635,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         if path == "/api/ai/mode":
             mode, cloud = body.get("mode") or STATE["mode"], body.get("cloud") or STATE["cloud"]
-            if mode not in ("cloud", "local", "off") or cloud not in ("claude", "deepseek"):
-                return self._json({"error": "mode: cloud | local | off; cloud: claude | deepseek"}, 400)
+            if mode not in ("auto", "cloud", "local", "off") or cloud not in ("claude", "deepseek"):
+                return self._json({"error": "mode: auto | cloud | local | off; cloud: claude | deepseek"}, 400)
             if mode == "cloud" and cloud == "claude" and not llm_gateway.claude_ready(CLAUDE)[0]:
                 return self._json({"error": "Claude не подключён: " + llm_gateway.claude_ready(CLAUDE)[1]}, 400)
             user = current_user(self)
@@ -533,7 +654,8 @@ class Handler(SimpleHTTPRequestHandler):
             mapping = {}
             if body.get("mask"):
                 system, user = mask(system, mapping), mask(user, mapping)
-            res = ask_model(system, user, bool(body.get("json")), int(body.get("max_tokens") or 900))
+            res = ask_model(system, user, bool(body.get("json")), int(body.get("max_tokens") or 900),
+                            str(body.get("task") or task_for(user)))
             if mapping and res.get("ok"):
                 res["text"] = unmask(res["text"], mapping)
                 if res.get("json") is not None:
@@ -605,8 +727,8 @@ def main():
         tls.socket = ctx.wrap_socket(tls.socket, server_side=True)
         threading.Thread(target=tls.serve_forever, daemon=True).start()
         NET["https"] = True
-    print("Space Hackathon: http://127.0.0.1:{}/  (ИИ: {}, модель {})".format(
-        port, STATE["mode"], CLOUD["model"] if STATE["mode"] == "cloud" else LOCAL["model"]))
+    print("Space Hackathon: http://127.0.0.1:{}/  (ИИ: {}, {})".format(
+        port, STATE["mode"], "; ".join("{} → {}".format(r["title"], r["provider"]) for r in ai_state()["routes"]) or ai_state()["provider"]))
     if lan:
         import socket
         try:
