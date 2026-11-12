@@ -247,3 +247,34 @@ html.wdragging, html.wdragging * { cursor: grabbing !important; user-select: non
 @media (prefers-reduced-motion: reduce) {
   .orb-core, .orb-core i, .orb-ring { animation: none !important; }
 }
+
+/* голос: режим «Встреча» — помощник слушает весь разговор */
+.v-kind { margin-bottom: 2px; }
+.v-kind button { min-height: 36px; padding: 0 16px; font-size: 14px; }
+.v-meet { width: min(62ch, 100%); display: none; flex-direction: column; align-items: center; gap: 10px; }
+.st-voice[data-vkind="meet"] .v-meet { display: flex; }
+.st-voice[data-vkind="meet"] .v-you, .st-voice[data-vkind="meet"] .v-answer { display: none; }
+.st-voice[data-vkind="meet"] .orb-xl { --s: min(30vw, 16vh, 140px); }
+.st-voice[data-vkind="meet"] { gap: 10px; }
+.st-voice[data-vkind="meet"] .orb-btn { padding: 10px; }
+.v-feed { width: 100%; min-height: 84px; max-height: 22vh; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; text-align: left;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 38%); mask-image: linear-gradient(to bottom, transparent, #000 38%); }
+.v-feed li { display: flex; gap: 10px; font-size: 15.5px; line-height: 1.4; color: var(--ink2); }
+.v-feed time, .meetcard time { flex: none; font-family: var(--mono); font-size: 11.5px; color: var(--ink4); padding-top: 3px; }
+.v-feed li.interim { color: var(--ink4); }
+.v-count { font-size: 13.5px; color: var(--ink3); }
+.v-note { font-size: 12.5px; line-height: 1.4; color: var(--ink4); max-width: 48ch; text-wrap: pretty; }
+.meetcard { gap: 14px; }
+.meet-sec { display: flex; flex-direction: column; gap: 8px; }
+.meet-sec h3 { font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink4); font-weight: 500; }
+.meet-list { display: flex; flex-direction: column; gap: 8px; font-size: 14.5px; }
+.meet-list li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.meet-list li > span:last-child { flex: 1; min-width: 60%; }
+.meet-list .chip { flex: none; }
+.meet-task b { font-weight: 500; }
+.meet-task small { width: 100%; color: var(--ink3); font-size: 13px; }
+.meetcard time { padding: 0; margin-left: 4px; }
+.meet-tr summary { cursor: pointer; font-size: 13.5px; color: var(--ink3); }
+.meet-tr ol { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; color: var(--ink2); max-height: 280px; overflow-y: auto; }
+.meet-tr li { display: flex; gap: 10px; }
+.meet-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

@@ -77,7 +77,7 @@ fi
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/data"
-cp server.py llm_gateway.py assistant_api.py assistant_voice.py pult_api.py pult_ai.py pult_contours.py app_api.py index.html "$STAGE/"
+cp server.py llm_gateway.py assistant_api.py assistant_voice.py assistant_live.py pult_api.py pult_ai.py pult_contours.py app_api.py index.html "$STAGE/"
 cp -R t1 t2 t3 shared get helper "$STAGE/"
 cp -R data/seed "$STAGE/data/seed"
 [ -d data/eval ] && cp -R data/eval "$STAGE/data/eval"

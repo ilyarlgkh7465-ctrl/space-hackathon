@@ -807,6 +807,10 @@ def handle(handler, method, path, core):
         import assistant_voice
         return assistant_voice.handle(handler, method, sub, core, user)
 
+    if sub.startswith("live/"):           # режим «Встреча» в голосе: отчёт по живой записи разговора
+        import assistant_live
+        return assistant_live.handle(handler, method, sub, core, user)
+
     if method == "GET" and sub == "people":
         handler._json({"people": staff(core), "me": user, "depts": DEPT_NAMES})
         return True

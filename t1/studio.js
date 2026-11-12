@@ -187,7 +187,7 @@
   const orbHtml = (size, id = '') => `<span class="orb orb-${size}"${id ? ` id="${id}"` : ''} data-state="idle" aria-hidden="true"><i class="orb-ring"></i><i class="orb-ring r2"></i><span class="orb-core"><i></i><i></i><i></i></span></span>`;
   const EXAMPLES = ['Что сейчас требует решения?', 'Покажи оборот по продуктам', 'Почему упали заказы в срок?', 'Кратко: регламент отгрузки и доставки'];
   const V_LABEL = { idle: 'Нажмите на шар и говорите', listening: 'Слушаю', hearing: 'Распознаю', thinking: 'Думаю', speaking: 'Отвечаю', muted: 'Микрофон выключен' };
-  const Vc = { on: false, state: 'idle', status: null, engine: '', muted: false, run: 0, t0: 0, timer: 0, raf: 0, lvl: 0, stream: null, ac: null, an: null, rec: null, sr: null, src: null };
+  const Vc = { on: false, kind: 'talk', meet: null, state: 'idle', status: null, engine: '', muted: false, run: 0, t0: 0, timer: 0, raf: 0, lvl: 0, stream: null, ac: null, an: null, rec: null, sr: null, src: null };
 
   function open(q, opts = {}) {
     let el = $('#studio');
@@ -207,6 +207,7 @@
   }
   function close() {
     const el = $('#studio'); if (!el) return;
+    if (meetLive() && Vc.meet.lines.length) return meetFinish();        // идёт встреча — сначала отчёт, окно остаётся
     voiceStop(true);
     el.classList.add('closing');
     setTimeout(() => { el.remove(); document.documentElement.classList.remove('studio-on'); const fab = $('#fab'); if (fab) { fab.classList.remove('hidden'); fab.focus(); } }, 180);
@@ -241,16 +242,22 @@
           </form>
         </div>
       </main>
-      <main class="st-voice" aria-live="polite">
+      <main class="st-voice" aria-live="polite" data-vkind="talk">
+        <div class="seg v-kind" role="group" aria-label="Что делает помощник"><button data-sa="vkind" data-k="talk" aria-pressed="true">Вопрос — ответ</button><button data-sa="vkind" data-k="meet" aria-pressed="false">Встреча</button></div>
         <p class="call-top"><span id="vTimer" class="num">0:00</span><span id="vEngine"></span></p>
         <button class="orb-btn" data-sa="vorb" aria-label="Говорить или прервать ответ">${orbHtml('xl', 'vOrb')}</button>
         <p class="v-state" id="vState">${V_LABEL.idle}</p>
         <p class="v-you" id="vYou"></p>
         <div class="v-answer" id="vAnswer"></div>
+        <div class="v-meet">
+          <ol class="v-feed" id="vFeed" aria-label="Расшифровка разговора"></ol>
+          <p class="v-count" id="vCount"></p>
+          <p class="v-note">По завершении соберу отчёт: решения, поручения, открытые вопросы. Предупредите участников — разговор расшифровывается. Звук не сохраняется.</p>
+        </div>
         <div class="call-bar">
           <button class="call-btn" data-sa="mode" data-m="chat" aria-label="Перейти в чат">${svg(IC.kb, 22)}<span>Чат</span></button>
           <button class="call-btn" data-sa="vmute" id="vMute" aria-pressed="false" aria-label="Выключить микрофон">${svg(IC.mic, 22)}<span>Микрофон</span></button>
-          <button class="call-btn call-end" data-sa="vend" aria-label="Завершить разговор">${svg(IC.close, 22)}<span>Завершить</span></button>
+          <button class="call-btn call-end" data-sa="vend" aria-label="Завершить разговор">${svg(IC.close, 22)}<span id="vEndLbl">Завершить</span></button>
         </div>
       </main>`;
     const inp = $('#stIn', el);
@@ -282,9 +289,10 @@
     return out;
   }
   function aiMsg(m, i) {
-    if (m.wait) return `<div class="smsg ai wait">${orbHtml('xs').replace('data-state="idle"', 'data-state="thinking"')}<span>Смотрю данные…</span></div>`;
+    if (m.wait) return `<div class="smsg ai wait">${orbHtml('xs').replace('data-state="idle"', 'data-state="thinking"')}<span>${esc(m.waitText || 'Смотрю данные…')}</span></div>`;
     const r = m.res;
-    if (r.error) return `<div class="smsg ai"><div class="stext st-bad">${esc(r.error)}</div></div>`;
+    if (r.error) return `<div class="smsg ai"><div class="stext st-bad">${esc(r.error)}</div>${r.retry ? `<button class="btn btn-sm" data-sa="mretry" data-i="${i}">Собрать отчёт ещё раз</button>` : ''}</div>`;
+    if (r.meeting) return meetCard(r, i);
     const who = (r.route || []).filter((x) => x !== 'supervisor').map((x) => AG[x] || x)[0];
     const s = r.summary;
     const sum = s ? `<div class="sumcard glass-flat"><header><span class="dicon">${svg(IC.doc, 18)}</span><div><b>${esc(s.title)}</b><small>${esc([s.code, s.kind, s.date].filter(Boolean).join(' · '))} · ${plural(s.n_items, 'пункт', 'пункта', 'пунктов')}</small></div></header>
@@ -380,7 +388,8 @@
   async function voiceStart() {
     const el = $('#studio'); if (!el) return;
     toggleDocs(false); setMode('voice');
-    Vc.on = true; Vc.muted = false; Vc.run++; Vc.t0 = Date.now();
+    Vc.on = true; Vc.muted = false; Vc.run++; Vc.t0 = Date.now(); Vc.kind = 'talk'; Vc.meet = null;
+    $('.st-voice').dataset.vkind = 'talk'; $$('.v-kind button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === 'talk'))); $('#vEndLbl').textContent = 'Завершить';
     $('#vMute').setAttribute('aria-pressed', 'false');
     $('#vYou').textContent = ''; $('#vAnswer').innerHTML = '';
     clearInterval(Vc.timer);
@@ -397,11 +406,168 @@
     if (!Vc.engine) { vSet('idle', 'Микрофон в этом браузере недоступен — перейдите в чат и напишите вопрос'); return; }
     listen();
   }
+
+  /* ---------- встреча: помощник слушает весь разговор, а по завершении отдаёт отчёт ----------
+     Текст расшифровки копится в браузере и уходит на сервер один раз — когда встречу завершили. Звук не сохраняется. */
+  const stamp = () => { const s = Math.max(0, Math.floor((Date.now() - Vc.meet.t0) / 1000)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+  const meetWords = () => (Vc.meet ? Vc.meet.lines.reduce((n, l) => n + l.text.split(/\s+/).length, 0) : 0);
+  const meetLive = () => !!(Vc.on && Vc.kind === 'meet' && Vc.meet && !Vc.meet.done);
+  function meetAdd(text, at) {
+    text = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!text || !Vc.meet) return;
+    Vc.meet.lines.push({ t: at || stamp(), text: text[0].toUpperCase() + text.slice(1) });
+    meetDraw();
+  }
+  function meetDraw(interim) {
+    const ul = $('#vFeed'); if (!ul || !Vc.meet) return;
+    if (interim !== undefined) Vc.meet.interim = interim;
+    const last = Vc.meet.lines.slice(-4);
+    ul.innerHTML = last.map((l) => `<li><time>${esc(l.t)}</time><span>${esc(l.text)}</span></li>`).join('') + (Vc.meet.interim ? `<li class="interim"><time>${stamp()}</time><span>${esc(Vc.meet.interim)}</span></li>` : '');
+    const n = Vc.meet.lines.length;
+    $('#vCount').textContent = n ? 'Записано: ' + plural(n, 'реплика', 'реплики', 'реплик') : 'Говорите — текст разговора появится здесь';
+    const lbl = $('#vEndLbl'); if (lbl) lbl.textContent = n ? 'Отчёт' : 'Завершить';
+  }
+  function setKind(k) {
+    const box = $('.st-voice'); if (!box || !Vc.on) return;
+    if (k === Vc.kind) return;
+    if (meetLive() && Vc.meet.lines.length && k !== 'meet') return meetFinish();     // из встречи выходим только через отчёт
+    Vc.run++; stopSpeaking(); stopListening();
+    Vc.kind = k; Vc.muted = false; $('#vMute').setAttribute('aria-pressed', 'false');
+    box.dataset.vkind = k;
+    $$('.v-kind button', box).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === k)));
+    $('#vYou').textContent = ''; $('#vAnswer').innerHTML = '';
+    if (k !== 'meet') { Vc.meet = null; $('#vEndLbl').textContent = 'Завершить'; vEngine(); return listen(); }
+    Vc.t0 = Date.now();
+    Vc.meet = { lines: [], interim: '', t0: Date.now(), started: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 19), queue: Promise.resolve(), done: false, wake: null };
+    if (navigator.wakeLock) navigator.wakeLock.request('screen').then((w) => { if (Vc.meet) Vc.meet.wake = w; }).catch(() => { });   // экран телефона не гаснет, пока идёт встреча
+    vEngine(); meetDraw();
+    listen();
+  }
+  async function meetListen() {
+    if (!meetLive() || Vc.muted) return;
+    const run = Vc.run, M = Vc.meet;
+    try { if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await micStream(); }
+    catch (e) { if (Vc.engine === 'server') { vSet('idle', 'Нет доступа к микрофону. Разрешите его в настройках'); return; } }
+    if (run !== Vc.run) return;
+    vSet('listening', 'Слушаю встречу');
+    if (Vc.engine === 'browser') {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const sr = Vc.sr = new SR(); sr.lang = 'ru-RU'; sr.interimResults = true;
+      sr.continuous = !/Android/.test(navigator.userAgent);            // на Android непрерывный режим повторяет фразы — там слушаем фразу за фразой
+      sr.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) { const r = e.results[i]; if (r.isFinal) meetAdd(r[0].transcript); else interim += r[0].transcript; }
+        meetDraw(interim);
+      };
+      sr.onerror = (e) => {
+        if (e.error !== 'not-allowed' && e.error !== 'service-not-allowed') return;
+        if (e.error === 'service-not-allowed' && Vc.canServer && run === Vc.run) { sr.onend = null; Vc.engine = 'server'; vEngine(); return meetListen(); }
+        Vc.muted = true; sr.onend = null; vSet('idle', 'Нет доступа к микрофону. Разрешите его в настройках');
+      };
+      sr.onend = () => { if (run !== Vc.run || !meetLive() || Vc.muted) return; if (M.interim) { meetAdd(M.interim); meetDraw(''); } setTimeout(() => { if (run === Vc.run) meetListen(); }, 120); };
+      try { sr.start(); } catch (e) { vSet('idle', 'Не получилось включить распознавание речи'); }
+      return;
+    }
+    // распознавание на сервере: запись режется на отрезки по 12 секунд, отрезки расшифровываются по очереди, тишина не отправляется
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].find((m) => MediaRecorder.isTypeSupported(m)) || '';
+    const seg = () => {
+      if (run !== Vc.run || !meetLive() || Vc.muted) return;
+      Vc.heard = 0;
+      const rec = Vc.rec = new MediaRecorder(Vc.stream, mime ? { mimeType: mime } : undefined), chunks = [], at = stamp();
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = () => {
+        const loud = (Vc.heard || 0) >= 0.08;
+        seg();
+        if (!loud) return;
+        const blob = new Blob(chunks, { type: rec.mimeType || mime });
+        M.queue = M.queue.then(async () => {
+          const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.readAsDataURL(blob); });
+          const r = await F().api('/api/assistant/voice/stt', { body: { audio: b64, mime: blob.type } });
+          if (r.text && Vc.meet === M) meetAdd(r.text, at);
+        }).catch(() => { });
+      };
+      rec.start();
+      setTimeout(() => { if (rec.state === 'recording') rec.stop(); }, 12000);
+    };
+    seg();
+  }
+  /* остановить запись так, чтобы последняя фраза не пропала */
+  async function meetHalt() {
+    const M = Vc.meet; if (!M) return;
+    Vc.run++;
+    if (M.interim) { meetAdd(M.interim); M.interim = ''; }
+    if (Vc.rec && Vc.rec.state === 'recording') {
+      const rec = Vc.rec;
+      await new Promise((res) => { const on = rec.onstop; rec.onstop = () => { if (on) on(); res(); }; rec.stop(); });
+    }
+    Vc.rec = null;
+    stopListening();
+    await M.queue;
+    meetDraw('');
+  }
+  async function meetFinish() {
+    const M = Vc.meet; if (!M || M.done) return;
+    M.done = true;
+    vSet('thinking', 'Заканчиваю запись…');
+    await meetHalt();
+    if (M.wake) { try { M.wake.release(); } catch (e) { /* уже отпущен */ } }
+    const lines = M.lines.slice(), minutes = Math.max(1, Math.round((Date.now() - M.t0) / 60000));
+    Vc.meet = null; Vc.kind = 'talk';
+    voiceStop(true); setMode('chat');
+    if (lines.reduce((n, l) => n + l.text.split(/\s+/).length, 0) < 12) { F().toast('Разговор слишком короткий — отчёт не из чего собрать'); return; }
+    St.busy = true;
+    St.msgs.push({ me: true, text: `Встреча · ${plural(minutes, 'минута', 'минуты', 'минут')} · ${plural(lines.length, 'реплика', 'реплики', 'реплик')}` });
+    const m = { wait: true, waitText: 'Готовлю отчёт по встрече…' }; St.msgs.push(m); draw();
+    try { m.res = { meeting: await F().api('/api/assistant/live/report', { body: { lines, started: M.started, minutes } }), lines }; }
+    catch (e) { m.res = { error: 'Отчёт не собрался: ' + e.message + '. Расшифровка сохранена в этом окне — повторите попытку.', retry: { lines, started: M.started, minutes } }; }
+    m.wait = false; St.busy = false; draw();
+    return m.res;
+  }
+  const MEET_ST = { 'решено': 'chip-ok', 'требует уточнения': 'chip-warn' };
+  const dmy = (iso) => (iso ? iso.slice(8, 10) + '.' + iso.slice(5, 7) : '');
+  function meetCard(r, i) {
+    const p = r.meeting, canSave = ['director', 'head'].includes(F().S.user.role);
+    const sec = (title, items, row) => (items && items.length ? `<section class="meet-sec"><h3>${title}</h3><ul class="meet-list">${items.map(row).join('')}</ul></section>` : '');
+    const at = (x) => (x.t ? ` <time>${esc(x.t)}</time>` : '');
+    const tasks = sec('Поручения', p.tasks, (t) => `<li class="meet-task"><b>${esc(t.title)}</b>${at(t)}
+      <small>${t.owner_name ? esc(t.owner_name) : 'ответственный не назван' + (t.suggested_owner_name ? ' — предлагаю: ' + esc(t.suggested_owner_name) : '')} · ${t.due ? 'срок ' + dmy(t.due) : 'срок не назван' + (t.suggested_due ? ' — предлагаю: ' + dmy(t.suggested_due) : '')}</small></li>`);
+    const saved = r.saved ? `<span class="chip chip-ok"><i></i>Сохранено: ${plural(r.saved.tasks, 'задача', 'задачи', 'задач')} в реестре</span>` : '';
+    return `<div class="smsg ai"><div class="sumcard meetcard glass-flat">
+      <header><span class="dicon">${svg(IC.mic, 18)}</span><div><b>${esc(p.title)}</b><small>${plural(p.minutes, 'минута', 'минуты', 'минут')} · ${plural(p.lines, 'реплика', 'реплики', 'реплик')} · ${esc(p.provider || '')}${p.outside ? ' · имена и суммы скрыты' : ''}</small></div></header>
+      <p class="sum-about">${esc(p.summary)}</p>
+      ${sec('Решения и темы', p.points, (x) => `<li><span class="chip ${MEET_ST[x.status] || 'chip-none'}"><i></i>${esc(x.status)}</span><span>${esc(x.text)}${at(x)}</span></li>`)}
+      ${tasks}
+      ${sec('Открытые вопросы', p.questions, (x) => `<li><span>${esc(x.text)}${at(x)}</span></li>`)}
+      ${sec('Риски', p.risks, (x) => `<li><span>${esc(x.text)}${at(x)}</span></li>`)}
+      ${sec('Цифры и сроки', p.numbers, (x) => `<li><span>${esc(x.text)}${at(x)}</span></li>`)}
+      <details class="meet-tr"><summary>Расшифровка разговора</summary><ol>${r.lines.map((l) => `<li><time>${esc(l.t)}</time><span>${esc(l.text)}</span></li>`).join('')}</ol></details>
+      <footer class="meet-foot">${saved || (canSave ? `<button class="btn btn-primary btn-sm" data-sa="msave" data-i="${i}">Сохранить протокол и задачи</button>` : '')}
+        <button class="btn btn-sm" data-sa="mcopy" data-i="${i}">Скопировать отчёт</button></footer>
+      <p class="smeta">Отчёт — черновик: задачи попадут в реестр только после сохранения. Звук не сохраняется.</p></div></div>`;
+  }
+  function meetText(r) {
+    const p = r.meeting, out = [p.title, '', p.summary];
+    const add = (title, items, f) => { if (items && items.length) { out.push('', title + ':'); items.forEach((x) => out.push('— ' + f(x))); } };
+    add('Решения и темы', p.points, (x) => `${x.text} (${x.status})`);
+    add('Поручения', p.tasks, (t) => `${t.title} — ${t.owner_name || 'ответственный не назван'}, ${t.due ? 'срок ' + dmy(t.due) : 'срок не назван'}`);
+    add('Открытые вопросы', p.questions, (x) => x.text); add('Риски', p.risks, (x) => x.text); add('Цифры и сроки', p.numbers, (x) => x.text);
+    return out.join('\n');
+  }
+  async function meetSave(i, b) {
+    const r = St.msgs[i].res, p = r.meeting;
+    b.disabled = true;
+    try {
+      const d = await F().api('/api/assistant/live/save', { body: { key: p.key, title: p.title, started: p.started, minutes: p.minutes, lines: r.lines, summary: p.summary, points: p.points, tasks: p.tasks, risks: p.risks, provider: p.provider } });
+      r.saved = { tasks: (d.tasks || []).length }; draw();
+      F().toast('Протокол сохранён, задачи — в реестре помощника');
+    } catch (e) { b.disabled = false; F().toast(e.message); }
+  }
   function vEngine(extra) {
     const el = $('#vEngine'); if (!el) return;
     el.textContent = (Vc.engine === 'server' ? 'речь распознаётся на сервере компании' : Vc.engine === 'browser' ? 'речь распознаёт устройство' : 'микрофон недоступен') + (extra ? ' · ' + extra : '');
   }
   function voiceStop(silent) {
+    if (meetLive() && Vc.meet.lines.length) return meetFinish();        // встречу с записью нельзя закрыть без отчёта
     Vc.on = false; Vc.run++;
     clearInterval(Vc.timer); cancelAnimationFrame(Vc.raf);
     stopListening(); stopSpeaking();
@@ -425,6 +591,7 @@
     return Vc.stream;
   }
   async function listen() {
+    if (Vc.kind === 'meet') return meetListen();
     if (!Vc.on || Vc.muted) return;
     const run = Vc.run;
     stopSpeaking(); stopListening();
@@ -538,13 +705,15 @@
   }
   function vOrbTap() {
     if (!Vc.on) return voiceStart();
+    if (Vc.kind === 'meet') return vMute();                              // во встрече касание шара — пауза
     if (Vc.state === 'speaking' || Vc.state === 'thinking') { Vc.run++; stopSpeaking(); Vc.muted = false; $('#vMute').setAttribute('aria-pressed', 'false'); return listen(); }
     if (Vc.state === 'listening' && Vc.rec && Vc.rec.state === 'recording') { Vc.heard = Math.max(Vc.heard || 0, 0.2); return Vc.rec.stop(); }
     if (Vc.state === 'idle' || Vc.state === 'muted') { Vc.muted = false; $('#vMute').setAttribute('aria-pressed', 'false'); Vc.run++; return listen(); }
   }
-  function vMute() {
+  async function vMute() {
     Vc.muted = !Vc.muted;
     $('#vMute').setAttribute('aria-pressed', String(Vc.muted));
+    if (Vc.kind === 'meet') { if (Vc.muted) { await meetHalt(); vSet('muted', 'Пауза — помощник не слушает'); } else { Vc.run++; meetListen(); } return; }
     if (Vc.muted) { if (Vc.state === 'listening') { Vc.run++; stopListening(); vSet('muted'); } }
     else if (Vc.state === 'muted' || Vc.state === 'idle') { Vc.run++; listen(); }
   }
@@ -664,13 +833,19 @@
     const b = e.target.closest('[data-sa]');
     if (!b) { const p = $('#stDocsPanel'); if (p && !p.hidden && !e.target.closest('#stDocsPanel')) toggleDocs(false); return; }
     const a = b.dataset.sa, key = b.dataset.k;
-    if (a === 'close') return close();
+    if (a === 'close') { if (meetLive() && Vc.meet.lines.length) return meetFinish(); return close(); }
+    if (a === 'vkind') return setKind(b.dataset.k);
+    if (a === 'msave') return meetSave(+b.dataset.i, b);
+    if (a === 'mcopy') { try { await navigator.clipboard.writeText(meetText(St.msgs[+b.dataset.i].res)); F().toast('Отчёт скопирован'); } catch (err) { F().toast('Не получилось скопировать'); } return; }
+    if (a === 'mretry') { const m = St.msgs[+b.dataset.i], q = m.res.retry; m.wait = true; m.waitText = 'Готовлю отчёт по встрече…'; draw();
+      try { m.res = { meeting: await F().api('/api/assistant/live/report', { body: q }), lines: q.lines }; } catch (err) { m.res = { error: 'Отчёт не собрался: ' + err.message, retry: q }; }
+      m.wait = false; draw(); return; }
     if (a === 'mode') { if (b.dataset.m === 'voice') return voiceStart(); voiceStop(true); return setMode('chat'); }
     if (a === 'docs') return toggleDocs();
     if (a === 'vorb') return vOrbTap();
     if (a === 'vmute') return vMute();
     if (a === 'vend') return voiceStop();
-    if (a === 'new') { St.msgs = []; if (Vc.on) voiceStop(true); setMode('chat'); return; }
+    if (a === 'new') { if (meetLive() && Vc.meet.lines.length) return meetFinish(); St.msgs = []; if (Vc.on) voiceStop(true); setMode('chat'); return; }
     if (a === 'example') { toggleDocs(false); if (!St.busy) ask(b.dataset.q); return; }
     if (a === 'ask') return open();
     if (a === 'builder') return builder();
@@ -753,5 +928,5 @@
     wcall('/' + key, { move }).then(() => { const n = $(`.wgrip[data-grip="${key}"]`); if (n) n.focus(); });
   });
 
-  window.Studio = { reset: () => { St.msgs = []; St.docs = null; St.dash = null; Vc.status = null; }, open, close, dashboard, builder, goResult, orbHtml, voiceAsk: (t) => heard(t), isOpen: () => !!$('#studio') };
+  window.Studio = { reset: () => { St.msgs = []; St.docs = null; St.dash = null; Vc.status = null; }, open, close, dashboard, builder, goResult, orbHtml, voiceAsk: (t) => heard(t), meetTest: async (texts) => { if (!Vc.on) await voiceStart(); setKind('meet'); await meetHalt(); Vc.muted = true; texts.forEach((t) => meetAdd(t)); return meetFinish(); }, meetFeed: (texts) => texts.forEach((t) => meetAdd(t)), meetState: () => (Vc.meet ? { lines: Vc.meet.lines.length, kind: Vc.kind } : null), isOpen: () => !!$('#studio') };
 })();
