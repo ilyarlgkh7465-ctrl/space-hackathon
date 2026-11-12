@@ -20,6 +20,13 @@
                            и возвращаются обратно в ответе; в журнал audit пишется, что ушло наружу
   GET/POST /api/ai/mode  — cloud | local | off (переключатель «защищённого контура» для демо); cloud: claude | deepseek
   GET  /api/gateway      — ИИ-шлюз: правила, счётчики и последние обращения к моделям (директор и аналитик)
+  GET  /api/connect      — адреса сервера в сети и есть ли https (для страницы /connect.html)
+  GET  /api/qr?text=     — QR-код адреса (SVG), если установлена библиотека segno
+  GET  /ca.crt           — сертификат доверия для телефонов (открытая часть)
+
+Запуск для телефонов:  python3 server.py --lan  — http на 8800 и, если есть сертификат, https на 8443.
+Сертификат: tools/make_cert.sh → папка certs рядом с проектом (или путь в переменной FP_CERTS). Микрофон на телефоне
+браузеры дают только по https.
   POST /api/telegram     — отправить сообщение ответственному, если заданы TG_BOT_TOKEN и TG_CHAT_ID
 
 Ключ модели: переменная LLM_API_KEY, иначе берётся из ../flat-inventory/.env (только LLM_*).
@@ -297,6 +304,53 @@ def _ask_openai(system: str, user: str, want_json: bool, max_tokens: int) -> dic
 
 GATEWAY = llm_gateway.Gateway(DATA / "gateway.json", MASK_RULES, _now)
 
+# ---------- доступ с телефонов: https и адреса ----------
+CERTS = Path(os.environ.get("FP_CERTS") or (ROOT.parent / "certs"))
+HTTPS_PORT = int(os.environ.get("FP_HTTPS_PORT", "8443"))
+NET = {"lan": False, "https": False, "port": 8800}
+
+
+def lan_addresses() -> list:
+    """Адреса этого компьютера в локальных сетях (Wi-Fi площадки, своя точка доступа)."""
+    import socket
+    found = []
+    try:
+        found += socket.gethostbyname_ex(socket.gethostname())[2]
+    except OSError:
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("10.255.255.255", 1))
+        found.append(s.getsockname()[0])
+        s.close()
+    except OSError:
+        pass
+    out = []
+    for ip in found:
+        if ip not in out and not ip.startswith(("127.", "169.254.", "198.18.")):
+            out.append(ip)
+    out.sort(key=lambda ip: (not ip.startswith("192.168.137."), ip))      # точка доступа Windows — первой
+    return out
+
+
+def connect_info() -> dict:
+    scheme, port = ("https", HTTPS_PORT) if NET["https"] else ("http", NET["port"])
+    return {"lan": NET["lan"], "https": NET["https"], "ca": (CERTS / "ca.crt").exists(), "http_port": NET["port"],
+            "addresses": [{"ip": ip, "base": "%s://%s:%d" % (scheme, ip, port), "plain": "http://%s:%d" % (ip, NET["port"]),
+                           "hotspot": ip.startswith("192.168.137.")} for ip in lan_addresses()]}
+
+
+def qr_svg(text: str):
+    try:
+        import io
+        import segno
+    except ImportError:
+        return None
+    buf = io.BytesIO()
+    segno.make(text, error="m").save(buf, kind="svg", scale=8, border=2, xmldecl=False, svgns=True, nl=False,
+                                     dark="#263B39", light="#ffffff")
+    return buf.getvalue()
+
 
 def ai_state() -> dict:
     """Что сейчас отвечает на запросы: для панели «ИИ-шлюз» и /api/health."""
@@ -382,6 +436,30 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"error": "нет доступа"}, 403)
         if self._module("GET", path):
             return
+        if path == "/api/connect":
+            return self._json(connect_info())
+        if path == "/api/qr":
+            import urllib.parse
+            text = (urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("text") or [""])[0][:300]
+            svg = qr_svg(text) if re.match(r"^https?://[\w.\-:/?=&%#]+$", text) else None
+            if not svg:
+                return self._json({"error": "QR недоступен: нет библиотеки segno или адрес не подходит"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Content-Length", str(len(svg)))
+            self.end_headers()
+            return self.wfile.write(svg)
+        if path == "/ca.crt":
+            try:
+                raw = (CERTS / "ca.crt").read_bytes()
+            except OSError:
+                return self._json({"error": "сертификат не выпущен"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-x509-ca-cert")
+            self.send_header("Content-Disposition", 'attachment; filename="fotoprint-demo-ca.crt"')
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            return self.wfile.write(raw)
         if path == "/api/me":
             user = current_user(self)
             return self._json(user) if user else self._json({"error": "нужно войти"}, 401)
@@ -515,6 +593,18 @@ def main():
     host = "0.0.0.0" if lan else "127.0.0.1"
     DATA.mkdir(exist_ok=True)
     srv = ThreadingHTTPServer((host, port), Handler)
+    NET.update(lan=lan, port=port)
+    crt, key = CERTS / "server.crt", CERTS / "server.key"
+    if lan and crt.exists() and key.exists():
+        # второй вход — https: только по нему телефон разрешает микрофон и установку приложения на экран
+        import ssl
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(str(crt), str(key))
+        tls = ThreadingHTTPServer((host, HTTPS_PORT), Handler)
+        tls.socket = ctx.wrap_socket(tls.socket, server_side=True)
+        threading.Thread(target=tls.serve_forever, daemon=True).start()
+        NET["https"] = True
     print("Space Hackathon: http://127.0.0.1:{}/  (ИИ: {}, модель {})".format(
         port, STATE["mode"], CLOUD["model"] if STATE["mode"] == "cloud" else LOCAL["model"]))
     if lan:
@@ -526,6 +616,12 @@ def main():
             s.close()
         except OSError:
             pass
+        if NET["https"]:
+            for a in connect_info()["addresses"]:
+                print("По https (микрофон работает): {}/".format(a["base"]))
+        else:
+            print("https выключен: нет сертификата в {} — микрофон на телефонах работать не будет".format(CERTS))
+        print("Страница подключения телефонов: http://127.0.0.1:{}/connect.html".format(port))
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

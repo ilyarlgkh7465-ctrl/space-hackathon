@@ -84,7 +84,9 @@
       } catch (e) { /* без сети перенос не случится: черновик останется на телефоне и загрузится заново */ }
     }
     setSession(d, !!moved);
-    if (moved && (moved.orders || moved.projects)) toast('Перенесли в вашу учётную запись: заказов ' + moved.orders + ', черновиков ' + moved.projects, 4000);
+    const any = !!(moved && (moved.orders || moved.projects));
+    if (any) toast('Перенесли в вашу учётную запись: заказов ' + moved.orders + ', черновиков ' + moved.projects, 4500);
+    return any;
   }
   async function loginGuest() { setSession(await call('POST', '/guest', {})); }
   function setSession(d, keep) {
@@ -679,7 +681,7 @@
         const k = cropFor(p, v.ratio, d.fit); p.man = { x: k.x, y: k.y };
         fr.style.backgroundPosition = (k.w < 1 ? k.x / (1 - k.w) * 100 : 0) + '% ' + (k.h < 1 ? k.y / (1 - k.h) * 100 : 0) + '%';
       };
-      fr.onpointerup = fr.onpointercancel = () => { if (!st) return; st = null; const k = cropFor(p, v.ratio, d.fit); p.crop = { x: k.x, y: k.y, w: k.w, h: k.h }; c.x = k.x; c.y = k.y; saveDraft(); };
+      fr.onpointerup = fr.onpointercancel = () => { if (!st) return; st = null; const k = cropFor(p, v.ratio, d.fit); p.crop = { x: k.x, y: k.y, w: k.w, h: k.h }; c.x = k.x; c.y = k.y; saveDraft(); if (!el.querySelector('[data-a="auto"]')) renderSheet(); };
     }
     el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = done; });
     el.querySelectorAll('[data-a]').forEach((b) => {
@@ -1291,7 +1293,7 @@
         <button class="btn btn-ghost" id="out">Выйти</button>
         <p class="src" style="text-align:center">Тестовый стенд: данные выдуманные, деньги не списываются.</p>`,
       bind(scr) {
-        const lf = $('#lf'); if (lf) lf.onsubmit = async (e) => { e.preventDefault(); try { await loginAs($('#lg').value.trim(), $('#pw').value); S.err = ''; toast('Вы вошли'); syncSoon(); loadOrders(); rerender(); } catch (er) { S.err = er.message; rerender(); } };
+        const lf = $('#lf'); if (lf) lf.onsubmit = async (e) => { e.preventDefault(); try { const mv = await loginAs($('#lg').value.trim(), $('#pw').value); S.err = ''; if (!mv) toast('Вы вошли'); syncSoon(); loadOrders(); rerender(); } catch (er) { S.err = er.message; rerender(); } };
         // сотрудник переходит в пульт или на экран участка без повторного входа: та же сессия, права всё равно проверяет сервер
         scr.querySelectorAll('[data-go]').forEach((a) => { a.onclick = () => { try { sessionStorage.setItem(a.dataset.go, S.session.token); } catch (e) { /* войдёт там заново */ } }; });
         $('#pn').onclick = async () => { await toggleNotify(); rerender(); };

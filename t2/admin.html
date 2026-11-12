@@ -2,79 +2,135 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>picPac · экран производства</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FAF7F5">
+<title>Экран участка · Фотопринт</title>
+<link rel="icon" href="/t2/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/shared/fonts/fonts.css">
-<link rel="stylesheet" href="/shared/ui.css">
+<link rel="stylesheet" href="/shared/glass.css">
 <style>
-  body { background: var(--canvas); }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 60px; display: flex; flex-direction: column; gap: 14px; }
-  .wrap h1 { font-size: 24px; font-weight: 600; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .ord { display: flex; flex-direction: column; gap: 10px; }
-  .ord .top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
-  .ord b { font-size: 17px; }
-  .ord small { color: var(--ink2); display: block; font-size: 14px; }
-  .form { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
-  .btn { min-height: 48px; }
-  .err { color: var(--bad); font-size: 14px; }
+  /* Экран участка — в оформлении пульта (shared/glass.css). Кнопки крупные: с ним работают стоя, с телефона или планшета. */
+  .wrap { max-width: 860px; margin: 0 auto; padding: 16px 16px 72px; display: flex; flex-direction: column; gap: 16px; }
+  .logo { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: var(--grad); color: #fff; font-weight: 700; font-size: 20px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), 0 8px 18px rgba(221, 87, 87, .28); flex: none; }
+  .login { width: min(440px, 100%); margin: 8vh auto 0; padding: 30px 28px 26px; display: flex; flex-direction: column; gap: 16px; }
+  .login h1 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  .roles { display: flex; flex-wrap: wrap; gap: 8px; }
+  .topbar { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-radius: 22px; flex-wrap: wrap; position: sticky; top: 12px; z-index: 5; }
+  .topbar .logo { width: 36px; height: 36px; border-radius: 12px; font-size: 16px; }
+  .topbar b { font-size: 15px; font-weight: 600; } .topbar small { display: block; color: var(--ink3); font-size: 12.5px; }
+  .spacer { flex: 1; }
+  .head h1 { font-size: clamp(26px, 5vw, 34px); font-weight: 600; letter-spacing: -.025em; line-height: 1.1; }
+  .head p { color: var(--ink3); margin-top: 6px; }
+  .kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .kpi { padding: 14px 16px; } .kpi b { display: block; font: 600 28px/1.1 var(--mono); letter-spacing: -.03em; } .kpi small { color: var(--ink3); font-size: 13px; }
+  .seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--track); align-self: flex-start; }
+  .seg button { border: 0; background: transparent; min-height: 40px; padding: 0 16px; border-radius: 999px; font-size: 14.5px; color: var(--ink3); font-weight: 500; }
+  .seg button[aria-pressed="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(60, 45, 35, .12); }
+  .ord { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; border-left: 3px solid transparent; }
+  .ord.work { border-left-color: var(--accent); } .ord.bad { border-left-color: var(--bad); }
+  .ord .top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+  .ord .no { font: 600 20px var(--mono); letter-spacing: -.03em; }
+  .ord small { color: var(--ink3); display: block; font-size: 14px; line-height: 1.4; }
+  .ord .st { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; }
+  .acts { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+  .acts .btn { min-height: 52px; font-size: 16px; }
   .btn-bad { color: var(--bad); }
+  .err { color: var(--bad); font-size: 14.5px; }
+  .empty { padding: 28px; text-align: center; color: var(--ink3); }
+  .src { font-size: 12.5px; color: var(--ink3); }
+  .live { color: var(--ok); background: var(--ok-bg); } .live i { animation: blink 2.4s ease-in-out infinite; } @keyframes blink { 50% { opacity: .35; } }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 16px); opacity: 0; background: var(--tip); color: #fff; padding: 12px 18px; border-radius: 16px;
+    font-size: 14.5px; transition: opacity .2s, transform .25s var(--ease); pointer-events: none; z-index: 50; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  @media (max-width: 560px) { .kpis { grid-template-columns: 1fr 1fr 1fr; gap: 8px; } .kpi { padding: 12px; } .kpi b { font-size: 22px; } .acts { grid-template-columns: 1fr 1fr; } .acts .btn-bad { grid-column: 1 / -1; min-height: 44px; } }
 </style>
 </head>
 <body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
 <main class="wrap" id="app"></main>
-<script src="/shared/api.js"></script>
+<div id="toast" role="status"></div>
 <script>
 (function () {
   const $ = (s) => document.querySelector(s);
-  let S = { tok: sessionStorage.getItem('pp_staff'), user: null, data: null, err: '', filter: 'mine' };
-  const NAME = { accepted: 'Принят', moderation: 'Модерация', production: 'Производство', quality: 'Контроль качества', shipped: 'Передан в доставку', done: 'Завершён' };
-  const STATE = { pending: 'ждёт', started: 'в работе', defect: 'брак', passed: 'сдан' };
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const ss = { get: (k) => { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v == null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch (e) { /* закрытое окно */ } } };
+  // вход общий с пультом: если человек пришёл оттуда в этой же вкладке, второй раз пароль не спрашиваем (права всё равно проверяет сервер)
+  const S = { tok: ss.get('pp_staff') || ss.get('fp-token'), user: null, data: null, err: '', filter: 'mine', busy: false };
+  const NAME = { accepted: 'Принят', moderation: 'Модерация', production: 'Производство', quality: 'Контроль качества', shipped: 'Передача в доставку', done: 'Выдача' };
+  const STATE = { pending: ['ждёт', 'chip-warn'], started: ['в работе', 'chip-ok'], defect: ['брак', 'chip-bad'], passed: ['сдан', ''] };
+  const DEMO = [['operator', 'Мастер участка'], ['quality', 'Контролёр качества'], ['production', 'Руководитель производства'], ['logistics', 'Руководитель логистики'], ['director', 'Директор']];
+  const plural = (n, a, b, c) => { const x = Math.abs(n) % 100, y = x % 10; return x > 10 && x < 20 ? c : y > 1 && y < 5 ? b : y === 1 ? a : c; };
+  let tt; const toast = (t) => { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => el.classList.remove('show'), 2400); };
 
   async function call(method, path, body) {
     const r = await fetch(path, { method, headers: Object.assign({ 'Content-Type': 'application/json' }, S.tok ? { Authorization: 'Bearer ' + S.tok } : {}), body: body ? JSON.stringify(body) : undefined });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw Object.assign(new Error(d.error || 'Ошибка ' + r.status), { status: r.status });
+    if (!r.ok) throw Object.assign(new Error(d.error || 'Ошибка сервера (' + r.status + ')'), { status: r.status });
     return d;
   }
-  async function load() {
-    try { S.data = await call('GET', '/api/app/staff/orders'); S.user = S.user || await call('GET', '/api/me'); S.err = ''; }
-    catch (e) { if (e.status === 401) { S.tok = null; sessionStorage.removeItem('pp_staff'); } S.err = e.message; S.data = null; }
+  async function load(quiet) {
+    if (!S.tok) return draw();
+    try { S.user = S.user || await call('GET', '/api/me'); S.data = await call('GET', '/api/app/staff/orders'); if (!quiet) S.err = ''; }
+    catch (e) {
+      if (e.status === 401) { S.tok = null; ss.set('pp_staff', null); S.err = ''; }
+      else if (e.status === 403) { S.tok = null; ss.set('pp_staff', null); S.err = 'Этот экран — для сотрудников производства и логистики. Войдите под рабочей учётной записью.'; }
+      else S.err = e instanceof TypeError ? 'Нет связи с сервером. Список ниже мог устареть — обновим сами, когда связь вернётся.' : e.message;
+      if (!S.tok) S.data = null;
+    }
     draw();
+  }
+  function loginForm(a) {
+    a.innerHTML = `<section class="glass login"><span class="logo" aria-hidden="true">Ф</span>
+      <div><p class="eyebrow">Фотопринт · единая система</p><h1>Экран участка</h1></div>
+      <p class="muted">Очередь заказов из приложения picPac. Отметки «Принял», «Сдал» и «Брак» сразу видят клиент и пульт руководителя.</p>
+      <form id="f" style="display:flex;flex-direction:column;gap:12px"><label class="field">Логин<input class="input" id="lg" value="operator" autocomplete="username"></label>
+        <label class="field">Пароль<input class="input" id="pw" type="password" placeholder="demo2026" autocomplete="current-password"></label>
+        <p class="err" role="alert">${esc(S.err)}</p><button class="btn btn-primary" type="submit" style="min-height:48px">Войти</button></form>
+      <div><p class="eyebrow" style="margin-bottom:8px">Тестовые роли</p><div class="roles">${DEMO.map(([l, n]) => `<button class="btn btn-sm" type="button" data-l="${l}">${n}</button>`).join('')}</div></div>
+      <div class="roles"><a class="btn btn-sm btn-ghost" href="/t1/">← Пульт руководителя</a><a class="btn btn-sm btn-ghost" href="/t2/">Приложение клиента</a></div></section>`;
+    const enter = async (login, password) => {
+      try { const d = await call('POST', '/api/login', { login, password }); S.tok = d.token; S.user = d.user; ss.set('pp_staff', d.token); S.err = ''; load(); }
+      catch (er) { S.err = er instanceof TypeError ? 'Нет связи с сервером. Проверьте сеть и попробуйте ещё раз.' : er.message; draw(); }
+    };
+    $('#f').onsubmit = (e) => { e.preventDefault(); enter($('#lg').value.trim(), $('#pw').value); };
+    a.querySelectorAll('[data-l]').forEach((b) => { b.onclick = () => enter(b.dataset.l, 'demo2026'); });
   }
   function draw() {
     const a = $('#app');
-    if (!S.tok || !S.data) {
-      a.innerHTML = `<h1>Экран производства</h1><p class="muted">Войдите под учётной записью сотрудника (operator или quality).</p>
-        <form class="form" id="f"><div><label for="lg">Логин</label><input class="input" id="lg" value="operator" autocomplete="username"></div>
-        <div><label for="pw">Пароль</label><input class="input" id="pw" type="password" placeholder="demo2026" autocomplete="current-password"></div>
-        ${S.err ? `<p class="err" role="alert">${esc(S.err)}</p>` : ''}<button class="btn btn-primary btn-lg" type="submit">Войти</button></form>
-        <a href="/t2/" class="btn btn-ghost" style="align-self:flex-start">← Приложение клиента</a>`;
-      $('#f').onsubmit = async (e) => {
-        e.preventDefault();
-        try { const d = await call('POST', '/api/login', { login: $('#lg').value.trim(), password: $('#pw').value }); S.tok = d.token; S.user = d.user; sessionStorage.setItem('pp_staff', d.token); load(); }
-        catch (er) { S.err = er.message; draw(); }
-      };
-      return;
-    }
+    if (!S.tok || !S.data) return loginForm(a);
     const D = S.data, mine = D.orders.filter((o) => o.can), list = S.filter === 'mine' ? mine : D.orders;
-    a.innerHTML = `<div class="row" style="justify-content:space-between"><h1>Очередь: ${D.stages.map((s) => NAME[s]).join(', ') || 'просмотр'}</h1><button class="btn btn-ghost" id="out">Выйти</button></div>
-      <p class="muted">${esc(S.user.name)} · ${esc(S.user.title)}</p>
-      <div class="row"><button class="chip" data-f="mine" aria-pressed="${S.filter === 'mine'}">Мои этапы · ${mine.length}</button><button class="chip" data-f="all" aria-pressed="${S.filter === 'all'}">Все · ${D.orders.length}</button></div>
+    const work = mine.filter((o) => o.stage_status === 'started').length, wait = mine.filter((o) => o.stage_status === 'pending').length, bad = D.orders.filter((o) => o.stage_status === 'defect').length;
+    const y = window.scrollY;
+    a.innerHTML = `<header class="glass topbar"><span class="logo" aria-hidden="true">Ф</span><div><b>${esc(S.user.name)}</b><small>${esc(S.user.title)}</small></div><span class="spacer"></span>
+        <span class="chip live"><i></i>обновляется само</span><a class="btn btn-sm" href="/t1/">Пульт</a><button class="btn btn-sm btn-ghost" id="out">Выйти</button></header>
+      <div class="head"><p class="eyebrow">Заказы из приложения picPac</p><h1>${D.stages.length ? 'Мои этапы: ' + D.stages.map((s) => NAME[s].toLowerCase()).join(', ') : 'Очередь заказов — только просмотр'}</h1>
+        <p>Нажмите «Принял», когда берёте заказ в работу, и «Сдал», когда передаёте дальше. По этим отметкам пульт считает время участка.</p></div>
+      <div class="kpis"><div class="glass-flat kpi"><b>${wait}</b><small>ждут вас</small></div><div class="glass-flat kpi"><b>${work}</b><small>у вас в работе</small></div><div class="glass-flat kpi"><b class="${bad ? 'st-bad' : ''}">${bad}</b><small>с браком, все этапы</small></div></div>
+      <div class="seg" role="group" aria-label="Какие заказы показать"><button data-f="mine" aria-pressed="${S.filter === 'mine'}">Мои этапы · ${mine.length}</button><button data-f="all" aria-pressed="${S.filter === 'all'}">Все · ${D.orders.length}</button></div>
       ${S.err ? `<p class="err" role="alert">${esc(S.err)}</p>` : ''}
-      ${list.map((o) => `<div class="card ord"><div class="top"><div><b>${esc(o.number)}</b><small>${(o.items || []).map((i) => esc(i.name) + ' × ' + i.qty).join(', ')} · ${o.photos} фото</small><small>${esc(o.pickup_point ? o.pickup_point.name : (o.delivery || {}).name || '')}</small></div>
-        <div style="text-align:right"><span class="chip chip-accent">${NAME[o.stage]}</span><small>${STATE[o.stage_status] || ''}</small></div></div>
-        ${o.can ? `<div class="row"><button class="btn btn-primary" data-a="accept" data-id="${o.id}" ${o.stage_status === 'started' ? 'disabled' : ''}>Принял</button><button class="btn" data-a="handoff" data-id="${o.id}" ${o.stage_status !== 'started' ? 'disabled' : ''}>Сдал</button><button class="btn btn-bad" data-a="defect" data-id="${o.id}">Брак</button></div>` : '<small>Этот этап вам отмечать нельзя</small>'}</div>`).join('') || '<div class="card"><p class="muted">Заказов в очереди нет.</p></div>'}`;
-    $('#out').onclick = () => { S.tok = null; S.data = null; S.user = null; sessionStorage.removeItem('pp_staff'); draw(); };
+      ${list.map((o) => { const st = STATE[o.stage_status] || ['', '']; return `<article class="glass ord ${o.stage_status === 'started' ? 'work' : o.stage_status === 'defect' ? 'bad' : ''}">
+        <div class="top"><div><div class="no">${esc(o.number)}</div><small>${(o.items || []).map((i) => esc(i.name) + ' × ' + i.qty).join(', ')} · ${o.photos} фото</small><small>${esc(o.pickup_point ? o.pickup_point.name : (o.delivery || {}).name || '')}</small></div>
+          <div class="st"><span class="chip">${esc(NAME[o.stage] || o.stage)}</span>${st[0] ? `<span class="chip ${st[1]}"><i></i>${st[0]}</span>` : ''}</div></div>
+        ${o.can ? `<div class="acts"><button class="btn btn-accent" data-a="accept" data-id="${o.id}" ${o.stage_status === 'started' ? 'disabled' : ''}>Принял</button><button class="btn btn-primary" data-a="handoff" data-id="${o.id}" ${o.stage_status !== 'started' ? 'disabled' : ''}>Сдал</button><button class="btn btn-bad" data-a="defect" data-id="${o.id}" data-no="${esc(o.number)}">Брак</button></div>` : '<small>Этот этап отмечает другой участок.</small>'}</article>`; }).join('')
+        || `<div class="glass-flat empty">${S.filter === 'mine' ? 'На ваших этапах заказов нет. Новые появятся здесь сами.' : 'Заказов из приложения пока нет.'}</div>`}
+      <p class="src">Данные тестовые. Каждая отметка пишется в журнал действий: кто, когда, какой заказ и этап.</p>`;
+    window.scrollTo(0, y);
+    $('#out').onclick = () => { S.tok = null; S.data = null; S.user = null; S.err = ''; ss.set('pp_staff', null); ss.set('fp-token', null); draw(); };
     a.querySelectorAll('[data-f]').forEach((b) => { b.onclick = () => { S.filter = b.dataset.f; draw(); }; });
     a.querySelectorAll('[data-a]').forEach((b) => {
       b.onclick = async () => {
-        try { await call('POST', '/api/app/staff/orders/' + b.dataset.id + '/mark', { action: b.dataset.a }); toast('Отмечено'); } catch (e) { S.err = e.message; }
-        load();
+        if (S.busy) return;
+        if (b.dataset.a === 'defect' && !confirm('Отметить брак по заказу ' + b.dataset.no + '? Клиент увидит, что заказ переделывают.')) return;
+        S.busy = true; b.disabled = true;
+        try { await call('POST', '/api/app/staff/orders/' + b.dataset.id + '/mark', { action: b.dataset.a }); S.err = ''; toast({ accept: 'Взяли в работу', handoff: 'Передали дальше', defect: 'Брак отмечен' }[b.dataset.a]); }
+        catch (e) { S.err = e instanceof TypeError ? 'Нет связи с сервером — отметка не сохранилась. Нажмите ещё раз, когда связь вернётся.' : e.message; }
+        S.busy = false; load(true);
       };
     });
   }
-  load(); setInterval(() => { if (S.tok) load(); }, 5000);
+  load();
+  setInterval(() => { if (S.tok && !S.busy && !document.hidden) load(true); }, 5000);
 })();
 </script>
 </body>

@@ -12,7 +12,7 @@
   .top h1 { font-size: 26px; font-weight: 600; }
   .seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--glass3); }
   .seg button { border: 0; background: none; min-height: 36px; padding: 0 14px; border-radius: 999px; font-size: 14px; color: var(--ink2); }
-  .seg button[aria-pressed="true"] { background: #fff; color: var(--brand-ink); font-weight: 600; box-shadow: 0 1px 3px rgba(70, 50, 40, .12); }
+  .seg button[aria-pressed="true"] { background: #fff; color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(70, 50, 40, .12); }
   .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
   .kpis { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
   .kpi { padding: 16px; display: flex; flex-direction: column; gap: 4px; }
@@ -21,11 +21,11 @@
   .card .hint { color: var(--ink3); font-size: 13px; }
   .row { display: grid; grid-template-columns: minmax(90px, 1.2fr) 3fr auto; gap: 10px; align-items: center; font-size: 14px; }
   .row i { height: 10px; border-radius: 99px; background: var(--track); overflow: hidden; display: block; } .row i b { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
-  .row.warn i b { background: #D9A441; } .row.bad i b { background: var(--bad); }
+  .row.warn i b { background: var(--warn); } .row.bad i b { background: var(--bad); }
   .row .n { font-family: var(--mono); font-size: 13px; text-align: right; min-width: 38px; }
   .row .drop { display: block; font-size: 12px; color: var(--bad); }
   .days { display: flex; align-items: flex-end; gap: 3px; height: 130px; }
-  .days div { flex: 1; min-width: 4px; background: linear-gradient(180deg, #EE8A78, #DD5757); border-radius: 4px 4px 0 0; position: relative; min-height: 2px; }
+  .days div { flex: 1; min-width: 4px; background: var(--grad); border-radius: 4px 4px 0 0; position: relative; min-height: 2px; }
   .days div.zero { background: var(--track); }
   .axis { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink4); }
   table { width: 100%; border-collapse: collapse; font-size: 14px; } th { text-align: left; font-weight: 500; color: var(--ink3); font-size: 12.5px; padding: 6px 8px; border-bottom: 1px solid var(--edge); }
@@ -34,7 +34,7 @@
   .form { max-width: 360px; margin: 60px auto; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
   .err { color: var(--bad); font-size: 14px; }
   .note { color: var(--ink3); font-size: 13px; }
-  .stars-row { color: #D9A441; font-size: 20px; letter-spacing: 2px; }
+  .stars-row { color: var(--warn); font-size: 20px; letter-spacing: 2px; }
 </style>
 </head>
 <body>
@@ -45,7 +45,7 @@
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const S = { tok: null, user: null, days: 14, data: null, err: '' };
-  try { S.tok = sessionStorage.getItem('pp_dir'); } catch (e) { /* закрытое окно */ }
+  try { S.tok = sessionStorage.getItem('pp_dir') || sessionStorage.getItem('fp-token'); } catch (e) { /* закрытое окно */ }   // вход общий с пультом
   const num = (v) => v == null ? '—' : Number(v).toLocaleString('ru-RU');
   const byn = (v) => v == null ? '—' : Number(v).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' BYN';
   const pct = (v) => v == null ? '—' : String(v).replace('.', ',') + ' %';
@@ -88,7 +88,7 @@
     $('#app').innerHTML = `
       <div class="top"><div><span class="eyebrow">Фотопринт · мобильное приложение</span><h1>Аналитика приложения</h1></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><div class="seg" role="group" aria-label="Период">${[7, 14, 30, 60].map((d) => `<button data-d="${d}" aria-pressed="${S.days === d}">${d} дн.</button>`).join('')}</div>
-        <a class="btn btn-sm" href="/t1/">← Пульт</a><button class="btn btn-sm btn-ghost" id="out">Выйти</button></div></div>
+        <a class="btn btn-sm" href="/t1/">← Пульт</a><a class="btn btn-sm" href="/t2/admin.html">Экран участка</a><button class="btn btn-sm btn-ghost" id="out">Выйти</button></div></div>
       <div class="kpis">
         ${kp(num(k.orders), 'Заказов', 'за ' + D.days + ' дн.')}${kp(byn(k.revenue), 'Выручка', 'сумма заказов с доставкой')}
         ${kp(byn(k.avg_check), 'Средний чек', '')}${kp(pct(k.conversion), 'Из выбора в заказ', k.sessions + ' начали')}
