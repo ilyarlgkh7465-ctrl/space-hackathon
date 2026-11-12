@@ -11,6 +11,7 @@
   POST /api/pult/widgets       {type, title, size, source}       — добавить виджет
   POST /api/pult/widgets/preview {type, source}                  — данные виджета без сохранения (для конструктора)
   POST /api/pult/widgets/<id>  {title?, type?, size?, move?}     — изменить
+  POST /api/pult/widgets/order {ids: [...]}                      — новый порядок после перетаскивания
   POST /api/pult/widgets/<id>/delete                             — удалить
 
 Цифры в графиках всегда считает сервер из тех же данных, что на пульте. Модель только выбирает,
@@ -788,6 +789,9 @@ def widgets(core, P, user, method, sub, body, product=""):
             d["widgets"].append(w)
         elif method == "POST" and sub == "reset":
             d["widgets"] = defaults
+        elif method == "POST" and sub == "order":                 # перетащили мышью — пришёл новый порядок
+            ids = [str(x) for x in (body.get("ids") or [])]
+            d["widgets"].sort(key=lambda x: ids.index(x["id"]) if x["id"] in ids else len(ids))
         elif method == "POST" and sub:
             wid, _, act = sub.partition("/")
             i = next((j for j, x in enumerate(d["widgets"]) if x["id"] == wid), None)

@@ -18,7 +18,8 @@
   POST /api/ai           — запрос к модели: {system, user, json, mask, max_tokens, who}
                            mask=true — ФИО, телефоны, УНП, почта и суммы заменяются метками до отправки
                            и возвращаются обратно в ответе; в журнал audit пишется, что ушло наружу
-  GET/POST /api/ai/mode  — cloud | local | off (переключатель «защищённого контура» для демо)
+  GET/POST /api/ai/mode  — cloud | local | off (переключатель «защищённого контура» для демо); cloud: claude | deepseek
+  GET  /api/gateway      — ИИ-шлюз: правила, счётчики и последние обращения к моделям (директор и аналитик)
   POST /api/telegram     — отправить сообщение ответственному, если заданы TG_BOT_TOKEN и TG_CHAT_ID
 
 Ключ модели: переменная LLM_API_KEY, иначе берётся из ../flat-inventory/.env (только LLM_*).
@@ -38,6 +39,8 @@ import uuid
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import llm_gateway
+
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 SEED = DATA / "seed"
@@ -52,7 +55,7 @@ def _read_env_file(path: Path) -> dict:
     out = {}
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
-            m = re.match(r"^(LLM_[A-Z_]+)=(.*)$", line.strip())
+            m = re.match(r"^((?:LLM|CLAUDE|CLOUD)_[A-Z_]+)=(.*)$", line.strip())
             if m:
                 out[m.group(1)] = m.group(2).strip().strip('"').strip("'")
     except OSError:
@@ -61,6 +64,7 @@ def _read_env_file(path: Path) -> dict:
 
 
 _file_env = _read_env_file(ROOT.parent / "flat-inventory" / ".env")
+_file_env.update(_read_env_file(ROOT / ".env"))          # свой файл проекта: CLAUDE_API_KEY=… (в репозиторий не попадает)
 
 
 def _env(name: str, default: str = "") -> str:
@@ -79,7 +83,18 @@ LOCAL = {
     "api_key": os.environ.get("LOCAL_LLM_KEY", ""),
     "model": os.environ.get("LOCAL_LLM_MODEL", "qwen2.5:7b"),
 }
-STATE = {"mode": os.environ.get("AI_MODE", "cloud" if CLOUD["api_key"] else "off")}
+# Вторая облачная модель — Claude. Ключ: CLAUDE_API_KEY в файле .env рядом с server.py или в окружении.
+# CLAUDE_BASE_URL — только если ключ выдан сервисом-посредником со своим адресом.
+CLAUDE = {
+    "name": "Claude (облако)",
+    "base_url": _env("CLAUDE_BASE_URL", "https://api.anthropic.com").rstrip("/"),
+    "api_key": _env("CLAUDE_API_KEY"),
+    "model": _env("CLAUDE_MODEL", "claude-opus-5-5"),
+}
+CLAUDE["official"] = CLAUDE["base_url"] == "https://api.anthropic.com"
+_cloud = _env("CLOUD_PROVIDER") or ("claude" if llm_gateway.claude_ready(CLAUDE)[0] else "deepseek")
+STATE = {"mode": os.environ.get("AI_MODE", "cloud" if (CLOUD["api_key"] or CLAUDE["api_key"]) else "off"),
+         "cloud": _cloud if _cloud in ("claude", "deepseek") else "deepseek"}
 
 
 # ---------- хранилище ----------
@@ -206,12 +221,26 @@ def unmask(text: str, mapping: dict) -> str:
 # ---------- запрос к модели ----------
 
 def ask_model(system: str, user: str, want_json: bool, max_tokens: int) -> dict:
+    """Единственный вход к моделям для всех модулей. Дальше — ИИ-шлюз (llm_gateway.py): правила, скрытие данных, журнал."""
     mode = STATE["mode"]
     if mode == "off":
         return {"ok": False, "reason": "ИИ выключен — работает встроенная логика"}
+    if mode == "cloud" and STATE["cloud"] == "claude":
+        ok, why = llm_gateway.claude_ready(CLAUDE)
+        if not ok:
+            return {"ok": False, "reason": why}
+        return GATEWAY.call(dict(CLAUDE, outside=True), system, user, want_json, max_tokens,
+                            lambda s, u, j, m: llm_gateway.ask_claude(CLAUDE, s, u, j, m))
     prov = LOCAL if mode == "local" else CLOUD
     if mode == "cloud" and not prov["api_key"]:
         return {"ok": False, "reason": "нет ключа модели"}
+    return GATEWAY.call(dict(prov, outside=mode == "cloud"), system, user, want_json, max_tokens, _ask_openai)
+
+
+def _ask_openai(system: str, user: str, want_json: bool, max_tokens: int) -> dict:
+    """Локальная модель и DeepSeek: общий формат chat/completions."""
+    mode = STATE["mode"]
+    prov = LOCAL if mode == "local" else CLOUD
     body = {
         "model": prov["model"],
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -264,6 +293,19 @@ def ask_model(system: str, user: str, want_json: bool, max_tokens: int) -> dict:
         except ValueError:
             out["json"] = None
     return out
+
+
+GATEWAY = llm_gateway.Gateway(DATA / "gateway.json", MASK_RULES, _now)
+
+
+def ai_state() -> dict:
+    """Что сейчас отвечает на запросы: для панели «ИИ-шлюз» и /api/health."""
+    mode = STATE["mode"]
+    prov = None if mode == "off" else LOCAL if mode == "local" else CLAUDE if STATE["cloud"] == "claude" else CLOUD
+    return {"mode": mode, "cloud": STATE["cloud"], "provider": prov["name"] if prov else "встроенная логика",
+            "model": prov["model"] if prov else None, "outside": mode == "cloud",
+            "available": {"claude": llm_gateway.claude_ready(CLAUDE)[0], "claude_note": llm_gateway.claude_ready(CLAUDE)[1],
+                          "deepseek": bool(CLOUD["api_key"]), "local": LOCAL["model"]}}
 
 
 # ---------- модули участников ----------
@@ -344,11 +386,18 @@ class Handler(SimpleHTTPRequestHandler):
             user = current_user(self)
             return self._json(user) if user else self._json({"error": "нужно войти"}, 401)
         if path == "/api/health":
-            return self._json({"ok": True, "mode": STATE["mode"], "cloud_key": bool(CLOUD["api_key"]),
-                               "cloud_model": CLOUD["model"], "local_model": LOCAL["model"],
+            cloud = CLAUDE if STATE["cloud"] == "claude" else CLOUD
+            return self._json({"ok": True, "mode": STATE["mode"], "cloud": STATE["cloud"], "cloud_key": bool(cloud["api_key"]),
+                               "cloud_model": cloud["model"], "local_model": LOCAL["model"],
                                "telegram": bool(os.environ.get("TG_BOT_TOKEN") and os.environ.get("TG_CHAT_ID"))})
         if path == "/api/ai/mode":
-            return self._json({"mode": STATE["mode"]})
+            return self._json({"mode": STATE["mode"], "cloud": STATE["cloud"]})
+        if path == "/api/gateway":
+            user = current_user(self)
+            if not user or user.get("role") not in ("director", "analyst"):
+                audit(user["name"] if user else self.client_address[0], "попытка доступа", "ИИ-шлюз", obj=path, result="отказ")
+                return self._json({"error": "ИИ-шлюз видят директор и аналитик"}, 403 if user else 401)
+            return self._json(dict(GATEWAY.snapshot(), state=ai_state()))
         m = re.match(r"^/api/store/([a-z]+)$", path)
         if m:
             if not self._trusted():
@@ -386,12 +435,19 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"ok": True})
 
         if path == "/api/ai/mode":
-            mode = body.get("mode")
-            if mode not in ("cloud", "local", "off"):
-                return self._json({"error": "mode: cloud | local | off"}, 400)
-            STATE["mode"] = mode
-            audit(body.get("who", "администратор"), "режим ИИ", "переключён на " + mode)
-            return self._json({"mode": mode})
+            mode, cloud = body.get("mode") or STATE["mode"], body.get("cloud") or STATE["cloud"]
+            if mode not in ("cloud", "local", "off") or cloud not in ("claude", "deepseek"):
+                return self._json({"error": "mode: cloud | local | off; cloud: claude | deepseek"}, 400)
+            if mode == "cloud" and cloud == "claude" and not llm_gateway.claude_ready(CLAUDE)[0]:
+                return self._json({"error": "Claude не подключён: " + llm_gateway.claude_ready(CLAUDE)[1]}, 400)
+            user = current_user(self)
+            if user and user.get("role") != "director":           # без входа — только служебные скрипты с этого компьютера
+                audit(user["name"], "попытка доступа", "переключение модели", obj="ИИ-шлюз", result="отказ")
+                return self._json({"error": "Переключать модель может директор"}, 403)
+            STATE["mode"], STATE["cloud"] = mode, cloud
+            audit(user["name"] if user else body.get("who", "администратор"), "режим ИИ",
+                  "переключён на " + ai_state()["provider"], obj="ИИ-шлюз")
+            return self._json({"mode": mode, "cloud": cloud, "state": ai_state()})
 
         if path == "/api/ai":
             system = str(body.get("system", ""))

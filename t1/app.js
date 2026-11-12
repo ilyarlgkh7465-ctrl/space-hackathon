@@ -8,7 +8,7 @@
   const fdate = (s) => s ? s.slice(8, 10) + '.' + s.slice(5, 7) : '—';
   const ftime = (s) => s ? fdate(s) + ' ' + s.slice(11, 16) : '—';
   const WORD = { ok: 'в норме', warn: 'внимание', bad: 'критично', none: 'нет данных' };
-  const COLOR = { ok: 'var(--ok)', warn: 'var(--brand2)', bad: 'var(--bad)', none: 'var(--none)' };
+  const COLOR = { ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)', none: 'var(--none)' };
   const chip = (st) => `<span class="chip chip-${st}"><i></i>${WORD[st] || WORD.none}</span>`;
   const ic = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${d}</svg>`;
   const I = {
@@ -36,7 +36,7 @@
   const VIEWS = [
     { id: 'pulse', name: 'Пульс компании', icon: I.pulse, group: 'main' },
     { id: 'mydash', name: 'Мой дашборд', icon: I.dash, group: 'main' },
-    { id: 'attention', name: 'Требует решения', icon: I.bell, group: 'work' },
+    { id: 'attention', name: 'Отклонения', icon: I.bell, group: 'work' },
     { id: 'decisions', name: 'Реестр решений', icon: I.decisions, group: 'work' },
     { id: 'data', name: 'Данные и журнал', icon: I.data, group: 'manage' },
   ];
@@ -54,8 +54,7 @@
   const STATUSES = ['новое', 'в работе', 'на проверке', 'закрыто'];
   const canDecide = () => S.user && S.user.role !== 'analyst';
   const myViews = () => [
-    ...VIEWS.filter((v) => v.id !== 'pulse' || S.user.role !== 'head').map((v) =>
-      S.user.role === 'head' && v.id === 'attention' ? { ...v, name: 'Отклонения от плана' } : v),
+    ...VIEWS.filter((v) => v.id !== 'pulse' || S.user.role !== 'head'),
     ...S.contours.map((c) => ({ ...c, group: 'contours', icon: CONTOUR_ICONS[c.id] })),
   ];
   const defaultView = () => S.user.role === 'head' ? S.user.dept : 'pulse';
@@ -156,7 +155,7 @@
     try { S.user = await api('/api/me'); } catch (e) { if (e.code !== 401) renderLogin(e.message); return; }
     if (S.user.role === 'operator') return renderMy();
     if (!['director', 'head', 'analyst'].includes(S.user.role)) {
-      $('#app').innerHTML = `<main class="login"><div class="glass login-card"><span class="logo">Ф</span><h1>Пульт — для руководителей</h1>
+      $('#app').innerHTML = `<main class="login"><div class="glass login-card"><span class="logo" aria-hidden="true">Ф</span><h1>Пульт — для руководителей</h1>
         <p class="muted">Вы вошли как «${esc(S.user.title)}». Для операционной команды есть экран участка с очередью и отметками этапов.</p>
         <a class="btn btn-primary" href="/t2/admin.html">Открыть экран участка</a><button class="btn" id="lo">Выйти</button></div></main>`;
       $('#lo').onclick = () => logout();
@@ -172,10 +171,11 @@
     $('#app').innerHTML = `<div class="shell">
       <button class="nav-scrim" id="navScrim" type="button" aria-label="Закрыть меню" hidden></button>
       <aside class="rail" id="rail" aria-label="Разделы">
-        <a class="rail-brand" href="/" aria-label="Фотопринт, все треки"><span aria-hidden="true">Ф</span>Фотопринт</a>
+        <a class="rail-brand" href="/" aria-label="Фотопринт, все разделы системы"><span class="logo" aria-hidden="true">Ф</span>Фотопринт</a>
         <div class="rail-profile">
           <span class="avatar" aria-hidden="true">${esc(initials)}</span>
           <div><strong>${esc(S.user.name)}</strong><small>${esc(S.user.title)}</small></div>
+          <button class="rail-out" id="navLogout" type="button" aria-label="Выйти" title="Выйти">${I.out}</button>
           <button class="rail-close" id="navClose" type="button" aria-label="Закрыть меню">${I.close}</button>
         </div>
         <nav class="rail-nav" id="nav" aria-label="Навигация"></nav>
@@ -185,7 +185,7 @@
         <main class="view" id="view" tabindex="-1"></main>
       </div>
     </div>
-    <button class="btn btn-accent fab" id="fab">${I.spark} Помощник</button>`;
+    <button class="btn fab" id="fab">${window.Studio.orbHtml('xs')} Помощник</button>`;
     $('#nav').onclick = (e) => {
       const b = e.target.closest('button');
       if (!b) return;
@@ -196,6 +196,7 @@
       if (b.dataset.rail === 'logout') logout();
     };
     $('#navScrim').onclick = $('#navClose').onclick = () => setMenu(false);
+    $('#navLogout').onclick = () => logout();
     $('#fab').onclick = () => openChat();
     renderNav();
     renderTop();
@@ -230,24 +231,21 @@
     const nav = $('#nav');
     if (!nav) return;
     const entries = myViews();
-    const group = (id, label, extra = '') => {
+    const group = (id, label, extra = '', sub = '') => {
       const links = entries.filter((v) => v.group === id).map((v) => {
         const count = v.id === 'attention' ? S.pulse?.alerts.length : v.id === 'decisions' ? S.openCount : 0;
         const current = v.id === S.view && !S.pain ? ' aria-current="page"' : '';
-        return `<button class="rail-btn" data-view="${v.id}"${current}>${v.icon}<span>${esc(v.name)}</span>${count ? `<b class="rail-count">${count}</b>` : ''}</button>`;
+        return `<button class="rail-btn" data-view="${v.id}"${current}>${v.icon}<span>${esc(v.name)}</span>${count ? `<b class="rail-count">${count}</b>` : ''}</button>${v.id === S.view ? sub : ''}`;
       }).join('') + extra;
       return links ? `<div class="rail-group">${label ? `<p>${label}</p>` : ''}${links}</div>` : '';
     };
     const contour = S.contour?.dept === S.view ? S.contour : null;
-    const painLinks = contour ? contour.pains.map((p) => `<button class="rail-btn" data-jump="${esc(p.id)}"${p.id === S.pain ? ' aria-current="page"' : ''}>${I.report}
-      <span>${esc(PAIN_NAV[p.id] || p.title)}</span>
-      ${['bad', 'warn'].includes(p.status) ? `<span class="rail-indicator st-${p.status}" role="img" aria-label="${WORD[p.status]}"></span>` : ''}</button>`).join('') : '';
-    const topics = painLinks ? `<div class="rail-group"><p>Рабочие вопросы</p>${painLinks}</div>` : '';
-    const departments = group('contours', S.user.role === 'head' ? '' : 'Отделы');
-    nav.innerHTML = group('main', '') + (S.user.role === 'head' ? departments + topics : topics)
-      + group('work', '', `<button class="rail-btn" data-rail="report"${S.pulse ? '' : ' disabled'}>${I.report}<span>Отчёт за период</span></button>`)
-      + (S.user.role === 'head' ? '' : departments)
-      + group('manage', '', `<button class="rail-btn" data-rail="logout">${I.out}<span>Выйти</span></button>`);
+    const sub = contour ? `<div class="rail-sub">${contour.pains.map((p) => `<button class="rail-btn rail-subbtn" data-jump="${esc(p.id)}"${p.id === S.pain ? ' aria-current="page"' : ''}>
+      <span class="rail-dot st-${['bad', 'warn'].includes(p.status) ? p.status : 'none'}" role="img" aria-label="${WORD[p.status] || ''}"></span><span>${esc(PAIN_NAV[p.id] || p.title)}</span></button>`).join('')}</div>` : '';
+    const departments = group('contours', S.user.role === 'head' ? '' : 'Отделы', '', sub);
+    const work = group('work', '');
+    nav.innerHTML = group('main', '') + (S.user.role === 'head' ? departments + work : work + departments)
+      + group('manage', '', `<button class="rail-btn" data-rail="report"${S.pulse ? '' : ' disabled'}>${I.report}<span>Отчёт за период</span></button>`);
   }
   function renderTop() {
     const p = S.pulse;
@@ -386,26 +384,102 @@
       return `<line class="twig" x1="${n.x.toFixed(1)}" y1="${n.y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${COLOR[n.status]}"/><circle cx="${x2.toFixed(1)}" cy="${y2.toFixed(1)}" r="${j === 2 ? 2.6 : 1.8}" fill="${COLOR[n.status]}" opacity=".75"/>`;
     }).join('');
     const coreColor = COLOR[p.pulse.status];
-    return `<svg id="map" viewBox="0 0 ${W} ${H}" role="group" aria-label="Карта компании: сквозной поток заказа">
+    const coreWord = p.pulse.critical ? 'требуют решения' : p.pulse.warn ? 'под вниманием' : 'всё в норме';
+    return `<div class="pulse-stage" id="pulseStage"><svg id="map" viewBox="0 0 ${W} ${H}" role="group" aria-label="Пульс компании: сквозной поток заказа из восьми звеньев">
       <path class="ring" d="${ring}"/>
-      ${nodes.map((n) => `<path class="spoke" d="M${cx} ${cy} Q${((cx + n.x) / 2 + Math.sin(n.a) * 18).toFixed(1)} ${((cy + n.y) / 2 - Math.cos(n.a) * 18).toFixed(1)} ${n.x.toFixed(1)} ${n.y.toFixed(1)}" stroke="${COLOR[n.status]}"/>`).join('')}
+      ${nodes.map((n, i) => `<path class="spoke" data-spoke="${i}" d="M${cx} ${cy} Q${((cx + n.x) / 2 + Math.sin(n.a) * 18).toFixed(1)} ${((cy + n.y) / 2 - Math.cos(n.a) * 18).toFixed(1)} ${n.x.toFixed(1)} ${n.y.toFixed(1)}" stroke="${COLOR[n.status]}"/>`).join('')}
       ${nodes.map(twigs).join('')}
-      <circle cx="${cx}" cy="${cy}" r="118" fill="var(--bg0)"/>
-      <circle cx="${cx}" cy="${cy}" r="66" fill="rgba(255,255,255,.92)" stroke="${coreColor}" stroke-width="2"/>
-      <circle cx="${cx}" cy="${cy}" r="76" fill="none" stroke="${coreColor}" stroke-width="1" opacity=".35"/>
-      <text class="core-t" x="${cx}" y="${cy - 22}" text-anchor="middle">ПУЛЬС</text>
-      <text class="core-v" x="${cx}" y="${cy + 12}" text-anchor="middle">${p.pulse.critical + p.pulse.warn}</text>
-      <text class="core-s" x="${cx}" y="${cy + 34}" text-anchor="middle" fill="${coreColor}">${p.pulse.critical ? 'отклонений' : p.pulse.warn ? 'под вниманием' : 'всё в норме'}</text>
-      ${nodes.map((n) => `<g class="node" tabindex="0" role="button" data-node="${n.kpi}" aria-label="${esc(n.name)}: ${WORD[n.status]}. ${esc(n.lines.join('. '))}">
-        <rect x="${n.bx.toFixed(1)}" y="${n.by.toFixed(1)}" width="${n.cw}" height="${n.ch}" rx="14"/>
-        <text class="nm" x="${(n.bx + 14).toFixed(1)}" y="${(n.by + 24).toFixed(1)}">${esc(n.name)}</text>
-        ${n.locked ? `<text class="ln" x="${(n.bx + 14).toFixed(1)}" y="${(n.by + 44).toFixed(1)}">${WORD[n.status]} · детали закрыты</text>`
-          : n.lines.slice(0, 2).map((l, j) => `<text class="ln" x="${(n.bx + 14).toFixed(1)}" y="${(n.by + 42 + j * 16).toFixed(1)}">${esc(l.length > 27 ? l.slice(0, 26) + '…' : l)}</text>`).join('')}
-        <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="15" fill="${COLOR[n.status]}"/><circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="21" fill="none" stroke="${COLOR[n.status]}" opacity=".35"/>
+      <g class="core" tabindex="0" role="button" data-core aria-label="Пульс компании: ${p.pulse.critical + p.pulse.warn} ${coreWord}. Открыть все отклонения">
+        <circle class="beat" cx="${cx}" cy="${cy}" r="76" fill="none" stroke="${coreColor}" stroke-width="1.5"/>
+        <circle class="beat b2" cx="${cx}" cy="${cy}" r="76" fill="none" stroke="${coreColor}" stroke-width="1.5"/>
+        <circle cx="${cx}" cy="${cy}" r="70" fill="rgba(255,255,255,.94)" stroke="${coreColor}" stroke-width="2"/>
+        <text class="core-t" x="${cx}" y="${cy - 24}" text-anchor="middle">ПУЛЬС</text>
+        <text class="core-v" x="${cx}" y="${cy + 12}" text-anchor="middle">${p.pulse.critical + p.pulse.warn}</text>
+        <text class="core-s" x="${cx}" y="${cy + 34}" text-anchor="middle" fill="${coreColor}">${coreWord}</text></g>
+      ${nodes.map((n, i) => `<g class="node" tabindex="0" role="button" data-node="${n.kpi}" data-i="${i}" aria-label="${esc(n.name)}: ${WORD[n.status]}. ${esc(n.lines.join('. '))}">
+        <rect x="${n.bx.toFixed(1)}" y="${(n.by + 8).toFixed(1)}" width="${n.cw}" height="${n.ch - 16}" rx="14"/>
+        <text class="nm" x="${(n.bx + 14).toFixed(1)}" y="${(n.by + 29).toFixed(1)}">${esc(n.name)}</text>
+        <text class="ln" x="${(n.bx + 14).toFixed(1)}" y="${(n.by + 47).toFixed(1)}">${n.locked ? WORD[n.status] + ' · детали закрыты' : esc(n.lines[n.lines.length - 1] || WORD[n.status])}</text>
+        <circle class="halo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="21" fill="none" stroke="${COLOR[n.status]}" opacity=".35"/>
+        <circle class="dot" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="15" fill="${COLOR[n.status]}"/>
         <text class="no" x="${n.x.toFixed(1)}" y="${(n.y + 4).toFixed(1)}" text-anchor="middle">${n.n}</text></g>`).join('')}
-    </svg>
+    </svg><div class="map-card glass" id="mapCard" role="status" hidden></div></div>
     <div class="flow-list">${p.flow.map((n) => `<button class="glass-flat flow-item" data-node="${n.kpi}"><span class="no" style="background:${COLOR[n.status]}">${n.n}</span><span><b>${esc(n.name)}</b> · <span class="st-${n.status}">${WORD[n.status]}</span><small>${esc(n.locked ? 'детали закрыты для вашей роли' : n.lines.join(' · '))}</small></span></button>`).join('')}</div>`;
   }
+
+  /* Что показать при наведении на звено пульса: главный показатель, факты, причина и ответственный. */
+  function nodeCard(p, n) {
+    const k = p.kpis.find((x) => x.id === n.kpi), a = p.alerts.find((x) => x.kpi === n.kpi);
+    const head = `<header><span class="mc-no" style="background:${COLOR[n.status]}">${n.n}</span><h3>${esc(n.name)}</h3>${chip(n.status)}</header>`;
+    if (n.locked || !k || k.locked) return `${head}<p class="mc-meta">Детали этого звена закрыты для вашей роли. Отвечает: ${esc(n.owner)}.</p>`;
+    const d = k.prev != null && k.value != null ? k.value - k.prev : null;
+    const inFlow = new Set(p.flow.map((f) => f.kpi));
+    const more = p.kpis.filter((x) => x.dept === n.dept && !x.locked && ['bad', 'warn'].includes(x.status) && !inFlow.has(x.id)).slice(0, 2);
+    return `${head}
+      <div class="mc-kpi"><div><small>${esc(k.name)}</small><p><b>${fmt(k.value)}</b> ${esc(k.unit)}</p></div>${spark(k.series, k.status)}</div>
+      <p class="mc-meta">План ${fmt(k.plan)} ${esc(k.unit)}${d != null && d !== 0 ? ` · <span class="${d * k.dir >= 0 ? 'st-ok' : 'st-bad'}">${d > 0 ? '+' : '−'}${fmt(Math.abs(d))}</span> к прошлому периоду` : ''}</p>
+      ${((li) => li ? `<ul class="mc-lines">${li}</ul>` : '')(`${n.lines.filter((l) => !l.includes(': ' + fmt(k.value) + ' ')).map((l) => `<li>${esc(l)}</li>`).join('')}${more.map((x) => `<li class="st-${x.status}">${esc(x.name)}: ${fmt(x.value)} ${esc(x.unit)} при плане ${fmt(x.plan)}</li>`).join('')}`)}
+      ${a ? `<p class="mc-cause">${esc(a.cause)}</p>` : ''}
+      <p class="mc-meta">Отвечает: ${esc(a ? a.owner : n.owner)}</p>
+      <p class="mc-hint">Нажмите на звено — откроется разбор до причины</p>`;
+  }
+  function coreCard(p) {
+    const top = p.alerts.slice(0, 3);
+    return `<header><h3>Пульс компании</h3>${chip(p.pulse.status)}</header>
+      <p class="mc-meta">Из ${p.pulse.total} показателей требуют решения ${p.pulse.critical}, под вниманием ${p.pulse.warn}.</p>
+      ${top.length ? `<ul class="mc-lines">${top.map((a) => `<li><b>${esc(a.title)}</b><br><span class="faint">${esc(a.dept_name)} · ${esc(a.owner)}</span></li>`).join('')}</ul>` : ''}
+      <p class="mc-hint">${p.alerts.length ? `Нажмите — все отклонения: ${p.alerts.length}` : 'Отклонений нет'}</p>`;
+  }
+  /* Рамка подписи звена растягивается по самой длинной строке — текст не выходит за края при любом шрифте. */
+  function fitMap() {
+    document.querySelectorAll('#map .node').forEach((g) => {
+      const rect = g.querySelector('rect'), texts = [...g.querySelectorAll('text.nm, text.ln')], dot = g.querySelector('.dot');
+      const w = Math.max(60, ...texts.map((t) => t.getComputedTextLength())) + 28;
+      const x0 = +rect.getAttribute('x'), w0 = +rect.getAttribute('width'), cx = +dot.getAttribute('cx');
+      const mid = x0 + w0 / 2;
+      const x = Math.abs(mid - cx) < 2 ? cx - w / 2 : mid > cx ? x0 : x0 + w0 - w;      // сверху и снизу — по центру, справа — от точки, слева — к точке
+      rect.setAttribute('x', x.toFixed(1)); rect.setAttribute('width', w.toFixed(1));
+      texts.forEach((t) => t.setAttribute('x', (x + 14).toFixed(1)));
+    });
+  }
+  let mapOn = null;
+  function showMapCard(el) {
+    const stage = $('#pulseStage'), card = $('#mapCard'), p = S.pulse;
+    if (!stage || !card || !p || mapOn === el) return;
+    mapOn = el;
+    const core = el.hasAttribute('data-core');
+    card.innerHTML = core ? coreCard(p) : nodeCard(p, p.flow[+el.dataset.i]);
+    card.hidden = false;
+    $$('#map .is-on').forEach((x) => x.classList.remove('is-on'));
+    el.classList.add('is-on');
+    if (!core) $(`#map [data-spoke="${el.dataset.i}"]`)?.classList.add('is-on');
+    $('#map').classList.add('has-focus');
+    /* Место карточки: рядом со звеном, но не поверх него и не поверх ядра. Пробуем справа, слева, снизу, сверху. */
+    const sr = stage.getBoundingClientRect(), nb = el.getBoundingClientRect(), cr = $('#map .core').getBoundingClientRect();
+    const cw = card.offsetWidth, ch = card.offsetHeight, gap = 14;
+    const box = (r) => ({ l: r.left - sr.left, t: r.top - sr.top, r: r.right - sr.left, b: r.bottom - sr.top });
+    const n = box(nb), c = box(cr), mx = (n.l + n.r) / 2, my = (n.t + n.b) / 2;
+    const fab = $('#fab'), f = fab && !fab.classList.contains('hidden') ? box(fab.getBoundingClientRect()) : null;
+    const over = (l, t, o) => !o ? 0 : Math.max(0, Math.min(l + cw, o.r) - Math.max(l, o.l)) * Math.max(0, Math.min(t + ch, o.b) - Math.max(t, o.t));
+    const best = [[n.r + gap, my - ch / 2], [n.l - gap - cw, my - ch / 2], [mx - cw / 2, n.b + gap], [mx - cw / 2, n.t - gap - ch]]
+      .map(([l, t]) => [Math.max(4, Math.min(l, sr.width - cw - 4)), Math.max(4, Math.min(t, sr.height - ch - 4))])
+      .map(([l, t]) => ({ l, t, cost: over(l, t, n) + (core ? 0 : over(l, t, c) * 3) + over(l, t, f) * 2 }))
+      .reduce((a, x) => (x.cost < a.cost ? x : a));
+    card.style.left = best.l + 'px';
+    card.style.top = best.t + 'px';
+  }
+  function hideMapCard() {
+    mapOn = null;
+    const card = $('#mapCard'); if (card) card.hidden = true;
+    $$('#map .is-on').forEach((x) => x.classList.remove('is-on'));
+    $('#map')?.classList.remove('has-focus');
+  }
+  const mapTarget = (e) => e.target.closest && e.target.closest('#map .node, #map .core');
+  let mapTouch = false;
+  document.addEventListener('pointerover', (e) => { const t = mapTarget(e); mapTouch = e.pointerType === 'touch'; if (t) showMapCard(t); });
+  document.addEventListener('pointerout', (e) => { const t = mapTarget(e); if (t && !t.contains(e.relatedTarget) && e.pointerType !== 'touch') hideMapCard(); });
+  document.addEventListener('focusin', (e) => { const t = mapTarget(e); if (t) showMapCard(t); });
+  document.addEventListener('focusout', (e) => { if (mapTarget(e)) hideMapCard(); });
 
   /* ---------- плитки и отклонения ---------- */
   function kpiTile(k, fromPulse = false) {
@@ -474,10 +548,11 @@
   function hypHtml(h, full) {
     if (!h || !h.items || !h.items.length) return '<span class="faint">Версий для проверки нет — смотрите разбивку показателя.</span>';
     const items = full ? h.items : h.items.slice(0, 3);
-    return `<p class="hyp-head">Проверено версий: ${h.checked} · подтвердилось: <b>${h.confirmed}</b></p>
-      <ul>${items.map((i) => `<li class="${i.verdict === 'да' ? 'yes' : 'no'}"><span class="mark" aria-label="${i.verdict === 'да' ? 'подтвердилась' : 'не подтвердилась'}">${i.verdict === 'да' ? '✓' : '✕'}</span>
+    const head = `Проверено версий причины: ${h.checked}, подтвердилось: <b>${h.confirmed}</b>`;
+    const wrap = (ul) => full ? `<p class="hyp-head">${head}</p>${ul}` : `<details class="hyp-d"><summary>${head}</summary>${ul}</details>`;
+    return wrap(`<ul>${items.map((i) => `<li class="${i.verdict === 'да' ? 'yes' : 'no'}"><span class="mark" aria-label="${i.verdict === 'да' ? 'подтвердилась' : 'не подтвердилась'}">${i.verdict === 'да' ? '✓' : '✕'}</span>
         <span><b>${esc(i.text)}</b>${i.verdict === 'да' ? '' : ' <span class="faint">— не подтвердилась</span>'}<small>${esc(i.evidence)}</small>
-        ${full && i.by ? `<button class="linkbtn" data-kpi="${h.kpi}" data-by="${i.by}">открыть разбивку</button>` : ''}</span></li>`).join('')}</ul>`;
+        ${full && i.by ? `<button class="linkbtn" data-kpi="${h.kpi}" data-by="${i.by}">открыть разбивку</button>` : ''}</span></li>`).join('')}</ul>`);
   }
   async function fillHyps() {
     for (const box of $$('[data-hyp]')) {
@@ -583,46 +658,50 @@
     } catch (e) { if (seq === S.seq) toast(e.message); }
   }
   function contourView(c) {
-    const showCharts = S.user.role !== 'head';
-    const questions = showCharts ? `<div class="grid2">${c.pains.map((p) => painCard(p, true)).join('')}</div>`
-      : `<ul class="glass-flat signal-list topic-list">${c.pains.map((p) => `<li><button class="signal-row" data-pain-link="${esc(p.id)}">
-          <span class="signal-text"><strong>${esc(p.title)}</strong></span>
-          ${p.status !== 'none' ? chip(p.status) : '<span></span>'}<span class="signal-arrow" aria-hidden="true">›</span></button></li>`).join('')}</ul>`;
+    const director = S.user.role !== 'head';
+    const first = (t) => { const m = String(t || '').match(/^.*?[.!?](?=\s+[А-ЯЁA-Z«]|$)/); return m ? m[0] : String(t || ''); };
+    const worst = c.pains.find((p) => p.status === 'bad' && p.note) || c.pains.find((p) => p.status === 'warn' && p.note);
+    const al = c.alerts[0];                        // главное — самое сильное отклонение отдела с причиной; нет отклонений — худший рабочий вопрос
+    const verdict = al
+      ? `<section class="glass-flat verdict is-${al.level}"><div><h2>Главное сейчас</h2><p><b>${esc(al.title)}.</b> ${esc(al.cause)}</p></div>
+          <div class="verdict-acts"><button class="btn" data-kpi="${al.kpi}" data-by="${al.by}">К причине</button>${canDecide() ? `<button class="btn btn-primary" data-decide="${al.kpi}">Оформить решение</button>` : ''}</div></section>`
+      : worst
+      ? `<section class="glass-flat verdict is-${worst.status}"><div><h2>Главное сейчас</h2><p>${esc(worst.note)}</p></div>
+          <button class="btn btn-accent" data-pain-link="${esc(worst.id)}">Открыть разбор</button></section>`
+      : `<section class="glass-flat verdict"><div><h2>Главное сейчас</h2><p>Отклонений нет: по всем рабочим вопросам отдел в норме.</p></div></section>`;
     const overview = (c.overview || []).map((item) => `<button class="glass-flat dept-summary" data-pain-link="${esc(item.pain)}">
       <span class="dept-summary-label">${esc(item.label)}</span>
       <span class="dept-summary-reading st-${esc(item.st)}"><b>${fmt(item.value)}</b>${item.unit ? ` <small>${esc(item.unit)}</small>` : ''}</span>
       <span class="dept-summary-when">${esc(item.when)}<span aria-hidden="true">›</span></span></button>`).join('');
+    const questions = `<ul class="glass-flat signal-list topic-list">${c.pains.map((p) => `<li><button class="signal-row" data-pain-link="${esc(p.id)}">
+        <span class="signal-text"><strong>${esc(p.title)}</strong>${p.note ? `<small>${esc(first(p.note))}</small>` : ''}</span>
+        ${p.status !== 'none' ? chip(p.status) : '<span></span>'}<span class="signal-arrow" aria-hidden="true">›</span></button></li>`).join('')}</ul>`;
+    const fold = (title, n, body) => `<details class="section-details glass-flat"><summary>${title}<span class="cnt">${n}</span></summary><div class="section-details-body">${body}</div></details>`;
     return `<header class="page-head contour-head"><div><h1>${esc(c.name)}</h1>
       <p class="lead">${esc(c.head)} · ${fdate(c.period.from)} — ${fdate(c.period.to)}${S.user?.role === 'analyst' ? ' · Только чтение' : ''}</p></div>${chip(c.status)}</header>
-      ${overview ? `<section class="dept-summary-grid" aria-label="Сводка отдела">${overview}</section>` : ''}
-      <section class="contour-analysis"><h2 class="sec-title">Рабочие вопросы</h2>
-        ${questions}</section>
-      <section class="all-kpis" aria-label="Показатели отдела"><h2 class="sec-title">Показатели отдела</h2><div class="kpi-grid">${c.kpis.map((k) => kpiTile(k)).join('')}</div></section>
-      ${showCharts && c.alerts.length ? `<section class="glass-flat signals" id="alerts"><header><h2 class="sec-title">Отклонения от плана</h2></header>${signalList(c.alerts)}</section>` : ''}
-      ${showCharts ? deptAppPanel(c.dept) : ''}`;
+      ${verdict}
+      ${overview ? `<section class="dept-summary-grid" aria-label="Три главных числа отдела">${overview}</section>` : ''}
+      <section class="contour-analysis"><h2 class="sec-title">Рабочие вопросы</h2>${questions}</section>
+      ${fold('Все показатели отдела', c.kpis.length, `<div class="kpi-grid">${c.kpis.map((k) => kpiTile(k)).join('')}</div>`)}
+      ${director && c.alerts.length ? fold('Отклонения от плана', c.alerts.length, signalList(c.alerts)) : ''}
+      ${director ? deptAppPanel(c.dept) : ''}`;
   }
 
   /* ---------- разделы ---------- */
   const views = {
     mydash: () => window.Studio.dashboard(),          // свой дашборд и конструктор виджетов — t1/studio.js
+    /* На «Пульсе» — только пульс: восемь звеньев потока заказа. Подробности — при наведении и в разделах отделов. */
     pulse(p) {
-      const primary = ['on_time', 'revenue', 'margin', 'sla'].map((id) => p.kpis.find((k) => k.id === id)).filter(Boolean);
-      const al = p.alerts, queue = overviewQueue(p.bottleneck);
-      const map = `<section class="glass-flat map-panel" aria-labelledby="company-map-title"><header><h2 class="sec-title" id="company-map-title">Карта компании</h2><div class="legend"><span><i style="background:var(--ok)"></i>в норме</span><span><i style="background:var(--brand2)"></i>внимание</span><span><i style="background:var(--bad)"></i>критично</span></div></header>${mapSvg(p)}</section>`;
-      return `<header class="page-head"><div><h1>Пульс компании</h1><p class="lead">${fdate(p.period.from)} — ${fdate(p.period.to)}</p></div></header>
-        <section aria-label="Ключевые показатели"><div class="kpi-grid primary-kpis">${primary.map((k) => kpiTile(k, true)).join('')}</div></section>
-        <div class="overview-grid${queue ? ' with-queue' : ''}">
-          <section class="glass-flat signals"><header><h2 class="sec-title">Требует решения</h2>
-            ${al.length ? `<button class="btn btn-sm" data-go="attention">Все отклонения · ${al.length}</button>` : ''}</header>
-            ${signalList(al.slice(0, 3))}</section>
-          ${queue}</div>
-        ${map}
-        <details class="section-details glass-flat"><summary>Сводка по отделам</summary><div class="section-details-body">${deptCards(p)}</div></details>
-        <section class="all-kpis"><h2 class="sec-title">Все показатели <span class="cnt">${p.kpis.length}</span></h2>
-          <div class="kpi-grid">${p.kpis.map((k) => kpiTile(k, true)).join('')}</div></section>`;
+      const n = p.pulse.critical + p.pulse.warn;
+      const lead = p.pulse.critical ? `Из ${p.pulse.total} показателей ${p.pulse.critical} требуют решения${p.pulse.warn ? `, ещё ${p.pulse.warn} под вниманием` : ''}.`
+        : n ? `Критичного нет, под вниманием ${p.pulse.warn} из ${p.pulse.total} показателей.` : `Все ${p.pulse.total} показателей в норме.`;
+      return `<header class="page-head pulse-head"><div><h1>Пульс компании</h1>
+          <p class="lead">${lead} ${matchMedia('(hover: none)').matches ? 'Нажмите' : 'Наведите'} на звено — увидите, что в нём происходит.</p></div><span class="spacer"></span>
+          <div class="legend"><span><i style="background:var(--ok)"></i>в норме</span><span><i style="background:var(--warn)"></i>внимание</span><span><i style="background:var(--bad)"></i>критично</span></div></header>
+        <section class="pulse-map" aria-label="Сквозной поток заказа">${mapSvg(p)}</section>`;
     },
     attention(p) {
-      return `<header class="page-head"><h1>${S.user.role === 'head' ? 'Отклонения от плана' : 'Требует решения'}</h1><span class="cnt">${p.alerts.length}</span></header>
+      return `<header class="page-head"><div><h1>Отклонения</h1><p class="lead">${p.alerts.length ? `Требуют решения: ${p.alerts.length}. У каждого — причина, ответственный и кнопка «Оформить решение».` : 'Все показатели в пределах плана.'}</p></div></header>
         <section class="alerts">${p.alerts.map(alertCard).join('') || '<p class="glass-flat empty">Отклонений нет.</p>'}</section>`;
     },
     async decisions() {
@@ -639,6 +718,9 @@
       let ql = null, qerr = null;
       if (['director', 'analyst'].includes(S.user.role)) { try { ql = await cached('quality', '/api/pult/quality'); } catch (e) { qerr = e; } }
       const audit = await api('/api/pult/audit');
+      let gw = null;
+      if (['director', 'analyst'].includes(S.user.role)) { try { gw = await api('/api/gateway'); } catch (e) { /* без панели шлюза */ } }
+      const gate = gw ? gatewayPanel(gw) : '';
       const src = ql ? `<section class="glass panel"><header><h2>Источники данных</h2><span class="faint" style="font-size:13px">пять систем связаны по номеру заказа и клиента</span></header>
           <div class="scroll-x"><table class="tbl"><thead><tr><th>Система</th><th>Обновлено</th><th>Свежесть</th><th class="n">Записей</th><th class="n">Пропуски</th><th class="n">Дубли</th></tr></thead><tbody>
           ${ql.sources.map((s) => `<tr><td>${esc(s.system)}</td><td class="num">${ftime(s.synced)}</td><td>${chip(s.status)} <span class="faint">${fmt(s.age_h)} ч назад</span></td><td class="n">${fmt(s.rows)} <span class="faint">${esc(s.what)}</span></td>
@@ -647,12 +729,43 @@
           ${ql.reconciliation.map((r) => `<tr><td>${esc(r.month)}</td><td class="n">${fmt(r.erp)}</td><td class="n">${fmt(r.fin)}</td><td class="n ${r.diff ? 'st-warn' : ''}">${fmt(r.diff)}</td><td>${r.status === 'ok' ? chip('ok') : '<span class="chip chip-warn"><i></i>расходится</span>'}</td></tr>`).join('')}</tbody></table></div>
           <p class="note" style="margin-top:12px">${esc(ql.note)} Заказы: ${ql.unposted.map(esc).join(', ')}.</p></section>`
         : `<section class="glass panel"><header><h2>Источники данных</h2></header><div class="lock-note">${I.lock}<span>${qerr ? esc(qerr.message) : 'Качество данных и сверку видят директор и аналитик.'}</span></div></section>`;
-      return `<header class="page-head"><div><h1>Данные и журнал</h1><p class="lead">Насколько можно верить цифрам и кто что менял: пользователь, время, действие, объект, результат.</p></div></header>${src}
+      return `<header class="page-head"><div><h1>Данные и журнал</h1><p class="lead">Насколько можно верить цифрам и кто что менял: пользователь, время, действие, объект, результат.</p></div></header>${gate}${src}
         <section class="glass panel"><header><h2>Журнал действий</h2><span class="faint" style="font-size:13px">${S.user.role === 'head' ? 'ваши действия и решения вашего подразделения' : 'все пользователи'}</span></header>
           <div class="scroll-x"><table class="tbl"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Результат</th><th>Подробности</th></tr></thead><tbody>
           ${audit.slice(0, 60).map((a) => `<tr><td class="num">${ftime(a.ts)}</td><td>${esc(a.who)}</td><td>${esc(a.action)}</td><td class="num">${esc(a.object || '—')}</td><td class="${a.result === 'отказ' ? 'st-bad' : ''}">${esc(a.result || 'ok')}</td><td class="muted">${esc(a.detail || '')}</td></tr>`).join('') || '<tr><td colspan="6" class="faint">Записей пока нет</td></tr>'}</tbody></table></div></section>`;
     },
   };
+  /* ИИ-шлюз: одна точка выхода к моделям. Показываем, куда сейчас идут запросы, правила и счётчики — без текста запросов. */
+  function gatewayPanel(g) {
+    const st = g.state, t = g.totals, av = st.available;
+    const modes = [['local', '', 'Локальная модель', 'на этом компьютере, наружу ничего не уходит', true],
+      ['cloud', 'claude', 'Claude', av.claude ? 'облако, данные скрыты метками' : av.claude_note, av.claude],
+      ['cloud', 'deepseek', 'DeepSeek', av.deepseek ? 'облако, данные скрыты метками' : 'нет ключа', av.deepseek],
+      ['off', '', 'Без модели', 'только встроенные правила', true]];
+    const cur = (m, c) => st.mode === m && (m !== 'cloud' || st.cloud === c);
+    const canSwitch = S.user.role === 'director';
+    return `<section class="glass panel gate"><header><h2>ИИ-шлюз</h2><span class="chip ${st.outside ? 'chip-warn' : 'chip-ok'}"><i></i>${st.outside ? 'запросы уходят в облако' : st.mode === 'off' ? 'модель выключена' : 'запросы не покидают компьютер'}</span>
+        <span class="spacer"></span><span class="faint" style="font-size:13px">сейчас отвечает: ${esc(st.provider)}${st.model ? ' · ' + esc(st.model) : ''}</span></header>
+      <div class="gate-modes" role="group" aria-label="Куда идут запросы к модели">${modes.map(([m, c, name, note, ok]) => `<button class="glass-flat gate-mode" data-gate-mode="${m}" data-gate-cloud="${c}" aria-pressed="${cur(m, c)}"${ok && canSwitch ? '' : ' disabled'}>
+        <b>${name}</b><small>${esc(note)}</small></button>`).join('')}</div>
+      <div class="facts gate-facts"><div class="fact"><small>Запросов к моделям</small><b>${fmt(t.calls)}</b></div><div class="fact"><small>Из них в облако</small><b>${fmt(t.outside)}</b></div>
+        <div class="fact"><small>Скрыто значений</small><b>${fmt(t.hidden)}</b> <span class="faint">шлюзом: ${fmt(t.auto_hidden)}</span></div>
+        <div class="fact"><small>Не пропущено</small><b class="${t.blocked ? 'st-bad' : ''}">${fmt(t.blocked)}</b> <span class="faint">помечено: ${fmt(t.flagged)}</span></div></div>
+      <ul class="gate-rules">${g.rules.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+      <details class="section-details glass-flat"><summary>Последние обращения<span class="cnt">${g.last.length}</span></summary><div class="section-details-body scroll-x"><table class="tbl"><thead><tr><th>Время</th><th>Модель</th><th>Куда</th><th class="n">Скрыто</th><th class="n">Знаков</th><th class="n">Время, с</th><th>Итог</th></tr></thead><tbody>
+        ${g.last.map((x) => `<tr><td class="num">${ftime(x.ts)}</td><td>${esc(x.provider)}</td><td>${x.outside ? 'облако' : 'локально'}</td><td class="n">${x.hidden}</td><td class="n">${fmt(x.chars_in)}</td><td class="n">${fmt(x.ms / 1000)}</td>
+          <td class="${x.blocked ? 'st-bad' : x.ok ? '' : 'st-warn'}">${x.blocked ? 'не пропущен: ' + esc(x.blocked) : x.ok ? 'ответ получен' : 'модель не ответила'}${x.flagged ? ' · помечен' : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="faint">Обращений пока не было</td></tr>'}</tbody></table></div></details>
+      ${canSwitch ? '' : '<p class="src">Переключать модель может директор.</p>'}</section>`;
+  }
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-gate-mode]'); if (!b || b.disabled) return;
+    try {
+      await api('/api/ai/mode', { body: { mode: b.dataset.gateMode, cloud: b.dataset.gateCloud || undefined } });
+      toast('Запросы к модели теперь идут так: ' + $('b', b).textContent);
+      renderView();
+    } catch (err) { toast(err.message); }
+  });
+
   /* Эффект решения считается сам: показатель за две недели до решения и за последние две недели после. */
   const EFF_CLS = { 'лучше': 'st-ok', 'хуже': 'st-bad', 'без изменений': 'faint' };
   /* Закрыто, а показатель хуже или так и остался вне плана — честно подсветить. */
@@ -707,6 +820,7 @@
       }
       el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
       fillHyps();
+      if (view === 'pulse') (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(() => { if (my === S.seq) fitMap(); });
     } catch (e) { if (my === S.seq) el.innerHTML = errorBox(e, 'rerender'); }
   }
 
@@ -974,8 +1088,9 @@
 
   /* ---------- общие нажатия ---------- */
   document.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act],[data-kpi],[data-company-kpi],[data-decide],[data-decision],[data-node],[data-go],[data-pain-link]');
-    if (!t) return;
+    const t = e.target.closest('[data-act],[data-kpi],[data-company-kpi],[data-decide],[data-decision],[data-node],[data-go],[data-pain-link],[data-core]');
+    if (!t) { if (mapTouch) hideMapCard(); return; }
+    if (t.hasAttribute('data-core')) { hideMapCard(); return go('attention'); }
     if (t.dataset.act === 'closeLayer') return closeLayer();
     if (t.dataset.act === 'load') return load();
     if (t.dataset.act === 'rerender') return renderView();
@@ -992,18 +1107,26 @@
     if (t.dataset.decide) return openDecisionForm({ kpi: t.dataset.decide });
     if (t.dataset.decision) return openDecision(t.dataset.decision);
     if (t.dataset.kpi) return openKpi(t.dataset.kpi, t.dataset.by);
-    if (t.dataset.node) return openCompanyKpi(t.dataset.node);
+    if (t.dataset.node) {
+      if (mapTouch && t.closest('#map') && !t.classList.contains('is-armed')) {       // палец: первое касание — карточка, второе — разбор
+        $$('#map .is-armed').forEach((x) => x.classList.remove('is-armed')); t.classList.add('is-armed'); showMapCard(t); return;
+      }
+      hideMapCard();
+      return openCompanyKpi(t.dataset.node);
+    }
   });
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && S.pulse) { e.preventDefault(); openPalette(); return; }
     if (e.key === 'Escape') {
       if ($('#layer').innerHTML) closeLayer();
+      else if (mapOn) hideMapCard();
       else if ($('#rail')?.classList.contains('is-open')) setMenu(false);
       else if (window.Studio && window.Studio.isOpen()) window.Studio.close();
       else if ($('#chat')) $('#chatX').click();
       return;
     }
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#map .node')) { e.preventDefault(); openCompanyKpi(e.target.dataset.node); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#map .node')) { e.preventDefault(); hideMapCard(); openCompanyKpi(e.target.dataset.node); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#map .core')) { e.preventDefault(); hideMapCard(); go('attention'); }
   });
   window.addEventListener('offline', () => toast('Нет сети. Данные на экране могли устареть, введённое в формах сохранено.'));
   window.addEventListener('online', () => $('#view') && toast('Сеть вернулась', { label: 'Обновить данные', run: reload }));

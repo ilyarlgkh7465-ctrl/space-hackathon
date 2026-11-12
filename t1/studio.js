@@ -1,4 +1,4 @@
-/* Рабочее место с ИИ (на весь экран), графики по запросу, «Мой дашборд» и конструктор виджетов.
+/* Помощник (на весь экран: чат и голос с шаром), графики по запросу, «Мой дашборд» и конструктор виджетов.
    Данные и права — только с сервера (/api/pult/ai/ask, /api/pult/widgets, /api/pult/docs, /api/pult/search).
    Общие функции пульта берём из window.FP (их выставляет app.js). */
 (() => {
@@ -9,8 +9,8 @@
   const esc = (v) => F().esc(v);
   const fmt = (v) => F().fmt(v);
   /* категориальная палитра проверена на различимость (в т.ч. при нарушениях цветового зрения) — порядок не менять */
-  const PAL = ['#B4313B', '#1F7FA8', '#C9931C', '#7466B8', '#3F9361', '#D46A93'];
-  const ONE = '#454548';                                     // один ряд — один цвет (тёмно-серый, красный — для бренда и тревоги)
+  const PAL = ['#1F7FA8', '#E0644B', '#7466B8', '#3F9361', '#C9931C', '#C2558A'];
+  const ONE = '#2F6F8F';                                     // один ряд — один цвет
   const svg = (d, w = 18) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const IC = {
     bar: '<path d="M4 6h11M4 12h16M4 18h7"/>', column: '<path d="M6 20V11M12 20V5M18 20v-6"/>', line: '<path d="M3 17l5-6 4 3 6-8 3 3"/>',
@@ -20,19 +20,12 @@
     send: '<path d="M4 12l16-8-6 16-3-6z"/>', doc: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/>', up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
     left: '<path d="M15 6l-6 6 6 6"/>', right: '<path d="M9 6l6 6-6 6"/>', trash: '<path d="M5 7h14M10 7V5h4v2M7 7l1 13h8l1-13"/>', size: '<path d="M4 9V4h5M20 15v5h-5M4 4l6 6M20 20l-6-6"/>',
     dl: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', dash: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="5" rx="2"/><rect x="13" y="10" width="8" height="11" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/>',
-    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>', search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>', route: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/>',
+    kb: '<path d="M4 6h16v10H9l-5 4z"/><path d="M8 10h8M8 13h5"/>', grip: '<circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/>', search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>', route: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   };
   const CH = { bar: 'Полосы', column: 'Столбцы', line: 'Линия', donut: 'Круговая', table: 'Таблица', kpi: 'Число', gauge: 'Индикатор', summary: 'Сводка' };
   const CH_NOTE = { bar: 'рейтинг категорий', column: 'сравнение и этапы', line: 'динамика с планом', donut: 'доли целого', table: 'точные цифры, выгрузка', kpi: 'одна цифра и тренд', gauge: 'выполнение плана', summary: 'текст ИИ по данным' };
-  const AGENTS = [
-    ['genbi', 'Аналитик данных', 'Графики и таблицы по запросу, можно добавить на дашборд', 'Покажи оборот по продуктам круговой диаграммой'],
-    ['qa', 'Ответы по данным', 'Короткий вывод по цифрам роли со сравнением с планом', 'Как у нас со средним чеком и повторными покупками?'],
-    ['why', 'Отклонения и причины', 'От показателя к причине и ответственному', 'Почему упали заказы в срок?'],
-    ['docs', 'Документы', 'Ответы по регламентам и договорам со ссылкой на пункт', 'Сколько часов даётся на модерацию заказа?'],
-    ['summary', 'Краткое содержание', 'Главное из документа: пункты, сроки, кто отвечает', 'Кратко: регламент отгрузки и доставки'],
-    ['search', 'Поиск', 'По всем показателям, разрезам, виджетам, решениям и документам', 'Найди всё про брак'],
-  ];
-  const AG = Object.fromEntries(AGENTS.map((a) => [a[0], a[1]]).concat([['supervisor', 'Супервизор']]));
+  const AG = { supervisor: 'Супервизор', genbi: 'Аналитик данных', qa: 'Ответы по данным', why: 'Отклонения и причины', docs: 'Документы', summary: 'Краткое содержание', search: 'Поиск' };
 
   const St = { msgs: [], docs: null, busy: false, dash: null, side: false };
 
@@ -180,52 +173,85 @@
     const sw = types.length > 1 && where !== 'prev' ? `<div class="wsw" role="group" aria-label="Вид">${types.map((t) => `<button data-sa="type" data-k="${key}" data-t="${t}" aria-pressed="${t === w.type}" data-tip="${CH[t]}" aria-label="${CH[t]}">${svg(IC[t], 16)}</button>`).join('')}</div>` : '';
     const tools = where === 'prev' ? '' : where === 'chat'
       ? `<button class="btn btn-sm" data-sa="pin" data-k="${key}">${svg(IC.plus, 15)} На мой дашборд</button>`
-      : `<button class="btn btn-icon btn-ghost wt" data-sa="wmove" data-k="${key}" data-m="-1" aria-label="Левее" data-tip="Левее">${svg(IC.left, 16)}</button><button class="btn btn-icon btn-ghost wt" data-sa="wmove" data-k="${key}" data-m="1" aria-label="Правее" data-tip="Правее">${svg(IC.right, 16)}</button>
-         <button class="btn btn-icon btn-ghost wt" data-sa="wsize" data-k="${key}" aria-label="Размер" data-tip="Размер: ${{ s: 'узкий', m: 'половина', l: 'на всю ширину' }[w.size || 'm']}">${svg(IC.size, 16)}</button>
+      : `<button class="btn btn-icon btn-ghost wt" data-sa="wsize" data-k="${key}" aria-label="Размер" data-tip="Размер: ${{ s: 'узкий', m: 'половина', l: 'на всю ширину' }[w.size || 'm']}">${svg(IC.size, 16)}</button>
          <button class="btn btn-icon btn-ghost wt" data-sa="wdel" data-k="${key}" aria-label="Удалить" data-tip="Удалить">${svg(IC.trash, 16)}</button>`;
     const more = (w.source || {}).kind === 'drill' && !d.locked ? `<button class="btn btn-sm btn-ghost" data-kpi="${esc(w.source.kpi)}" data-by="${esc(w.source.by || '')}">До причины</button>` : (w.source || {}).kind === 'kpi' && !d.locked ? `<button class="btn btn-sm btn-ghost" data-kpi="${esc(w.source.kpi)}">Карточка показателя</button>` : '';
-    return `<article class="wcard glass-flat w-${w.size || 'm'}" data-key="${key}"><header><div class="wh"><h3>${esc(w.title)}</h3><small>${esc(meta(w))}</small></div>${sw}</header>
+    const grip = where === 'dash' ? `<button class="wgrip" data-grip="${key}" aria-label="Переместить виджет «${esc(w.title)}»: перетащите мышью или нажимайте стрелки" data-tip="Перетащите, чтобы переставить">${svg(IC.grip, 16)}</button>` : '';
+    return `<article class="wcard glass-flat w-${w.size || 'm'}" data-key="${key}"><header>${grip}<div class="wh"><h3>${esc(w.title)}</h3><small>${esc(meta(w))}</small></div>${sw}</header>
       <div class="wbody">${chart(w)}</div>
       ${d.note && w.type !== 'summary' && !(said && said.includes(d.note)) ? `<p class="wnote">${esc(d.note)}</p>` : ''}
       ${where === 'prev' ? '' : `<footer>${tools}${d.rows || d.series ? `<button class="btn btn-sm btn-ghost" data-sa="csv" data-k="${key}">${svg(IC.dl, 15)} CSV</button>` : ''}${more}</footer>`}</article>`;
   }
 
-  /* ---------- рабочее место ---------- */
+  /* ---------- помощник: один спокойный экран, два режима — чат и голос ---------- */
+  const orbHtml = (size, id = '') => `<span class="orb orb-${size}"${id ? ` id="${id}"` : ''} data-state="idle" aria-hidden="true"><i class="orb-ring"></i><i class="orb-ring r2"></i><span class="orb-core"><i></i><i></i><i></i></span></span>`;
+  const EXAMPLES = ['Что сейчас требует решения?', 'Покажи оборот по продуктам', 'Почему упали заказы в срок?', 'Кратко: регламент отгрузки и доставки'];
+  const V_LABEL = { idle: 'Нажмите на шар и говорите', listening: 'Слушаю', hearing: 'Распознаю', thinking: 'Думаю', speaking: 'Отвечаю', muted: 'Микрофон выключен' };
+  const Vc = { on: false, state: 'idle', status: null, engine: '', muted: false, run: 0, t0: 0, timer: 0, raf: 0, lvl: 0, stream: null, ac: null, an: null, rec: null, sr: null, src: null };
+
   function open(q, opts = {}) {
     let el = $('#studio');
     if (!el) {
       el = document.createElement('section');
-      el.id = 'studio'; el.className = 'studio'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Рабочее место с ИИ');
+      el.id = 'studio'; el.className = 'studio'; el.dataset.mode = 'chat';
+      el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Помощник');
       document.body.append(el);
       document.documentElement.classList.add('studio-on');
       const fab = $('#fab'); if (fab) fab.classList.add('hidden');
       renderShell(el);
       loadDocs();
     }
+    if (opts.voice) return voiceStart();
     if (opts.doc) return askDoc(opts.doc, opts.title);
     if (q) ask(q); else $('#stIn').focus();
   }
   function close() {
     const el = $('#studio'); if (!el) return;
+    voiceStop(true);
     el.classList.add('closing');
     setTimeout(() => { el.remove(); document.documentElement.classList.remove('studio-on'); const fab = $('#fab'); if (fab) { fab.classList.remove('hidden'); fab.focus(); } }, 180);
   }
+  function setMode(m) {
+    const el = $('#studio'); if (!el) return;
+    el.dataset.mode = m;
+    $$('.st-mode button', el).forEach((b) => b.setAttribute('aria-pressed', b.dataset.m === m));
+    if (m === 'chat') { draw(); const i = $('#stIn'); if (i) i.focus(); }
+  }
   function renderShell(el) {
     const u = F().S.user;
-    el.innerHTML = `<aside class="st-side glass" id="stSide">
-        <div class="st-brand"><span class="st-orb">${svg(IC.spark, 20)}</span><div><b>Рабочее место с ИИ</b><small>${esc(u.name)} · ${esc(u.title)}</small></div></div>
-        <button class="btn btn-accent st-new" data-sa="new">${svg(IC.plus, 16)} Новый разговор</button>
-        <section><p class="eyebrow">Агенты · запрос распределяет супервизор</p><ul class="st-agents">${AGENTS.map((a) => `<li><button data-sa="example" data-q="${esc(a[3])}"><b>${esc(a[1])}</b><small>${esc(a[2])}</small></button></li>`).join('')}</ul></section>
-        <section class="st-docs"><div class="st-row"><p class="eyebrow">Документы</p><label class="btn btn-sm btn-ghost st-up" data-tip=".docx, .txt, .md, .csv до 3 МБ">${svg(IC.up, 15)} Загрузить<input type="file" id="stFile" accept=".docx,.txt,.md,.csv" hidden></label></div>
-          <input class="input st-dfind" id="stDfind" placeholder="Найти документ" autocomplete="off"><ul id="stDocs" class="st-doclist"><li class="faint">Загрузка…</li></ul><p class="faint st-hidden" id="stHidden"></p></section>
-      </aside>
-      <main class="st-main glass">
-        <header class="st-top"><button class="btn btn-icon btn-ghost st-menu" data-sa="side" aria-label="Агенты и документы">${svg(IC.menu)}</button>
-          <div class="st-title"><h2>Помощник руководителя</h2><p class="faint">Отвечает только по данным и документам роли «${esc(u.title)}». Цифры считает система, модель их не придумывает.</p></div>
-          <button class="btn btn-sm" data-sa="todash">${svg(IC.dash, 16)} Мой дашборд</button><button class="btn btn-icon btn-ghost" data-sa="close" aria-label="Свернуть (Esc)" data-tip="Свернуть · Esc">${svg(IC.close)}</button></header>
+    el.innerHTML = `<header class="st-bar">
+        <div class="st-id">${orbHtml('xs')}<div><b>Помощник</b><small>Видит только то, что доступно роли «${esc(u.title)}»</small></div></div>
+        <div class="seg st-mode" role="group" aria-label="Режим"><button data-sa="mode" data-m="chat" aria-pressed="true">${svg(IC.kb, 16)} Чат</button><button data-sa="mode" data-m="voice" aria-pressed="false">${svg(IC.mic, 16)} Голос</button></div>
+        <div class="st-acts"><button class="btn btn-sm btn-ghost" data-sa="new">${svg(IC.plus, 15)} Новый разговор</button>
+          <button class="btn btn-icon btn-ghost" data-sa="close" aria-label="Закрыть помощника" data-tip="Закрыть · Esc">${svg(IC.close)}</button></div>
+      </header>
+      <main class="st-chat">
         <div class="st-log" id="stLog" aria-live="polite"></div>
-        <form class="st-compose" id="stForm"><textarea id="stIn" rows="1" maxlength="600" placeholder="Например: покажи брак по причинам за неделю, сделай круговую, что сказано в договоре доставки…"></textarea>
-          <button class="btn btn-primary btn-icon" aria-label="Отправить">${svg(IC.send)}</button></form>
+        <div class="st-foot">
+          <div class="st-docs glass" id="stDocsPanel" hidden>
+            <div class="st-row"><b>Документы</b><label class="btn btn-sm btn-ghost st-up" data-tip=".docx, .txt, .md, .csv до 3 МБ">${svg(IC.up, 15)} Загрузить свой<input type="file" id="stFile" accept=".docx,.txt,.md,.csv" hidden></label></div>
+            <input class="input st-dfind" id="stDfind" placeholder="Найти документ" autocomplete="off">
+            <ul id="stDocs" class="st-doclist"><li class="faint">Загрузка…</li></ul><p class="faint st-hidden" id="stHidden"></p>
+          </div>
+          <form class="st-compose glass" id="stForm">
+            <button type="button" class="btn btn-icon btn-ghost" data-sa="docs" aria-label="Документы: краткое содержание и вопросы" data-tip="Документы" aria-expanded="false">${svg(IC.doc, 19)}</button>
+            <textarea id="stIn" rows="1" maxlength="600" placeholder="Спросите о показателях, попросите график или документ"></textarea>
+            <button type="button" class="btn btn-icon btn-ghost" data-sa="mode" data-m="voice" aria-label="Говорить голосом" data-tip="Говорить голосом">${svg(IC.mic, 19)}</button>
+            <button class="btn btn-primary btn-icon" aria-label="Отправить">${svg(IC.send)}</button>
+          </form>
+        </div>
+      </main>
+      <main class="st-voice" aria-live="polite">
+        <p class="call-top"><span id="vTimer" class="num">0:00</span><span id="vEngine"></span></p>
+        <button class="orb-btn" data-sa="vorb" aria-label="Говорить или прервать ответ">${orbHtml('xl', 'vOrb')}</button>
+        <p class="v-state" id="vState">${V_LABEL.idle}</p>
+        <p class="v-you" id="vYou"></p>
+        <div class="v-answer" id="vAnswer"></div>
+        <div class="call-bar">
+          <button class="call-btn" data-sa="mode" data-m="chat" aria-label="Перейти в чат">${svg(IC.kb, 22)}<span>Чат</span></button>
+          <button class="call-btn" data-sa="vmute" id="vMute" aria-pressed="false" aria-label="Выключить микрофон">${svg(IC.mic, 22)}<span>Микрофон</span></button>
+          <button class="call-btn call-end" data-sa="vend" aria-label="Завершить разговор">${svg(IC.close, 22)}<span>Завершить</span></button>
+        </div>
       </main>`;
     const inp = $('#stIn', el);
     if (innerWidth < 760) inp.placeholder = 'Вопрос, график или документ…';
@@ -237,10 +263,9 @@
     draw();
   }
   function emptyState() {
-    const ex = ['Покажи оборот по продуктам круговой диаграммой', 'Почему упали заказы в срок?', 'Сравни брак и время изготовления за неделю таблицей', 'Как дела в компании — сводка', 'Сколько часов даётся на модерацию заказа?', 'Кратко: договор на курьерскую доставку'];
-    return `<div class="st-empty"><span class="st-orb big">${svg(IC.spark, 30)}</span><h1>Что посмотрим сегодня?</h1>
-      <p class="muted">Попросите график или таблицу — добавите на свой дашборд одной кнопкой. Спросите о причине отклонения, о пункте регламента или попросите краткое содержание документа.</p>
-      <div class="st-ex">${ex.map((x) => `<button class="glass-flat" data-sa="example" data-q="${esc(x)}">${esc(x)}</button>`).join('')}</div></div>`;
+    return `<div class="st-empty">${orbHtml('md')}<h1>Чем помочь?</h1>
+      <p class="muted">Отвечу по цифрам пульта и документам компании, построю график или таблицу. Можно голосом.</p>
+      <div class="st-ex">${EXAMPLES.map((x) => `<button class="btn" data-sa="example" data-q="${esc(x)}">${esc(x)}</button>`).join('')}</div></div>`;
   }
   function md(text, cites) {
     const byKey = Object.fromEntries((cites || []).map((c) => [c.doc + ':' + c.n, c]));
@@ -248,21 +273,32 @@
     h = h.replace(/\[D:(d\d+):(\d+)\]/g, (m, d, n) => { const c = byKey[d + ':' + n]; return `<button class="cite" data-sa="cite" data-doc="${d}" data-n="${n}" data-tip="${esc(c ? c.title + ', п. ' + n + ': ' + c.text.slice(0, 160) : 'пункт ' + n)}">${esc(c ? (c.code || 'док.') + ' п.' + n : 'п.' + n)}</button>`; });
     return h.split(/\n{2,}/).map((p) => /^(- |• |\d+\. )/m.test(p) ? `<ul>${p.split('\n').map((l) => `<li>${l.replace(/^(- |• |\d+\. )/, '')}</li>`).join('')}</ul>` : `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
   }
+  /* подсказки «что ещё можно» под последним ответом с графиком — вместо списка возможностей на экране */
+  function followUps(r) {
+    const w = (r.widgets || [])[0]; if (!w || !w.source || !['drill', 'kpi'].includes(w.source.kind)) return [];
+    const out = [];
+    if (w.source.kind === 'drill' && w.type !== 'donut' && w.data && w.data.additive) out.push('Сделай круговой');
+    if (w.type !== 'table' && w.source.kind === 'drill') out.push('Покажи таблицей');
+    if ((w.data && w.data.days) !== 30) out.push('За месяц');
+    return out;
+  }
   function aiMsg(m, i) {
-    if (m.wait) return `<div class="smsg ai"><div class="route"><span class="rchip live">${svg(IC.route, 13)} Супервизор выбирает агента</span></div><div class="typing"><i></i><i></i><i></i></div></div>`;
+    if (m.wait) return `<div class="smsg ai wait">${orbHtml('xs').replace('data-state="idle"', 'data-state="thinking"')}<span>Смотрю данные…</span></div>`;
     const r = m.res;
-    if (r.error) return `<div class="smsg ai"><p class="st-bad">${esc(r.error)}</p></div>`;
-    const route = (r.route || []).map((x) => `<span class="rchip ${x === 'supervisor' ? '' : 'on'}">${esc(AG[x] || x)}</span>`).join(`<span class="rarrow">${svg(IC.route, 12)}</span>`);
+    if (r.error) return `<div class="smsg ai"><div class="stext st-bad">${esc(r.error)}</div></div>`;
+    const who = (r.route || []).filter((x) => x !== 'supervisor').map((x) => AG[x] || x)[0];
     const s = r.summary;
     const sum = s ? `<div class="sumcard glass-flat"><header><span class="dicon">${svg(IC.doc, 18)}</span><div><b>${esc(s.title)}</b><small>${esc([s.code, s.kind, s.date].filter(Boolean).join(' · '))} · ${plural(s.n_items, 'пункт', 'пункта', 'пунктов')}</small></div></header>
         <p class="sum-about">${esc(s.about)}</p><ol class="sum-pts">${(s.points || []).map((p) => `<li>${esc(p.text)}${p.n ? ` <button class="cite" data-sa="cite" data-doc="${esc(s.doc)}" data-n="${esc(p.n)}">п.${esc(p.n)}</button>` : ''}</li>`).join('')}</ol>
-        ${s.who ? `<p class="muted"><b>Кого касается:</b> ${esc(s.who)}</p>` : ''}${(s.deadlines || []).length ? `<p class="muted"><b>Сроки:</b> ${s.deadlines.map(esc).join('; ')}</p>` : ''}
-        <p class="src">Сжато из ${fmt(s.chars)} знаков · ${esc(s.provider)}${s.masked ? ' · замаскировано значений: ' + s.masked : ''}</p></div>` : '';
+        ${s.who ? `<p class="muted"><b>Кого касается:</b> ${esc(s.who)}</p>` : ''}${(s.deadlines || []).length ? `<p class="muted"><b>Сроки:</b> ${s.deadlines.map(esc).join('; ')}</p>` : ''}</div>` : '';
     const res = (r.results || []).length ? `<ul class="sres">${r.results.map((x, j) => `<li><button data-sa="result" data-i="${i}" data-j="${j}"><span class="sg">${esc(x.group)}</span><b>${esc(x.title)}</b><small>${esc(x.sub)}</small></button></li>`).join('')}</ul>` : '';
     const ws = (r.widgets || []).map((w, j) => card(w, 'chat', i + ':' + j, r.text)).join('');
-    const cites = (r.cites || []).length ? `<div class="srcs"><p class="eyebrow">Источники</p>${r.cites.map((c) => `<button class="srcdoc" data-sa="cite" data-doc="${esc(c.doc)}" data-n="${esc(c.n)}"><b>${esc(c.code || '')} п.${esc(c.n)}</b> ${esc(c.title)}<small>${esc(c.text.slice(0, 180))}</small></button>`).join('')}</div>` : '';
-    return `<div class="smsg ai"><div class="route">${route}</div>${r.text && !s ? `<div class="stext">${md(r.text, r.cites)}</div>` : ''}${sum}${res}${ws ? `<div class="wlist">${ws}</div>` : ''}${cites}
-      <p class="smeta">${esc(r.provider || '')}${r.masked ? ` · замаскировано значений: ${r.masked}` : ''}${r.asof ? ' · данные на ' + F().ftime(r.asof) : ''}${r.hidden ? ` · закрытых для роли документов: ${r.hidden}` : ''}</p></div>`;
+    const cites = (r.cites || []).length ? `<div class="srcs">${r.cites.map((c) => `<button class="srcdoc" data-sa="cite" data-doc="${esc(c.doc)}" data-n="${esc(c.n)}"><b>${esc(c.code || '')} п.${esc(c.n)}</b> ${esc(c.title)}<small>${esc(c.text.slice(0, 180))}</small></button>`).join('')}</div>` : '';
+    const last = i === St.msgs.length - 1, fu = last ? followUps(r) : [];
+    const meta = [who, r.provider, r.masked ? `скрыто личных данных: ${r.masked}` : '', r.asof ? 'данные на ' + F().ftime(r.asof) : '', r.hidden ? `закрытых для роли документов: ${r.hidden}` : ''].filter(Boolean).join(' · ');
+    return `<div class="smsg ai">${r.text && !s ? `<div class="stext">${md(r.text, r.cites)}</div>` : ''}${sum}${res}${ws ? `<div class="wlist">${ws}</div>` : ''}${cites}
+      ${fu.length ? `<div class="st-fu">${fu.map((x) => `<button class="btn btn-sm" data-sa="example" data-q="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
+      <p class="smeta">${esc(meta)}</p></div>`;
   }
   function draw() {
     const log = $('#stLog'); if (!log) return;
@@ -277,10 +313,18 @@
     try { m.res = await F().api('/api/pult/ai/ask', { body: Object.assign({ question: text, days: S.days, product: S.product, last: lastWidgets() }, extra) }); }
     catch (e) { m.res = { error: e.message }; }
     m.wait = false; St.busy = false; draw();
-    const inp = $('#stIn'); if (inp) inp.focus();
+    const inp = $('#stIn'); if (inp && $('#studio').dataset.mode === 'chat') inp.focus();
+    return m.res;
   }
-  const askDoc = (id, title) => ask('Краткое содержание: ' + (title || 'документ'), { doc: id });
+  const askDoc = (id, title) => { toggleDocs(false); if ($('#studio').dataset.mode !== 'chat') setMode('chat'); return ask('Краткое содержание: ' + (title || 'документ'), { doc: id }); };
 
+  function toggleDocs(show) {
+    const p = $('#stDocsPanel'); if (!p) return;
+    const on = show == null ? p.hidden : show;
+    p.hidden = !on;
+    const b = $('[data-sa="docs"]'); if (b) b.setAttribute('aria-expanded', String(on));
+    if (on) $('#stDfind').focus();
+  }
   async function loadDocs() {
     try { St.docs = await F().api('/api/pult/docs'); } catch (e) { St.docs = { docs: [], hidden: 0, error: e.message }; }
     drawDocs();
@@ -308,6 +352,173 @@
     rd.readAsDataURL(file);
   }
 
+  /* ---------- голос: разговор как по телефону — слушаю → думаю → отвечаю → снова слушаю ---------- */
+  function vSet(state, text) {
+    Vc.state = state;
+    const orb = $('#vOrb'); if (orb) orb.dataset.state = state === 'hearing' ? 'thinking' : state === 'muted' ? 'idle' : state;
+    const el = $('#vState'); if (el) el.textContent = text || V_LABEL[state];
+  }
+  function vLevelLoop() {
+    cancelAnimationFrame(Vc.raf);
+    const buf = Vc.an ? new Uint8Array(Vc.an.fftSize) : null;
+    const tick = () => {
+      const orb = $('#vOrb'); if (!orb || !Vc.on) return;
+      let target = 0;
+      if (Vc.state === 'listening' && Vc.an) { Vc.an.getByteTimeDomainData(buf); let s = 0; for (let i = 0; i < buf.length; i++) { const x = (buf[i] - 128) / 128; s += x * x; } target = Math.min(1, Math.sqrt(s / buf.length) * 6); Vc.heard = Math.max(Vc.heard || 0, target); }
+      else if (Vc.state === 'speaking') target = Vc.outAn ? outLevel() : 0.35 + 0.3 * Math.abs(Math.sin(performance.now() / 130)) * (0.6 + 0.4 * Math.sin(performance.now() / 470));
+      Vc.lvl += (target - Vc.lvl) * 0.25;
+      orb.style.setProperty('--lvl', Vc.lvl.toFixed(3));
+      Vc.raf = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+  function outLevel() {
+    const b = Vc.outBuf || (Vc.outBuf = new Uint8Array(Vc.outAn.fftSize));
+    Vc.outAn.getByteTimeDomainData(b); let s = 0; for (let i = 0; i < b.length; i++) { const x = (b[i] - 128) / 128; s += x * x; }
+    return Math.min(1, Math.sqrt(s / b.length) * 5);
+  }
+  const audioCtx = () => { if (!Vc.ac) Vc.ac = new (window.AudioContext || window.webkitAudioContext)(); if (Vc.ac.state === 'suspended') Vc.ac.resume(); return Vc.ac; };
+  async function voiceStart() {
+    const el = $('#studio'); if (!el) return;
+    toggleDocs(false); setMode('voice');
+    Vc.on = true; Vc.muted = false; Vc.run++; Vc.t0 = Date.now();
+    $('#vMute').setAttribute('aria-pressed', 'false');
+    $('#vYou').textContent = ''; $('#vAnswer').innerHTML = '';
+    clearInterval(Vc.timer);
+    Vc.timer = setInterval(() => { const t = $('#vTimer'); if (!t) return clearInterval(Vc.timer); const s = Math.floor((Date.now() - Vc.t0) / 1000); t.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }, 500);
+    if (!Vc.status) { try { Vc.status = await F().api('/api/assistant/voice/status'); } catch (e) { Vc.status = { stt: false, tts: false }; } }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const mic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    Vc.engine = Vc.status.stt && mic && window.MediaRecorder ? 'server' : SR ? 'browser' : '';
+    $('#vEngine').textContent = Vc.engine === 'server' ? 'речь распознаётся на сервере компании' : Vc.engine === 'browser' ? 'речь распознаёт браузер' : 'микрофон недоступен';
+    vLevelLoop();
+    if (!Vc.engine) { vSet('idle', 'Микрофон в этом браузере недоступен — перейдите в чат и напишите вопрос'); return; }
+    listen();
+  }
+  function voiceStop(silent) {
+    Vc.on = false; Vc.run++;
+    clearInterval(Vc.timer); cancelAnimationFrame(Vc.raf);
+    stopListening(); stopSpeaking();
+    if (Vc.stream) { Vc.stream.getTracks().forEach((t) => t.stop()); Vc.stream = null; Vc.an = null; }
+    if (!silent) setMode('chat');
+  }
+  function stopListening() {
+    if (Vc.rec && Vc.rec.state !== 'inactive') { Vc.rec.onstop = null; try { Vc.rec.stop(); } catch (e) { /* уже остановлен */ } }
+    Vc.rec = null;
+    if (Vc.sr) { Vc.sr.onend = Vc.sr.onresult = Vc.sr.onerror = null; try { Vc.sr.abort(); } catch (e) { /* не запущен */ } Vc.sr = null; }
+  }
+  function stopSpeaking() {
+    if (Vc.src) { try { Vc.src.onended = null; Vc.src.stop(); } catch (e) { /* уже закончился */ } Vc.src = null; }
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+  }
+  async function micStream() {
+    if (Vc.stream) return Vc.stream;
+    Vc.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    const ac = audioCtx(); Vc.an = ac.createAnalyser(); Vc.an.fftSize = 1024;
+    ac.createMediaStreamSource(Vc.stream).connect(Vc.an);
+    return Vc.stream;
+  }
+  async function listen() {
+    if (!Vc.on || Vc.muted) return;
+    const run = Vc.run;
+    stopSpeaking(); stopListening();
+    Vc.heard = 0;
+    try { if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await micStream(); }
+    catch (e) { if (Vc.engine === 'server') { vSet('idle', 'Нет доступа к микрофону. Разрешите его в браузере или перейдите в чат'); return; } }
+    if (run !== Vc.run) return;
+    vSet('listening');
+    if (Vc.engine === 'browser') {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const sr = Vc.sr = new SR(); sr.lang = 'ru-RU'; sr.interimResults = true; sr.continuous = false;
+      let final = '';
+      sr.onresult = (e) => { let t = ''; for (const r of e.results) { t += r[0].transcript; if (r.isFinal) final = t; } const y = $('#vYou'); if (y) y.textContent = t; };
+      sr.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { Vc.muted = true; vSet('idle', 'Нет доступа к микрофону. Разрешите его в браузере или перейдите в чат'); } };
+      sr.onend = () => { if (run !== Vc.run || !Vc.on) return; const t = (final || ($('#vYou') || {}).textContent || '').trim(); if (t) heard(t); else if (!Vc.muted) setTimeout(() => { if (run === Vc.run) listen(); }, 250); };
+      try { sr.start(); } catch (e) { vSet('idle', 'Не получилось включить распознавание речи'); }
+      return;
+    }
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].find((m) => MediaRecorder.isTypeSupported(m)) || '';
+    const rec = Vc.rec = new MediaRecorder(Vc.stream, mime ? { mimeType: mime } : undefined), chunks = [];
+    const t0 = performance.now(); let quiet = 0;
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = async () => {
+      if (run !== Vc.run || !Vc.on) return;
+      if ((Vc.heard || 0) < 0.08) return listen();                       // тишина — слушаем дальше
+      vSet('hearing');
+      try {
+        const blob = new Blob(chunks, { type: rec.mimeType || mime });
+        const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.readAsDataURL(blob); });
+        const r = await F().api('/api/assistant/voice/stt', { body: { audio: b64, mime: blob.type } });
+        if (run !== Vc.run) return;
+        const t = (r.text || '').trim();
+        if (t) { $('#vYou').textContent = t; heard(t); } else listen();
+      } catch (e) { if (run === Vc.run) { vSet('idle', e.message); } }
+    };
+    rec.start(250);
+    const watch = setInterval(() => {                                    // сам останавливается, когда человек замолчал
+      if (rec.state === 'inactive' || run !== Vc.run) return clearInterval(watch);
+      const spoke = (Vc.heard || 0) > 0.12;
+      quiet = Vc.lvl < 0.06 ? quiet + 1 : 0;
+      if ((spoke && quiet > 9) || performance.now() - t0 > 25000) { clearInterval(watch); rec.stop(); }
+    }, 120);
+  }
+  async function heard(text) {
+    const run = Vc.run;
+    stopListening();
+    vSet('thinking');
+    $('#vAnswer').innerHTML = '';
+    const r = await ask(text);
+    if (run !== Vc.run || !Vc.on) return;
+    const full = speakable(r.error || (r.summary ? r.summary.about : r.text) || 'Готово.');
+    let say = '';                                                          // голосом — коротко, как в разговоре: первые одно-два предложения
+    for (const part of full.match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g) || [full]) { if (say && (say + part).length > 260) break; say += part; }
+    say = say.trim() || full;
+    const extra = (r.widgets || []).length ? `<button class="btn btn-sm" data-sa="mode" data-m="chat">${svg(IC.column, 15)} Показать ${r.widgets.length > 1 ? 'графики' : (r.widgets[0].type === 'table' ? 'таблицу' : 'график')}</button>`
+      : r.summary || (r.cites || []).length || (r.results || []).length ? `<button class="btn btn-sm" data-sa="mode" data-m="chat">${svg(IC.doc, 15)} Открыть в чате</button>` : '';
+    const more = say.length < full.length && !extra ? `<button class="btn btn-sm" data-sa="mode" data-m="chat">${svg(IC.kb, 15)} Полный ответ в чате</button>` : '';
+    $('#vAnswer').innerHTML = `<p>${esc(say)}</p>${extra || more}`;
+    vSet('speaking');
+    await speak(say, run);
+    if (run !== Vc.run || !Vc.on) return;
+    if (Vc.muted) vSet('muted'); else listen();
+  }
+  const speakable = (t) => String(t || '').replace(/\[D:[^\]]+\]/g, '').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim().slice(0, 700);
+  async function speak(text, run) {
+    if (!text) return;
+    if (Vc.status && Vc.status.tts) {
+      try {
+        const r = await fetch('/api/assistant/voice/tts', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + F().S.token }, body: JSON.stringify({ text, voice: 'robot' }) });
+        if (r.ok && run === Vc.run) {
+          const ac = audioCtx(), buf = await ac.decodeAudioData(await r.arrayBuffer());
+          if (run !== Vc.run) return;
+          if (!Vc.outAn) { Vc.outAn = ac.createAnalyser(); Vc.outAn.fftSize = 1024; Vc.outAn.connect(ac.destination); }
+          await new Promise((res) => { const src = Vc.src = ac.createBufferSource(); src.buffer = buf; src.connect(Vc.outAn); src.onended = res; src.start(); });
+          return;
+        }
+      } catch (e) { /* нет синтеза на сервере — голос устройства */ }
+    }
+    if (!window.speechSynthesis) return new Promise((res) => setTimeout(res, Math.min(9000, 900 + text.length * 45)));
+    await new Promise((res) => {
+      const u = new SpeechSynthesisUtterance(text); u.lang = 'ru-RU'; u.rate = 1.03;
+      const v = window.speechSynthesis.getVoices().find((x) => /^ru/i.test(x.lang)); if (v) u.voice = v;
+      u.onend = u.onerror = res;
+      window.speechSynthesis.speak(u);
+      setTimeout(res, Math.min(60000, 4000 + text.length * 110));          // на случай, если браузер не сообщит об окончании
+    });
+  }
+  function vOrbTap() {
+    if (!Vc.on) return voiceStart();
+    if (Vc.state === 'speaking' || Vc.state === 'thinking') { Vc.run++; stopSpeaking(); Vc.muted = false; $('#vMute').setAttribute('aria-pressed', 'false'); return listen(); }
+    if (Vc.state === 'listening' && Vc.rec && Vc.rec.state === 'recording') { Vc.heard = Math.max(Vc.heard || 0, 0.2); return Vc.rec.stop(); }
+    if (Vc.state === 'idle' || Vc.state === 'muted') { Vc.muted = false; $('#vMute').setAttribute('aria-pressed', 'false'); Vc.run++; return listen(); }
+  }
+  function vMute() {
+    Vc.muted = !Vc.muted;
+    $('#vMute').setAttribute('aria-pressed', String(Vc.muted));
+    if (Vc.muted) { if (Vc.state === 'listening') { Vc.run++; stopListening(); vSet('muted'); } }
+    else if (Vc.state === 'muted' || Vc.state === 'idle') { Vc.run++; listen(); }
+  }
+
   /* ---------- мой дашборд ---------- */
   async function dashboard() {
     const S = F().S;
@@ -316,8 +527,8 @@
   }
   function dashHtml() {
     const ws = St.dash.widgets;
-    return `<header class="page-head"><div><h1>Мой дашборд</h1><p class="lead">Свои графики и таблицы. Соберите виджет в конструкторе или попросите помощника — и добавьте ответ одной кнопкой. Права те же, что на пульте: чужой отдел сюда не попадёт.</p></div>
-        <span class="spacer"></span><button class="btn" data-sa="ask">${svg(IC.spark, 17)} Спросить ИИ</button><button class="btn btn-primary" data-sa="builder">${svg(IC.plus, 16)} Виджет</button></header>
+    return `<header class="page-head"><div><h1>Мой дашборд</h1><p class="lead">Свои графики и таблицы. Соберите виджет в конструкторе или попросите помощника. Чтобы переставить — зажмите заголовок виджета и перетащите.</p></div>
+        <span class="spacer"></span><button class="btn" data-sa="ask">${orbHtml('xs')} Спросить помощника</button><button class="btn btn-primary" data-sa="builder">${svg(IC.plus, 16)} Виджет</button></header>
       <div class="dgrid" id="dgrid">${ws.map((w) => card(w, 'dash', w.id)).join('')}
         <button class="glass-flat dadd w-s" data-sa="builder">${svg(IC.plus, 26)}<b>Новый виджет</b><small>${Object.values(CH).join(' · ')}</small></button></div>
       ${ws.length ? '' : '<p class="faint">Виджетов пока нет.</p>'}<p class="src">Цифры пересчитываются при каждом открытии из тех же источников, что и пульт. <button class="linkbtn" data-sa="dreset">Вернуть набор по умолчанию</button></p>`;
@@ -420,16 +631,20 @@
     else if (g.doc) open('', { doc: g.doc, title: x.title });
   }
   document.addEventListener('click', async (e) => {
-    const b = e.target.closest('[data-sa]'); if (!b) return;
+    const b = e.target.closest('[data-sa]');
+    if (!b) { const p = $('#stDocsPanel'); if (p && !p.hidden && !e.target.closest('#stDocsPanel')) toggleDocs(false); return; }
     const a = b.dataset.sa, key = b.dataset.k;
     if (a === 'close') return close();
-    if (a === 'side') { $('#stSide').classList.toggle('open'); return; }
-    if (a === 'new') { St.msgs = []; draw(); $('#stSide').classList.remove('open'); $('#stIn').focus(); return; }
-    if (a === 'example') { $('#stSide') && $('#stSide').classList.remove('open'); if (!St.busy) ask(b.dataset.q); return; }
-    if (a === 'todash') { close(); F().go('mydash'); return; }
+    if (a === 'mode') { if (b.dataset.m === 'voice') return voiceStart(); voiceStop(true); return setMode('chat'); }
+    if (a === 'docs') return toggleDocs();
+    if (a === 'vorb') return vOrbTap();
+    if (a === 'vmute') return vMute();
+    if (a === 'vend') return voiceStop();
+    if (a === 'new') { St.msgs = []; if (Vc.on) voiceStop(true); setMode('chat'); return; }
+    if (a === 'example') { toggleDocs(false); if (!St.busy) ask(b.dataset.q); return; }
     if (a === 'ask') return open();
     if (a === 'builder') return builder();
-    if (a === 'doc') { $('#stSide').classList.remove('open'); const d = St.docs.docs.find((x) => x.id === b.dataset.doc); return askDoc(b.dataset.doc, d ? d.title : ''); }
+    if (a === 'doc') { const d = St.docs.docs.find((x) => x.id === b.dataset.doc); return askDoc(b.dataset.doc, d ? d.title : ''); }
     if (a === 'cite') { if (!$('#studio')) return; const d = (St.docs && St.docs.docs.find((x) => x.id === b.dataset.doc)) || {}; return askDoc(b.dataset.doc, d.title || 'документ'); }
     if (a === 'result') { const r = St.msgs[+b.dataset.i].res.results[+b.dataset.j]; return goResult(r); }
     if (a === 'dreset') return wcall('/reset');
@@ -448,9 +663,65 @@
       return;
     }
     if (a === 'wdel') return wcall('/' + key + '/delete');
-    if (a === 'wmove') return wcall('/' + key, { move: +b.dataset.m });
     if (a === 'wsize') return wcall('/' + key, { size: { s: 'm', m: 'l', l: 's' }[w.size || 'm'] });
   });
 
-  window.Studio = { reset: () => { St.msgs = []; St.docs = null; St.dash = null; }, open, close, dashboard, builder, goResult, isOpen: () => !!$('#studio') };
+  /* ---------- перетаскивание виджетов: зажать мышью заголовок карточки и перенести ---------- */
+  let drag = null;
+  const dragCards = () => $$('#dgrid .wcard[data-key]');
+  document.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const head = e.target.closest('#dgrid .wcard > header'); if (!head) return;
+    const grip = e.target.closest('.wgrip');
+    if (!grip && (e.target.closest('button, a, input, select') || e.pointerType !== 'mouse')) return;   // пальцем — только за ручку, чтобы не мешать прокрутке
+    const cardEl = head.parentElement;
+    drag = { card: cardEl, x0: e.clientX, y0: e.clientY, on: false, before: dragCards().map((c) => c.dataset.key).join(), last: 0 };
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+    if (!drag.on) {
+      if (Math.hypot(dx, dy) < 6) return;
+      const r = drag.card.getBoundingClientRect();
+      const g = drag.ghost = drag.card.cloneNode(true);
+      g.classList.add('wfloat'); g.removeAttribute('data-key');
+      Object.assign(g.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+      document.body.append(g);
+      drag.card.classList.add('wslot'); document.documentElement.classList.add('wdragging');
+      drag.on = true;
+    }
+    e.preventDefault();
+    drag.ghost.style.transform = `translate(${dx}px, ${dy}px) rotate(.6deg) scale(1.02)`;
+    if (e.clientY < 90) scrollBy(0, -14); else if (e.clientY > innerHeight - 70) scrollBy(0, 14);
+    const now = performance.now(); if (now - drag.last < 110) return;
+    const over = (document.elementFromPoint(e.clientX, e.clientY) || document.body).closest('#dgrid .wcard[data-key]');
+    if (!over || over === drag.card) return;
+    const r = over.getBoundingClientRect(), list = dragCards();
+    const after = list.indexOf(drag.card) < list.indexOf(over);          // тянем вперёд — встаём после, назад — перед
+    over.parentNode.insertBefore(drag.card, after ? over.nextSibling : over);
+    drag.last = now;
+    void r;
+  });
+  const dragEnd = async () => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (!d.on) return;
+    d.ghost.remove(); d.card.classList.remove('wslot'); document.documentElement.classList.remove('wdragging');
+    const ids = dragCards().map((c) => c.dataset.key);
+    if (ids.join() === d.before) return;
+    St.dash.widgets.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+    try { await F().api('/api/pult/widgets/order', { body: { ids } }); }
+    catch (e) { F().toast(e.message); redrawDash(); }
+  };
+  document.addEventListener('pointerup', dragEnd);
+  document.addEventListener('pointercancel', dragEnd);
+  document.addEventListener('keydown', (e) => {                            // с клавиатуры: ручка в фокусе, стрелки меняют порядок
+    const g = e.target.closest && e.target.closest('.wgrip'); if (!g) return;
+    const move = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]; if (!move) return;
+    e.preventDefault();
+    const key = g.dataset.grip;
+    wcall('/' + key, { move }).then(() => { const n = $(`.wgrip[data-grip="${key}"]`); if (n) n.focus(); });
+  });
+
+  window.Studio = { reset: () => { St.msgs = []; St.docs = null; St.dash = null; Vc.status = null; }, open, close, dashboard, builder, goResult, orbHtml, voiceAsk: (t) => heard(t), isOpen: () => !!$('#studio') };
 })();

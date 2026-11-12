@@ -2,7 +2,8 @@
 # Usage:  powershell -ExecutionPolicy Bypass -File D:\fp-ai\start-ai.ps1 [-Hold] [-Model 4b|8b] [-Ngl N] [-Ctx N] [-Think 0|1] [-Threads N] [-Lan]
 #   -Model 8b : bigger model split between GPU and CPU (-Ngl = layers on GPU, default 18)
 #   -Think 0  : no reasoning even for long tasks (faster, less accurate)
-param([switch]$Hold, [string]$Model = '4b', [switch]$Lan, [int]$Ctx = 8192, [int]$Ngl = 0, [string]$Think = '1', [int]$Threads = 0, [string]$Whisper = 'ggml-small-q5_1.bin', [int]$WThreads = 8)
+#   -Voice    : Silero speaker (xenia, kseniya, baya, aidar, eugene); used when Silero is installed (setup-silero.ps1)
+param([switch]$Hold, [string]$Model = '4b', [switch]$Lan, [int]$Ctx = 8192, [int]$Ngl = 0, [string]$Think = '1', [int]$Threads = 0, [string]$Whisper = 'ggml-small-q5_1.bin', [int]$WThreads = 8, [string]$Voice = 'xenia')
 $root = 'D:\fp-ai'
 $log = "$root\logs"; New-Item -ItemType Directory -Force -Path $log | Out-Null
 $llama = (Get-ChildItem "$root\llama" -Recurse -Filter llama-server.exe | Select-Object -First 1).FullName
@@ -21,7 +22,13 @@ function Run($name, $exe, $argv, $dir) {
 }
 $pids += Run 'llm' $llama $llmArgs $root
 $pids += Run 'stt' "$root\whisper\Release\whisper-server.exe" @('-m', "$root\models\$Whisper", '-l', 'ru', '-t', "$WThreads", '--host', '127.0.0.1', '--port', '8090') "$root\whisper\Release"
-$pids += Run 'tts' "$root\piper\Scripts\python.exe" @("$root\space-hackathon\tools\tts_server.py", '--engine', 'piper', '--model', "$root\voices\ru_RU-denis-medium.onnx", '--port', '5050') $root
+# Speech synthesis: Silero (voice xenia) when installed by setup-silero.ps1, otherwise the Piper voice.
+$silero = "$root\silero\Scripts\python.exe"; $sileroModel = "$root\models\v4_ru.pt"
+if ((Test-Path $silero) -and (Test-Path $sileroModel)) {
+  $pids += Run 'tts' $silero @("$root\space-hackathon\tools\tts_server.py", '--engine', 'silero', '--model', $sileroModel, '--speaker', $Voice, '--port', '5050') $root
+} else {
+  $pids += Run 'tts' "$root\piper\Scripts\python.exe" @("$root\space-hackathon\tools\tts_server.py", '--engine', 'piper', '--model', "$root\voices\ru_RU-denis-medium.onnx", '--port', '5050') $root
+}
 $env:LOCAL_LLM_URL = 'http://127.0.0.1:8080/v1'; $env:LOCAL_LLM_MODEL = $alias; $env:AI_MODE = 'local'; $env:LOCAL_LLM_THINK = $Think
 $env:FFMPEG = $ff; $env:PYTHONIOENCODING = 'utf-8'; $env:PYTHONUTF8 = '1'
 $srvArgs = @("$root\space-hackathon\server.py", '8800'); if ($Lan) { $srvArgs += '--lan' }
