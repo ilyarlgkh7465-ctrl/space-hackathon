@@ -689,11 +689,28 @@
     return `<header class="page-head contour-head"><div><h1>${esc(c.name)}</h1>
       <p class="lead">${esc(c.head)} · ${fdate(c.period.from)} — ${fdate(c.period.to)}${S.user?.role === 'analyst' ? ' · Только чтение' : ''}</p></div>${chip(c.status)}</header>
       ${verdict}
+      ${c.dept === 'support' ? maryPanel() : ''}
       ${overview ? `<section class="dept-summary-grid" aria-label="Три главных числа отдела">${overview}</section>` : ''}
       <section class="contour-analysis"><h2 class="sec-title">Рабочие вопросы</h2>${questions}</section>
       ${fold('Все показатели отдела', c.kpis.length, `<div class="kpi-grid">${c.kpis.map((k) => kpiTile(k)).join('')}</div>`)}
       ${director && c.alerts.length ? fold('Отклонения от плана', c.alerts.length, signalList(c.alerts)) : ''}
       ${director ? deptAppPanel(c.dept) : ''}`;
+  }
+
+  /* Поддержка клиентов: первую линию ведёт Mary (ИИ-агент, maryrose.by). Пульт её не заменяет — показывает, чем они обмениваются.
+     Цифры — из открытого кейса Mary; сам обмен в прототипе имитируется. */
+  function maryPanel() {
+    return `<section class="glass-flat mary" aria-label="Связка пульта с Mary">
+      <header><span class="mary-brand"><img src="/shared/brand/mary-mark.svg" alt=""><b>mary</b></span><span class="mary-x" aria-hidden="true">×</span>
+        <span class="mary-brand"><img class="logo" src="/shared/brand/fotoprint.svg" alt=""><b>Пульт</b></span><span class="spacer"></span><span class="chip chip-none"><i></i>связка продумана</span></header>
+      <p class="mary-lead">Первую линию поддержки ведёт <b>Mary</b> — ИИ-агент, подключённый к Битрикс24. Пульт её не заменяет, а работает с ней в паре: Mary отвечает клиенту, пульт показывает руководителю картину.</p>
+      <div class="mary-grid">
+        <div><h3>Пульт → Mary</h3><ul><li>Этап и срок заказа из единого слоя событий — Mary сама отвечает на «Где мой заказ»</li><li>Отметка о браке и переделке — клиент узнаёт раньше, чем спросит</li></ul></div>
+        <div><h3>Mary → пульт</h3><ul><li>Темы обращений и скорость ответа — показатель «Ответ поддержки в срок»</li><li>Срочное — брак, срыв срока, резкий негатив — сразу отклонением с ответственным</li></ul></div>
+        <div><h3>Что Mary уже даёт</h3><div class="mary-nums"><span><b>52 %</b>обращений без менеджера</span><span><b>1 мин</b>ответ клиенту</span><span><b>~600</b>обращений в неделю</span></div></div>
+      </div>
+      <footer>${canDecide() ? '<button class="btn btn-sm btn-primary" data-decide="sla">Поручить Mary «Где мой заказ»</button>' : ''}
+        <span class="who">Цифры — из открытого кейса Mary о производителе печатной продукции. В прототипе обмен с Mary имитируется; подключение — через Битрикс24 и единый слой событий. Mary — продукт maryrose.by.</span></footer></section>`;
   }
 
   /* ---------- разделы ---------- */

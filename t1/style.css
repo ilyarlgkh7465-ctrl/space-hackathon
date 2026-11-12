@@ -567,3 +567,20 @@ html { scrollbar-color: rgba(20, 20, 20, .28) transparent; scrollbar-width: thin
 .pulse-now { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
 .pulse-now > .row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; } .pulse-now h2 { font-size: 20px; font-weight: 600; }
 .pulse-now .who { font-size: 12.5px; color: var(--ink4); } .pulse-now .spacer { flex: 1; }
+/* связка с Mary на странице поддержки */
+.mary { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; margin: 14px 0; }
+.mary header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; } .mary .spacer { flex: 1; }
+.mary-brand { display: inline-flex; align-items: center; gap: 8px; } .mary-brand img { width: 30px; height: 30px; display: block; }
+.mary-brand b { font-size: 21px; font-weight: 700; letter-spacing: -.03em; }
+.mary-x { font-size: 20px; color: var(--ink4); }
+.mary-lead { max-width: 78ch; font-size: 14.5px; line-height: 1.5; color: var(--ink2); }
+.mary-grid { display: grid; grid-template-columns: 1fr 1fr 1.1fr; gap: 12px; }
+.mary-grid > div { padding: 14px 16px; border-radius: 14px; background: rgba(20, 20, 20, .035); }
+.mary-grid > div:last-child { background: color-mix(in srgb, var(--brand) 26%, transparent); }
+.mary-grid h3 { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink3); margin-bottom: 8px; }
+.mary-grid ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.45; color: var(--ink2); }
+.mary-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mary-nums span { display: flex; flex-direction: column; gap: 2px; font-size: 12px; line-height: 1.3; color: var(--ink2); }
+.mary-nums b { font-size: 22px; font-weight: 700; letter-spacing: -.02em; color: var(--ink); white-space: nowrap; }
+.mary footer { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; } .mary footer .who { flex: 1 1 320px; font-size: 12px; line-height: 1.4; color: var(--ink4); }
+@media (max-width: 900px) { .mary-grid { grid-template-columns: 1fr; } }
