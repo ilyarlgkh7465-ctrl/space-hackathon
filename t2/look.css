@@ -324,3 +324,6 @@ body { background: #EDEDF0; }
 /* «Конструктор» — самое длинное слово в нижних вкладках: шрифт чуть уже, чтобы оно помещалось в выделение */
 .tab3 { font-size: 10.5px; letter-spacing: -.035em; } .tab3 span { white-space: nowrap; }
 .app-head > .head-acts { justify-self: end; }
+/* один кот на экран: кнопка в шапке прячется, когда на экране есть подсказка Пака; кот в подсказке открывает помощника */
+.pak-btn[hidden] { display: none; } #screen .ai-ava.pak { cursor: pointer; }
+.mk-hero { padding: 0; } .mk-hero h1 { font-size: 28px; }

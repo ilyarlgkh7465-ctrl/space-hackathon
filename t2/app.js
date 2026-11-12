@@ -368,17 +368,23 @@
     const bl = $('#bell'); if (bl) bl.onclick = openNotes;
     const pk = $('#pak'); if (pk) pk.onclick = () => openPak();
     document.querySelectorAll('#sideSteps li').forEach((li) => { const s = { home: 0, feed: 1, product: 0, photos: 1, layout: 1, check: 2, cart: 3, done: 4, order: 4 }[S.view]; li.classList.toggle('on', +li.dataset.s === s); li.classList.toggle('done', +li.dataset.s < (s == null ? -1 : s)); });
-    if (S.busy) { renderBusy(); $('#bar').innerHTML = ''; fitBar(); return; }
+    if (S.busy) { renderBusy(); $('#bar').innerHTML = ''; onePak(); fitBar(); return; }
     const v = VIEWS[S.view]();
     $('#screen').innerHTML = v.html;
     $('#bar').innerHTML = (v.bar || '') + (isTab ? tabbar() : '');
     document.querySelectorAll('[data-tab]').forEach((t) => { t.onclick = () => { S.stack = []; go(t.dataset.tab, true); }; });
     v.bind && v.bind($('#screen'), $('#bar'));
     const rx = $('#rjx'); if (rx) rx.onclick = () => { S.rejects = []; rerender(); };
+    onePak();
     fitBar();
     if (S.view === 'orders') loadOrders();
     if (S.view === 'social' && !S.soc.fetched) { S.soc.fetched = true; loadSocial(); }
     if (S.view === 'order' || S.view === 'done') startPoll();
+  }
+  function onePak() {
+    const inScreen = document.querySelectorAll('#screen .ai-ava.pak'), hb = $('#pak');
+    inScreen.forEach((a, i) => { if (i) { a.remove(); return; } a.removeAttribute('aria-hidden'); a.setAttribute('role', 'button'); a.tabIndex = 0; a.setAttribute('aria-label', 'Помощник Пак. Открыть'); a.onclick = () => openPak(); });
+    if (hb) hb.hidden = inScreen.length > 0;
   }
   function tabbar() {
     const i = TABS.indexOf(S.view), from = S.tabFrom == null ? i : S.tabFrom; S.tabFrom = i;
@@ -462,7 +468,7 @@
     const order = ['book', 'card', 'calendar', 'print', 'magnet', 'canvas'];
     const items = cat ? order.map((id) => prodOf(id)).filter(Boolean).map((p) => `<button class="mk-i" data-pr="${p.id}"><span class="pic">${artOf(p.kind)}</span><b>${esc(p.name.replace(' на 2027', ''))}</b><small>${esc(WHAT[p.kind] || p.short)}</small><em>от ${money(fromPrice(p))}</em></button>`).join('') : '';
     return {
-      html: `<section class="mk-hero"><img src="/t2/brand/cat-point.png" alt="Котик Пак"><div><h1>Соберём вместе</h1><p>Выберите, что сделать. Раскладку и оформление подскажу — останется поправить.</p></div></section>
+      html: `<section class="mk-hero"><div><h1>Соберём вместе</h1><p>Выберите, что сделать. Раскладку и оформление подскажу — останется поправить.</p></div></section>
         ${cont}
         <p class="sec-t">Что собираем</p><div class="mk-grid">${items || '<p class="muted">Загружаю каталог…</p>'}</div>
         <p class="sec-t">Стиль от Пака</p><p class="muted mk-note">Выберите настроение — соберу фотокнигу в этом стиле из ваших фото.</p>
@@ -696,7 +702,7 @@
         ${!cal && !card && N < P ? `<div class="warnbox"><span>Фото меньше, чем страниц. Можно уменьшить книгу${P > prod.options[0].min ? '' : ' (меньше 20 страниц нельзя)'}.</span>${P > prod.options[0].min ? `<button class="btn btn-sm" id="fit">${Math.max(prod.options[0].min, P - 2)} стр.</button>` : ''}</div>` : ''}
         <p class="sec-t">${card ? 'Лицевая сторона' : 'Страницы'}</p>
         <div class="pages${card ? ' one' : ''}">${cover}${lay.map(page).join('')}</div>
-        ${card ? '' : `<section class="card aiedit" aria-label="Правка альбома с помощью ИИ"><div class="ai-head">${PAK}<b>Попросить Пака</b></div>
+        ${card ? '' : `<section class="card aiedit" aria-label="Правка альбома с помощью ИИ"><div class="ai-head"><b>Попросить Пака</b></div>
           <div class="chips-row" role="list">${AI_HINTS.map((t, i) => `<button class="pchip" role="listitem" data-hint="${i}">${esc(t)}</button>`).join('')}</div>
           <div class="field"><label for="aiq">Напишите, что изменить</label><textarea class="textarea" id="aiq" rows="2" maxlength="300" placeholder="Например: убери размытые и поставь страницу 5 в начало"></textarea></div>
           ${S.aiMsg ? `<p class="ai-say" role="status">${esc(S.aiMsg)}</p>` : ''}
