@@ -31,9 +31,11 @@
     out: ic('<path d="M14 4h4a2 2 0 012 2v12a2 2 0 01-2 2h-4M10 16l-4-4 4-4M6 12h10"/>'),
     spark: ic('<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z"/>'),
     send: ic('<path d="M4 12l16-8-6 16-3-6z"/>'),
+    dash: ic('<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="5" rx="2"/><rect x="13" y="10" width="8" height="11" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/>'),
   };
   const VIEWS = [
     { id: 'pulse', name: 'Пульс компании', icon: I.pulse, group: 'main' },
+    { id: 'mydash', name: 'Мой дашборд', icon: I.dash, group: 'main' },
     { id: 'attention', name: 'Требует решения', icon: I.bell, group: 'work' },
     { id: 'decisions', name: 'Реестр решений', icon: I.decisions, group: 'work' },
     { id: 'data', name: 'Данные и журнал', icon: I.data, group: 'manage' },
@@ -142,6 +144,7 @@
     if (!silent) history.replaceState(null, '', location.pathname + location.search);
     S.seq++; S.loadSeq++;
     S.token = null; S.user = null; S.pulse = null; S.cache = {}; S.chat = []; S.contours = []; S.contour = null; S.openCount = null; S.draft = null;
+    if (window.Studio) { window.Studio.close(); window.Studio.reset(); }
     clearInterval(S.timer);
     store.set('fp-token', null);
     renderLogin(silent ? 'Сеанс закончился, войдите снова' : '');
@@ -193,7 +196,7 @@
       if (b.dataset.rail === 'logout') logout();
     };
     $('#navScrim').onclick = $('#navClose').onclick = () => setMenu(false);
-    $('#fab').onclick = openChat;
+    $('#fab').onclick = () => openChat();
     renderNav();
     renderTop();
     clearInterval(S.timer);
@@ -601,6 +604,7 @@
 
   /* ---------- разделы ---------- */
   const views = {
+    mydash: () => window.Studio.dashboard(),          // свой дашборд и конструктор виджетов — t1/studio.js
     pulse(p) {
       const primary = ['on_time', 'revenue', 'margin', 'sla'].map((id) => p.kpis.find((k) => k.id === id)).filter(Boolean);
       const al = p.alerts, queue = overviewQueue(p.bottleneck);
@@ -897,28 +901,49 @@
       ...S.pulse.kpis.filter((k) => !k.locked).map((k) => ({ t: k.name, s: `показатель · ${fmt(k.value)} ${k.unit}`, run: () => openKpi(k.id) })),
       ...decs.map((d) => ({ t: d.title, s: `решение ${d.id} · ${d.status}`, run: () => openDecision(d.id) })),
       ...(canDecide() ? [{ t: 'Новое решение', s: 'действие', run: () => openDecisionForm({}) }] : []),
-      { t: 'Спросить помощника', s: 'действие', run: openChat },
+      { t: 'Спросить помощника', s: 'действие', run: () => openChat() },
+      { t: 'Новый виджет', s: 'конструктор виджетов', run: () => window.Studio.builder() },
       { t: 'Выйти', s: 'действие', run: () => logout() },
     ];
     lastFocus = document.activeElement;
-    $('#layer').innerHTML = `<div class="scrim" data-act="closeLayer"></div><div class="palette glass" role="dialog" aria-modal="true" aria-label="Поиск и команды">
-      <input id="palIn" placeholder="Раздел, показатель или решение" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="palList"><ul id="palList" role="listbox"></ul></div>`;
-    let sel = 0, shown = items;
-    const draw = () => { $('#palList').innerHTML = shown.slice(0, 40).map((x, i) => `<li role="option" aria-selected="${i === sel}" data-i="${i}">${esc(x.t)}<small>${esc(x.s)}</small></li>`).join('') || '<li class="faint">Ничего не нашлось</li>';
+    $('#layer').innerHTML = `<div class="scrim" data-act="closeLayer"></div><div class="palette glass" role="dialog" aria-modal="true" aria-label="Умный поиск">
+      <input id="palIn" placeholder="Умный поиск: показатель, разрез, документ, решение… или вопрос ИИ" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="palList"><ul id="palList" role="listbox"></ul>
+      <p class="pal-foot">Ищет по смыслу: «выручка» найдёт оборот, «опоздания» — заказы в срок, «долги» — дебиторку. Последняя строка — спросить ИИ.</p></div>`;
+    let sel = 0, shown = items, timer = 0;
+    const draw = () => { $('#palList').innerHTML = shown.slice(0, 40).map((x, i) => `<li role="option" aria-selected="${i === sel}" data-i="${i}">${x.g ? `<span class="pal-g">${esc(x.g)}</span>` : ''}<span class="pal-t">${esc(x.t)}</span><small>${esc(x.s)}</small></li>`).join('') || '<li class="faint">Ничего не нашлось</li>';
       const cur = $('#palList [aria-selected="true"]'); if (cur) cur.scrollIntoView({ block: 'nearest' }); };
     const inp = $('#palIn');
-    inp.oninput = () => { const s = inp.value.trim().toLowerCase(); shown = items.filter((x) => (x.t + ' ' + x.s).toLowerCase().includes(s)); sel = 0; draw(); };
+    const askItem = (s) => ({ g: 'ИИ', t: `Спросить ИИ: «${s}»`, s: 'рабочее место с ИИ', run: () => openChat(s) });
+    /* умный поиск: сначала мгновенно по названиям, следом — по смыслу с сервера (показатели, разрезы, документы, виджеты) */
+    inp.oninput = () => {
+      const raw = inp.value.trim(), s = raw.toLowerCase();
+      const local = items.filter((x) => (x.t + ' ' + x.s).toLowerCase().includes(s));
+      shown = raw ? local.concat([askItem(raw)]) : items; sel = 0; draw();
+      clearTimeout(timer);
+      if (raw.length < 2) return;
+      timer = setTimeout(async () => {
+        try {
+          const r = await api('/api/pult/search?q=' + encodeURIComponent(raw));
+          if (!$('#palIn') || inp.value.trim() !== raw) return;
+          const seen = new Set(local.map((x) => x.t));
+          const srv = r.results.filter((x) => !seen.has(x.title)).map((x) => ({ g: x.group, t: x.title, s: x.sub, run: () => window.Studio.goResult(x) }));
+          shown = srv.concat(local).concat([askItem(raw)]); sel = 0; draw();
+        } catch (e) { /* остаётся поиск по названиям */ }
+      }, 160);
+    };
     inp.onkeydown = (e) => {
       if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, Math.min(shown.length, 40) - 1); draw(); e.preventDefault(); }
       else if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); draw(); e.preventDefault(); }
-      else if (e.key === 'Enter' && shown[sel]) { const x = shown[sel]; closeLayer(); x.run(); }
+      else if (e.key === 'Enter' && shown[sel]) { e.preventDefault(); const x = shown[sel]; closeLayer(); x.run(); }
     };
     $('#palList').onclick = (e) => { const li = e.target.closest('[data-i]'); if (li) { const x = shown[+li.dataset.i]; closeLayer(); x.run(); } };
     draw(); inp.focus();
   }
 
   /* ---------- помощник ---------- */
-  function openChat() {
+  /* Помощник открывается на весь экран: графики, таблицы, документы, краткое содержание — t1/studio.js. */
+  function openChat(q) { return window.Studio.open(q); }
+  function openChatPanel() {                          // прежняя маленькая панель — запасной вариант
     if ($('#chat')) { $('#chatIn').focus(); return; }
     const quick = ['Что требует решения сегодня?', 'Почему упали заказы в срок?', 'Какие решения просрочены?'];
     const box = document.createElement('section');
@@ -974,6 +999,7 @@
     if (e.key === 'Escape') {
       if ($('#layer').innerHTML) closeLayer();
       else if ($('#rail')?.classList.contains('is-open')) setMenu(false);
+      else if (window.Studio && window.Studio.isOpen()) window.Studio.close();
       else if ($('#chat')) $('#chatX').click();
       return;
     }
@@ -982,5 +1008,7 @@
   window.addEventListener('offline', () => toast('Нет сети. Данные на экране могли устареть, введённое в формах сохранено.'));
   window.addEventListener('online', () => $('#view') && toast('Сеть вернулась', { label: 'Обновить данные', run: reload }));
 
+  /* для рабочего места с ИИ и «Моего дашборда» (t1/studio.js) */
+  window.FP = { api, S, esc, fmt, ftime, fdate, chip, COLOR, WORD, go, openKpi, openDecision, openDecisionForm, toast, openLayer, closeLayer };
   start();
 })();
