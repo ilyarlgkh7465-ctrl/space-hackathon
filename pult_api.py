@@ -3,6 +3,7 @@
 Адреса (все требуют входа — заголовок Authorization: Bearer <token>):
   GET  /api/pult/pulse?days=30&product=&dept=   — показатели, отклонения, поток заказа
   GET  /api/pult/drill?kpi=on_time&by=stage     — детализация показателя до причины
+  GET  /api/pult/why?kpi=on_time&days=30        — гипотезы о причине отклонения, каждая проверена данными
   GET  /api/pult/forecast                       — спрос и мощность на 6 недель, неделя дефицита
   GET  /api/pult/finance                        — план-факт доходов и расходов, штат, вакансии (по правам)
   GET  /api/pult/app?days=14                    — живые данные приложения: воронка, заказы по этапам, время участков
@@ -322,7 +323,7 @@ def pulse(P, user, days=30, product="", dept=""):
     crit = sum(1 for k in kpis if k["status"] == "bad")
     warn = sum(1 for k in kpis if k["status"] == "warn")
     return {"asof": b.isoformat(timespec="minutes"), "period": {"from": a.date().isoformat(), "to": b.date().isoformat(), "days": days},
-            "product": product, "dept": dept, "kpis": kpis, "alerts": alerts, "flow": flow,
+            "product": product, "dept": dept, "kpis": kpis, "alerts": alerts, "flow": flow, "bottleneck": _bottleneck(P, product, sc),
             "departments": _departments(P, cur, kpis, sc),
             "pulse": {"status": "bad" if crit else "warn" if warn else "ok", "critical": crit, "warn": warn, "total": len(kpis)},
             "products": [{"id": i, "name": n} for i, n in P["products"].items()],
@@ -635,6 +636,262 @@ def _alerts(P, kpis, a, b, product):
                     "context": "Отклонение %s%s %s за %d дн." % ("+" if gap > 0 else "−", _fmt(abs(gap)), k["unit"], days),
                     "cause": cause, "by": by, "owner_id": OWNERS[k["dept"]][0], "owner": OWNERS[k["dept"]][1]})
     out.sort(key=lambda x: (x["level"] != "bad", x["kpi"]))
+    return out
+
+
+# ---------- проверка гипотез: почему горит лампочка ----------
+# Как «модуль отклонений»: на каждое отклонение — несколько версий причины, каждая проверяется данными
+# и получает отметку «подтвердилась / не подтвердилась» с цифрой-доказательством. Решает руководитель.
+
+GENERIC_DIMS = ("product", "channel", "client", "shift", "ticket_channel", "att_section", "doc_dept", "doc_kind")
+SEG_TEXT = {"product": "одном продукте", "channel": "одном канале продаж", "client": "одном типе клиентов", "shift": "одной смене",
+            "ticket_channel": "одном канале связи", "att_section": "одном участке", "doc_dept": "одном подразделении",
+            "doc_kind": "одном виде документов"}
+SUM_KPIS = ("revenue", "new_clients")
+
+
+def _hyp(text, ok, evidence, by=None):
+    return {"text": text, "verdict": "да" if ok else "нет", "evidence": evidence, "by": by}
+
+
+def _seg_check(P, k, value, kid, by, days, product):
+    """Сосредоточено ли отклонение в одном срезе: продукт, канал, смена и т. п."""
+    fake = {"role": "director"}
+    d, _ = drill(P, fake, kid, by, days, product)
+    rows = [r for r in (d or {}).get("rows", []) if r.get("value") is not None]
+    if len(rows) < 2:
+        return None
+    title = "Дело в " + SEG_TEXT.get(by, "одном срезе")
+    unit = (" " + k["unit"]) if k["unit"] not in ("BYN",) else " BYN"
+    if kid in SUM_KPIS:
+        tot_now, tot_was = sum(r["value"] for r in rows), sum(r["prev"] or 0 for r in rows)
+        drop = tot_now - tot_was
+        if drop * k["dir"] >= 0:
+            return None                                     # к прошлому периоду не просело — искать «виноватого» нечего
+        worst = min(rows, key=lambda r: (r["value"] - (r["prev"] or 0)) * k["dir"])
+        share = 100 * (worst["value"] - (worst["prev"] or 0)) / drop
+        return _hyp(title, share >= 50,
+                    "«%s»: %s → %s%s — %s %% всего падения к прошлому периоду" % (
+                        worst["name"], _fmt(worst["prev"]), _fmt(worst["value"]), unit, _fmt(share)), by)
+    total = sum(r.get("count") or 0 for r in rows) or 1
+    rows = [r for r in rows if (r.get("count") or 0) >= max(5, 0.05 * total)] or rows
+    worst = min(rows, key=lambda r: r["value"] * k["dir"])
+    best = max(rows, key=lambda r: r["value"] * k["dir"])
+    thr = k["bad"] * (abs(value) / 100 if k.get("rel") else 1)
+    gap = (value - worst["value"]) * k["dir"]
+    if gap >= thr:
+        return _hyp(title, True,
+                    "«%s»: %s%s при общем %s; лучше всех «%s»: %s" % (worst["name"], _fmt(worst["value"]), unit, _fmt(value),
+                                                                     best["name"], _fmt(best["value"])), by)
+    return _hyp(title, False,
+                "разброс небольшой: от %s до %s%s, общий %s — просело равномерно" % (
+                    _fmt(worst["value"]), _fmt(best["value"]), unit, _fmt(value)), by)
+
+
+def _day_shift(P, k, kid, days, product):
+    """Разовый сдвиг: показатель резко сменил уровень с какого-то дня."""
+    if "day" not in k["dims"] or kid in SUM_KPIS:
+        return None
+    d, _ = drill(P, {"role": "director"}, kid, "day", days, product)
+    s = [(r["key"], r["value"]) for r in (d or {}).get("rows", []) if r.get("value") is not None]
+    if len(s) < 8:
+        return None
+    best = None
+    for i in range(3, len(s) - 3):
+        before = statistics.mean(v for _, v in s[:i])
+        after = statistics.mean(v for _, v in s[i:])
+        worse = (before - after) * k["dir"]
+        if best is None or worse > best[0]:
+            best = (worse, s[i][0], before, after)
+    thr = k["bad"] * (abs(best[2]) / 100 if k.get("rel") else 1)
+    day = best[1][8:10] + "." + best[1][5:7]
+    return _hyp("Сдвиг с конкретной даты, а не постепенное ухудшение", best[0] >= thr,
+                "до %s в среднем %s, после — %s %s" % (day, _fmt(best[2]), _fmt(best[3]), k["unit"]), "day")
+
+
+def hypotheses(P, user, kid, days=30, product=""):
+    sc = _scope(user)
+    k = next((x for x in KPIS if x["id"] == kid), None)
+    if not k:
+        return None, "нет такого показателя"
+    if not sc["all"] and k["dept"] != sc["dept"]:
+        return None, "denied"
+    b = P["asof"]
+    a = b - dt.timedelta(days=days)
+    cur, prev = measure(P, a, b, product), measure(P, a - dt.timedelta(days=days), a, product)
+    value = cur.get(kid)
+    if value is None:
+        return {"kpi": kid, "items": []}, None
+    fake = {"role": "director"}
+    H = []
+    if kid in ("on_time", "lead_time"):
+        st, _ = drill(P, fake, kid, "stage", days, product)
+        rows = (st or {}).get("rows", [])
+        if rows:
+            w = max(rows, key=lambda r: r["over"])
+            others = [r["over"] for r in rows if r is not w] or [0]
+            ok = w["over"] >= 15 and w["over"] >= 2 * statistics.median(others)
+            H.append(_hyp("Заказы застревают на одном участке", ok,
+                          "«%s»: %s %% заказов ждут больше двух норм%s; %s" % (
+                              w["name"], _fmt(w["over"]), " (было %s %%)" % _fmt(w["over_prev"]) if w.get("over_prev") is not None else "",
+                              "на остальных участках таких заказов нет" if not max(others) else "на остальных участках — не больше %s %%" % _fmt(max(others))), "stage"))
+            gap = w["vacancies"] + w["absent"]
+            H.append(_hyp("На этом участке не хватает людей", gap > 0,
+                          "«%s»: по штату %s, вакансий %d, отсутствуют %d" % (w["name"], w["staff"] or "—", w["vacancies"], w["absent"]), "stage"))
+        H.append(_hyp("Заказов больше, чем успевает производство", (cur.get("load") or 0) > PLAN["load"],
+                      "загрузка %s %% при норме %s %%; мощность %s заказов в день вместо %s" % (
+                          _fmt(cur.get("load")), _fmt(PLAN["load"]), _fmt(P["hr"]["capacity"]["current_per_day"]),
+                          _fmt(P["hr"]["capacity"]["normal_per_day"])), "day"))
+    elif kid == "defect":
+        rs, _ = drill(P, fake, kid, "reason", days, product)
+        rows = (rs or {}).get("rows", [])
+        if rows:
+            H.append(_hyp("Брак из-за одной причины", rows[0]["value"] >= 40,
+                          "«%s» — %s %% всего брака (%d случаев)" % (rows[0]["name"].lower(), _fmt(rows[0]["value"]), rows[0]["count"]), "reason"))
+    elif kid == "sla":
+        per = lambda m: m["tickets"] / max(1, days)
+        grow = 100 * (cur["tickets"] - prev["tickets"]) / prev["tickets"] if prev.get("tickets") else 0
+        H.append(_hyp("Обращений стало заметно больше", grow >= 15,
+                      "%s обращений в день, было %s (%s%s %%)" % (_fmt(per(cur)), _fmt(per(prev)), "+" if grow >= 0 else "−", _fmt(abs(grow))), "day"))
+        tp, _ = drill(P, fake, kid, "topic", days, product)
+        rows = [r for r in (tp or {}).get("rows", []) if (r.get("share") or 0) >= 10]
+        if rows:
+            w = min(rows, key=lambda r: r["value"])
+            H.append(_hyp("Не успевают по одной теме обращений", value - w["value"] >= k["bad"],
+                          "«%s»: в срок %s %% при общем %s %%, это %s %% обращений" % (w["name"], _fmt(w["value"]), _fmt(value), _fmt(w["share"])), "topic"))
+    elif kid == "margin":
+        rev = cur["revenue"] or 1
+        dcost = sum(o["cost"] for o in P["orders"] if a <= o["d_accepted"] < b and o["defect"] and (not product or o["product"] == product))
+        pdcost = sum(o["cost"] for o in P["orders"] if a - dt.timedelta(days=days) <= o["d_accepted"] < a and o["defect"] and (not product or o["product"] == product))
+        prev_rev = prev["revenue"] or 1
+        now_s, was_s = 100 * dcost / rev, 100 * pdcost / prev_rev
+        H.append(_hyp("Маржу съедают перепечатки", now_s - was_s >= 0.3 or now_s >= 1.5,
+                      "перепечатки стоят %s %% оборота (было %s %%), %s BYN за период" % (_fmt(now_s), _fmt(was_s), _fmt(dcost)), "product"))
+    elif kid == "app_conv":
+        st, _ = drill(P, fake, kid, "step", days, product)
+        rows = [r for r in (st or {}).get("rows", []) if r.get("pass") is not None and r.get("pass_prev") is not None]
+        if rows:
+            w = min(rows, key=lambda r: r["pass"] - r["pass_prev"])
+            H.append(_hyp("Клиенты уходят на одном шаге приложения", w["pass_prev"] - w["pass"] >= 5,
+                          "шаг «%s»: дальше проходит %s %% вместо %s %%" % (w["name"], _fmt(w["pass"]), _fmt(w["pass_prev"])), "step"))
+    elif kid == "overdue_recv":
+        cps = sorted((c for c in P["fin"]["counterparties"] if c["overdue_sum"]), key=lambda c: -c["overdue_sum"])
+        tot = sum(c["overdue_sum"] for c in cps) or 1
+        top = cps[:3]
+        H.append(_hyp("Просрочку держат несколько крупных должников", 100 * sum(c["overdue_sum"] for c in top) / tot >= 60,
+                      "три крупнейших — %s %% всей просрочки: %s" % (_fmt(100 * sum(c["overdue_sum"] for c in top) / tot),
+                                                                    ", ".join("%s — %s BYN" % (c["name"], _fmt(c["overdue_sum"])) for c in top)), "counterparty"))
+        old = sum(c["overdue_sum"] for c in cps if c["overdue_days"] > 30)
+        H.append(_hyp("Долги старые — больше месяца", 100 * old / tot >= 50,
+                      "просрочено больше 30 дней: %s %% суммы (%s BYN)" % (_fmt(100 * old / tot), _fmt(old)), "counterparty"))
+    for by in [x for x in k["dims"] if x in GENERIC_DIMS]:
+        h = _seg_check(P, k, value, kid, by, days, product)
+        if h:
+            H.append(h)
+    h = _day_shift(P, k, kid, days, product)
+    if h:
+        H.append(h)
+    yes = [h for h in H if h["verdict"] == "да"]
+    no = [h for h in H if h["verdict"] == "нет"]
+    items = (yes[:3] + no[:2])[:4] if yes else no[:3]       # подтверждённые сверху; хотя бы одна отвергнутая — видно, что проверяли
+    return {"kpi": kid, "name": k["name"], "items": items, "checked": len(H), "confirmed": len(yes),
+            "period": {"from": a.date().isoformat(), "to": b.date().isoformat()}, "source": k["source"]}, None
+
+
+# ---------- узкое место прямо сейчас ----------
+
+def _bottleneck(P, product, sc):
+    """Этап, где больше всего заказов стоит дольше нормы, сколько он будет разбирать очередь и откуда взять людей."""
+    if not (sc["all"] or sc["dept"] == "production"):
+        return None
+    q = _queue(P, product)
+    stages = ("moderation", "print", "binding", "quality", "shipping")
+    fin = {"moderation": "d_moderation", "print": "d_print", "binding": "d_binding", "quality": "d_quality", "shipping": "d_shipped"}
+    t0 = P["asof"] - dt.timedelta(hours=24)
+    rate = {s: sum(1 for o in P["orders"] if o[fin[s]] and t0 <= o[fin[s]] < P["asof"] and (s != "binding" or o["d_binding"] != o["d_print"])
+                   and (not product or o["product"] == product)) for s in stages}
+    w = max(stages, key=lambda s: (q[s]["stuck"], q[s]["count"]))
+    if q[w]["stuck"] < 3:
+        return {"ok": True, "text": "Узких мест сейчас нет: на всех участках очередь в пределах нормы."}
+    sec = {s["id"]: s for d in P["hr"]["depts"] for s in d.get("sections", [])}
+    vac = sum(1 for v in P["hr"]["vacancies"] if v["section"] == w)
+    ab = sum(x["people"] for x in P["hr"]["absences"] if x["section"] == w)
+    clear = q[w]["count"] / (rate[w] / 24.0) if rate[w] else None
+    s = sec.get(w, {})
+    out = {"ok": False, "stage": w, "name": STAGE_NAMES[w], "count": q[w]["count"], "stuck": q[w]["stuck"], "norm": NORMS[w],
+           "per_day": rate[w], "clear_h": _r(clear), "staff": "%s из %s" % (s.get("fact"), s.get("plan")) if s else "",
+           "vacancies": vac, "absent": ab, "asof": P["asof"].isoformat(timespec="minutes"), "source": "ERP: отметки этапов · HR: штат, вакансии, отсутствия"}
+    out["text"] = "«%s»: в очереди %d заказов, %d из них ждут дольше нормы (%s ч)." % (out["name"], q[w]["count"], q[w]["stuck"], _fmt(NORMS[w]))
+    if clear:
+        out["text"] += " При нынешнем темпе (%d в сутки) очередь разберут за ~%s ч." % (rate[w], _fmt(round(clear)))
+    donors = []
+    for d in stages:
+        if d == w or d not in sec:
+            continue
+        sd = sec[d]
+        absent = sum(x["people"] for x in P["hr"]["absences"] if x["section"] == d)
+        free = sd["fact"] - absent
+        if q[d]["stuck"] == 0 and free >= sd["plan"] * 0.9:
+            donors.append((q[d]["count"] / max(1, free), d, free))
+    if donors:
+        _, d, free = min(donors)
+        n = max(1, min(3, vac + ab or 1))
+        out["donor"] = {"stage": d, "name": STAGE_NAMES[d], "count": q[d]["count"], "people": n}
+        out["advice"] = ("Временно перевести %d чел. с участка «%s» (в очереди %d, всё в норме) на участок «%s» до разбора очереди — "
+                         "если у них есть допуск к этой работе. Решает руководитель производства." % (n, STAGE_NAMES[d], q[d]["count"], out["name"]))
+    else:
+        out["advice"] = "Свободных людей на соседних участках нет — нужна подработка или перенос сроков. Решает руководитель производства."
+    if vac or ab:
+        out["text"] += " На участке %s, вакансий %d, отсутствуют %d." % (("работает " + out["staff"]) if out["staff"] else "", vac, ab)
+    return out
+
+
+# ---------- эффект решения: было → стало ----------
+SNAPSHOT_KPIS = ("staffing", "overdue_recv")       # показатели-«снимки»: истории по дням нет, сравнить не с чем
+
+
+def decision_effect(P, d):
+    kid = d.get("kpi")
+    k = next((x for x in KPIS if x["id"] == kid), None)
+    t0 = _dt(d.get("ts"))
+    if not k or not t0 or kid in SNAPSHOT_KPIS:
+        return None
+    b = P["asof"]
+    win = dt.timedelta(days=14)
+    per_day = kid in SUM_KPIS or kid == "turnover"
+    def val(a1, b1):
+        v = measure(P, a1, b1).get(kid)
+        return v / max(1.0, _h(a1, b1) / 24) if (v is not None and per_day) else v
+    before = d.get("kpi_start") if d.get("kpi_start") is not None and not per_day else val(t0 - win, t0)
+    # Закрытое решение судим по окну сразу после него — до закрытия, а не по сегодняшнему дню:
+    # иначе в «после» попадут события, к решению отношения не имеющие. Открытое — по последним двум неделям.
+    closed = None
+    if d.get("status") == "закрыто":
+        closed = next((_dt(h["ts"]) for h in reversed(d.get("history") or []) if "закрыто" in str(h.get("change", ""))), None) or t0 + win
+    a_from, b = (t0, min(closed, t0 + win, b)) if closed else (max(t0, b - win), b)
+    days_after = _h(a_from, b) / 24
+    out = {"name": k["name"], "unit": k["unit"] + (" в день" if per_day else ""), "since": t0.date().isoformat(),
+           "before": _r(before), "after": None, "days_after": int(days_after), "source": k["source"],
+           "window": "до закрытия" if closed else "последние дни"}
+    if days_after < 3:
+        out["verdict"] = "рано судить"
+        out["text"] = "С решения прошло меньше трёх дней — рано судить."
+        return out
+    after = val(a_from, b)
+    vals = measure(P, a_from, b)
+    plan = _plan(P, kid, a_from, b, "", vals)
+    if per_day and plan is not None:
+        plan = plan / max(1.0, days_after)
+    out.update(after=_r(after), plan=_r(plan), status=_status(k, after, plan) if not per_day else "none")
+    if before is None or after is None:
+        out["verdict"], out["text"] = "нет данных", "Недостаточно данных для сравнения."
+        return out
+    delta = (after - before) * k["dir"]
+    eps = k["warn"] * (abs(before) / 100 if k.get("rel") else 1) * 0.3
+    out["verdict"] = "лучше" if delta > eps else "хуже" if delta < -eps else "без изменений"
+    out["text"] = "%s: до решения %s, после — %s %s%s; план %s." % (
+        k["name"], _fmt(before), _fmt(after), out["unit"],
+        {"лучше": " — стало лучше", "хуже": " — стало хуже", "без изменений": " — заметных изменений нет"}[out["verdict"]], _fmt(plan))
     return out
 
 
@@ -952,11 +1209,15 @@ def _can_decision(user, d):
 def decisions_list(core, user):
     today = core.now()[:10]
     out = []
+    P, sc = prep(core), _scope(user)
+    dept_of = {k["id"]: k["dept"] for k in KPIS}
     for d in core.load("decisions"):
         if not _can_decision(user, d):
             continue
         x = dict(d)
         x["overdue"] = d.get("status") != "закрыто" and (d.get("due") or "9999") < today
+        if d.get("kpi") and (sc["all"] or dept_of.get(d["kpi"]) == sc["dept"]):     # чужой отдел — без цифр показателя
+            x["effect_auto"] = decision_effect(P, d)
         out.append(x)
     return out
 
@@ -1116,6 +1377,20 @@ def handle(handler, method, path, core):
         if err == "denied":
             return deny("показатель другого подразделения")
         handler._json(d if d else {"error": err}, 200 if d else 404)
+    elif method == "GET" and path == "/api/pult/contour":
+        import pult_contours
+        d, err = pult_contours.contour(core, P, user, arg("dept"), days, product)
+        if err == "denied":
+            return deny("контур другого отдела: " + DEPTS.get(arg("dept"), arg("dept")))
+        handler._json(d if d else {"error": err}, 200 if d else 404)
+    elif method == "GET" and path == "/api/pult/contours":
+        import pult_contours
+        handler._json(pult_contours.contours_summary(P, user, days, product))
+    elif method == "GET" and path == "/api/pult/why":
+        d, err = hypotheses(P, user, arg("kpi"), days, product)
+        if err == "denied":
+            return deny("показатель другого подразделения")
+        handler._json(d if d else {"error": err}, 200 if d else 404)
     elif method == "GET" and path == "/api/pult/forecast":
         if not (_scope(user)["all"] or user.get("dept") in ("production", "sales", "hr")):
             return deny("прогноз спроса и мощности")
@@ -1129,11 +1404,15 @@ def handle(handler, method, path, core):
     elif method == "GET" and path == "/api/pult/decisions":
         handler._json(decisions_list(core, user))
     elif method == "POST" and path == "/api/pult/decisions":
+        if user["role"] == "analyst":
+            return deny("аналитик может только читать решения")
         d, err, code = decision_create(core, user, handler._body())
         if err == "denied":
             return deny("решение для другого подразделения")
         handler._json(d if d else {"error": err}, code)
     elif method == "POST" and path.startswith("/api/pult/decisions/"):
+        if user["role"] == "analyst":
+            return deny("аналитик может только читать решения")
         d, err, code = decision_update(core, user, path.rsplit("/", 1)[1], handler._body())
         if err == "denied":
             return deny("чужое решение")

@@ -7,8 +7,8 @@
   const fmt = (v) => v == null ? '—' : Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('ru-RU').replace(/ /g, ' ') : (Math.round(v * 10) / 10).toLocaleString('ru-RU');
   const fdate = (s) => s ? s.slice(8, 10) + '.' + s.slice(5, 7) : '—';
   const ftime = (s) => s ? fdate(s) + ' ' + s.slice(11, 16) : '—';
-  const WORD = { ok: 'в норме', warn: 'внимание', bad: 'плохо', none: 'нет данных' };
-  const COLOR = { ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)', none: 'var(--none)' };
+  const WORD = { ok: 'в норме', warn: 'внимание', bad: 'критично', none: 'нет данных' };
+  const COLOR = { ok: 'var(--ok)', warn: 'var(--brand2)', bad: 'var(--bad)', none: 'var(--none)' };
   const chip = (st) => `<span class="chip chip-${st}"><i></i>${WORD[st] || WORD.none}</span>`;
   const ic = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${d}</svg>`;
   const I = {
@@ -16,7 +16,10 @@
     sales: ic('<path d="M4 5h2l2.2 10h9.6L20 8H7.2"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/>'),
     production: ic('<path d="M3 20V9l6 4V9l6 4V5h6v15z"/><path d="M8 17h2M13 17h2"/>'),
     finance: ic('<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18M16 15h2"/>'),
-    people: ic('<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.4 3-5 6-5s5.4 1.6 6 5"/><path d="M16 5.2a3 3 0 010 5.6M17.5 14.3c1.9.6 3.1 2.1 3.5 4.7"/>'),
+    hr: ic('<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.4 3-5 6-5s5.4 1.6 6 5"/><path d="M16 5.2a3 3 0 010 5.6M17.5 14.3c1.9.6 3.1 2.1 3.5 4.7"/>'),
+    support: ic('<path d="M4 13v-2a8 8 0 0116 0v2M20 17c0 2-3 3-6 3"/><rect x="3" y="11" width="4" height="6" rx="2"/><rect x="17" y="11" width="4" height="6" rx="2"/>'),
+    logistics: ic('<path d="M3 5h11v12H3zM14 9h4l3 4v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>'),
+    menu: ic('<path d="M4 6h16M4 12h16M4 18h16"/>'),
     report: ic('<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>'),
     decisions: ic('<rect x="3" y="4" width="5" height="16" rx="1.6"/><rect x="9.5" y="4" width="5" height="10" rx="1.6"/><rect x="16" y="4" width="5" height="13" rx="1.6"/>'),
     data: ic('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
@@ -30,46 +33,75 @@
     send: ic('<path d="M4 12l16-8-6 16-3-6z"/>'),
   };
   const VIEWS = [
-    { id: 'pulse', name: 'Пульс компании', icon: I.pulse },
-    { id: 'sales', name: 'Продажи и клиент', icon: I.sales },
-    { id: 'production', name: 'Производство и качество', icon: I.production },
-    { id: 'finance', name: 'Финансы и бухгалтерия', icon: I.finance },
-    { id: 'people', name: 'Кадры и документы', icon: I.people },
-    { id: 'decisions', name: 'Реестр решений', icon: I.decisions },
-    { id: 'data', name: 'Данные и журнал', icon: I.data },
+    { id: 'pulse', name: 'Пульс компании', icon: I.pulse, group: 'main' },
+    { id: 'attention', name: 'Требует решения', icon: I.bell, group: 'work' },
+    { id: 'decisions', name: 'Реестр решений', icon: I.decisions, group: 'work' },
+    { id: 'data', name: 'Данные и журнал', icon: I.data, group: 'manage' },
   ];
+  const CONTOUR_ICONS = { production: I.production, sales: I.sales, support: I.support, logistics: I.logistics, finance: I.finance, hr: I.hr, office: I.report };
+  const PAIN_NAV = {
+    oneday: 'Выпуск и сроки', queue: 'Очередь на участках', defect: 'Брак и перепечатки', season: 'Мощность на сезон',
+    plan: 'План продаж', funnel: 'Потери в воронке', return: 'Повторные покупки', channels: 'Каналы продаж',
+    sla: 'Скорость ответа', topics: 'Темы обращений', backlog: 'Открытые обращения', money: 'Возвраты и перепечатки', where: 'Где мой заказ',
+    '48h': 'Доставлено', when: 'Опоздания по дням', transit: 'Застряли в пути', regions: 'Сроки по регионам', dock: 'Очередь на отгрузку',
+    cash: 'Деньги на счетах', debtors: 'Долги покупателей', margin: 'Потери маржи', pnl: 'План-факт и сверка',
+    today: 'Приём и увольнения', attendance: 'Не вышли на смену', vacancies: 'Открытые вакансии', leave: 'Причины увольнений',
+    completed: 'Исполнено и просрочено', burn: 'Документы в работе', who: 'Сроки по отделам', kinds: 'Виды документов', claims: 'Претензии клиентов',
+  };
+  const isContour = (id) => Object.prototype.hasOwnProperty.call(CONTOUR_ICONS, id);
   const STATUSES = ['новое', 'в работе', 'на проверке', 'закрыто'];
-  /* Руководитель отдела видит только свои разделы — так просил заказчик. */
-  const DEPT_VIEW = { production: 'production', logistics: 'production', sales: 'sales', support: 'sales', finance: 'finance', hr: 'people', office: 'people' };
-  const myViews = () => !S.user || S.user.role !== 'head' ? VIEWS : VIEWS.filter((v) => ['pulse', 'decisions', 'data', DEPT_VIEW[S.user.dept]].includes(v.id));
-  const DEMO = [['director', 'Директор'], ['production', 'Руководитель производства'], ['finance', 'Руководитель финансов'], ['hr', 'Руководитель по персоналу'], ['operator', 'Мастер участка'], ['analyst', 'Аналитик']];
+  const canDecide = () => S.user && S.user.role !== 'analyst';
+  const myViews = () => [
+    ...VIEWS.filter((v) => v.id !== 'pulse' || S.user.role !== 'head').map((v) =>
+      S.user.role === 'head' && v.id === 'attention' ? { ...v, name: 'Отклонения от плана' } : v),
+    ...S.contours.map((c) => ({ ...c, group: 'contours', icon: CONTOUR_ICONS[c.id] })),
+  ];
+  const defaultView = () => S.user.role === 'head' ? S.user.dept : 'pulse';
+  function routeView(params) {
+    const id = params.get('v');
+    const view = isContour(id) || VIEWS.some((v) => v.id === id && (id !== 'pulse' || S.user.role !== 'head')) ? id : defaultView();
+    return { view, pain: isContour(view) && view === id ? params.get('p') : null };
+  }
+  function routeFilters(params) {
+    const days = +params.get('d');
+    return { days: [7, 14, 30, 60].includes(days) ? days : 14, product: params.get('product') || '' };
+  }
+  function viewHash() {
+    const params = new URLSearchParams({ v: S.view, d: S.days });
+    if (S.pain) params.set('p', S.pain);
+    if (S.product) params.set('product', S.product);
+    return '#' + params;
+  }
+  const DEMO = [['director', 'Директор'], ['production', 'Руководитель производства'], ['sales', 'Руководитель продаж'], ['support', 'Руководитель поддержки'], ['logistics', 'Руководитель логистики'], ['finance', 'Руководитель финансов'], ['hr', 'Руководитель по персоналу'], ['office', 'Руководитель делопроизводства'], ['operator', 'Мастер участка'], ['analyst', 'Аналитик']];
 
   const store = { get: (k) => { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v == null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch (e) { /* закрытое окно */ } } };
-  const hash = new URLSearchParams(location.hash.slice(1));
-  const S = { token: store.get('fp-token'), user: null, view: VIEWS.some((v) => v.id === hash.get('v')) ? hash.get('v') : 'pulse',
-    days: [7, 14, 30, 60].includes(+hash.get('d')) ? +hash.get('d') : 14, product: '', dept: '', pulse: null, cache: {}, err: null, chat: [], seq: 0 };
+  const S = { token: store.get('fp-token'), user: null, view: '', pain: null, contours: [], contour: null, openCount: null,
+    days: 14, product: '', pulse: null, cache: {}, err: null, chat: [], seq: 0, loadSeq: 0 };
 
   /* ---------- сервер ---------- */
   class ApiError extends Error { constructor(msg, code) { super(msg); this.code = code; } }
   async function api(path, opts = {}) {
+    const token = S.token;
     let r;
     try {
-      r = await fetch(path, { method: opts.body ? 'POST' : 'GET', headers: Object.assign({ 'Content-Type': 'application/json' }, S.token ? { Authorization: 'Bearer ' + S.token } : {}),
+      r = await fetch(path, { method: opts.body ? 'POST' : 'GET', headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: 'Bearer ' + token } : {}),
         body: opts.body ? JSON.stringify(opts.body) : undefined });
     } catch (e) { throw new ApiError('Нет связи с сервером. Проверьте сеть и повторите — введённое сохранено.', 0); }
     let data = null;
     try { data = await r.json(); } catch (e) { /* пустой ответ */ }
-    if (r.status === 401 && path !== '/api/login') { logout(true); throw new ApiError('Сеанс закончился, войдите снова', 401); }
+    if (r.status === 401 && path !== '/api/login') { if (token === S.token) logout(true); throw new ApiError('Сеанс закончился, войдите снова', 401); }
     if (!r.ok) throw new ApiError((data && data.error) || 'Сервер ответил ошибкой ' + r.status, r.status);
     return data;
   }
-  const q = () => `days=${S.days}${S.product ? '&product=' + S.product : ''}`;
+  const q = () => `days=${S.days}${S.product ? '&product=' + encodeURIComponent(S.product) : ''}`;
   async function cached(key, path) {
     const k = key + '|' + q();
-    if (!S.cache[k]) S.cache[k] = api(path).catch((e) => { delete S.cache[k]; throw e; });
-    return S.cache[k];
+    const cache = S.cache;
+    if (!cache[k]) cache[k] = api(path).catch((e) => { delete cache[k]; throw e; });
+    return cache[k];
   }
   const drill = (kpi, by) => cached(`drill:${kpi}:${by}`, `/api/pult/drill?kpi=${kpi}&by=${by}&${q()}`);
+  const why = (kpi) => cached(`why:${kpi}`, `/api/pult/why?kpi=${kpi}&${q()}`);
   function toast(text, action) {
     const el = document.createElement('div');
     el.className = 'toast';
@@ -100,14 +132,17 @@
       btn.disabled = true;
       try {
         const d = await api('/api/login', { body: { login: f.login.value.trim(), password: f.password.value } });
-        S.token = d.token; S.user = d.user; store.set('fp-token', d.token); S.view = 'pulse'; S.dept = ''; S.product = '';
+        S.token = d.token; S.user = d.user; store.set('fp-token', d.token);
         start();
       } catch (err) { $('.err', f).textContent = err.message; btn.disabled = false; }
     };
     f.login.focus();
   }
   function logout(silent) {
-    S.token = null; S.user = null; S.pulse = null; S.cache = {}; S.chat = []; clearInterval(S.timer);
+    if (!silent) history.replaceState(null, '', location.pathname + location.search);
+    S.seq++; S.loadSeq++;
+    S.token = null; S.user = null; S.pulse = null; S.cache = {}; S.chat = []; S.contours = []; S.contour = null; S.openCount = null; S.draft = null;
+    clearInterval(S.timer);
     store.set('fp-token', null);
     renderLogin(silent ? 'Сеанс закончился, войдите снова' : '');
   }
@@ -117,7 +152,6 @@
     if (!S.token) return renderLogin();
     try { S.user = await api('/api/me'); } catch (e) { if (e.code !== 401) renderLogin(e.message); return; }
     if (S.user.role === 'operator') return renderMy();
-    if (!myViews().some((v) => v.id === S.view)) S.view = 'pulse';
     if (!['director', 'head', 'analyst'].includes(S.user.role)) {
       $('#app').innerHTML = `<main class="login"><div class="glass login-card"><span class="logo">Ф</span><h1>Пульт — для руководителей</h1>
         <p class="muted">Вы вошли как «${esc(S.user.title)}». Для операционной команды есть экран участка с очередью и отметками этапов.</p>
@@ -125,18 +159,23 @@
       $('#lo').onclick = () => logout();
       return;
     }
+    const params = new URLSearchParams(location.hash.slice(1));
+    Object.assign(S, routeView(params), routeFilters(params));
     renderShell();
     load();
   }
   function renderShell() {
     const initials = S.user.name.split(' ').map((p) => p[0]).slice(0, 2).join('');
     $('#app').innerHTML = `<div class="shell">
-      <aside class="rail glass" aria-label="Разделы">
-        <span class="logo" aria-hidden="true">Ф</span>
-        <nav class="rail-nav" id="nav"><span class="rail-pill" id="pill"></span>
-          ${myViews().map((v) => `<button class="rail-btn" data-view="${v.id}" aria-label="${v.name}">${v.icon}<span class="tip">${v.name}</span></button>`).join('')}
-        </nav>
-        <span class="avatar" title="${esc(S.user.name)} · ${esc(S.user.title)}">${esc(initials)}</span>
+      <button class="nav-scrim" id="navScrim" type="button" aria-label="Закрыть меню" hidden></button>
+      <aside class="rail" id="rail" aria-label="Разделы">
+        <a class="rail-brand" href="/" aria-label="Фотопринт, все треки"><span aria-hidden="true">Ф</span>Фотопринт</a>
+        <div class="rail-profile">
+          <span class="avatar" aria-hidden="true">${esc(initials)}</span>
+          <div><strong>${esc(S.user.name)}</strong><small>${esc(S.user.title)}</small></div>
+          <button class="rail-close" id="navClose" type="button" aria-label="Закрыть меню">${I.close}</button>
+        </div>
+        <nav class="rail-nav" id="nav" aria-label="Навигация"></nav>
       </aside>
       <div class="stage">
         <header class="topbar glass" id="topbar"></header>
@@ -144,70 +183,144 @@
       </div>
     </div>
     <button class="btn btn-accent fab" id="fab">${I.spark} Помощник</button>`;
-    $('#nav').addEventListener('click', (e) => { const b = e.target.closest('[data-view]'); if (b) go(b.dataset.view); });
-    $('#nav').addEventListener('keydown', (e) => {
-      if (!['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft'].includes(e.key)) return;
-      const btns = $$('.rail-btn'); const i = btns.indexOf(document.activeElement);
-      const n = btns[(i + (e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1) + btns.length) % btns.length];
-      if (n) { n.focus(); e.preventDefault(); }
-    });
+    $('#nav').onclick = (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      setMenu(false);
+      if (b.dataset.view) go(b.dataset.view);
+      if (b.dataset.jump) go(S.view, b.dataset.jump);
+      if (b.dataset.rail === 'report') openReport();
+      if (b.dataset.rail === 'logout') logout();
+    };
+    $('#navScrim').onclick = $('#navClose').onclick = () => setMenu(false);
     $('#fab').onclick = openChat;
-    renderTop(); movePill(false);
-    window.addEventListener('resize', () => movePill(false));
+    renderNav();
+    renderTop();
     clearInterval(S.timer);
-    S.timer = setInterval(async () => {                      // новые заказы и отметки из приложения — без перезагрузки
-      if (document.hidden || $('#layer').innerHTML || !S.pulse || !S.pulse.app || !['pulse', 'sales', 'production'].includes(S.view)) return;
+    S.timer = setInterval(async () => {
+      if (document.hidden || $('#layer').innerHTML || !S.pulse?.app || !['sales', 'production'].includes(S.view)) return;
+      const token = S.token, query = q(), view = S.view, pulse = S.pulse;
       try {
-        const a = await api('/api/pult/app?days=' + S.days), sig = appSig(a);
-        if (sig !== S.appSig) { S.appSig = sig; S.pulse.app = a; const y = window.scrollY; await renderView(); window.scrollTo(0, y); toast('Пришли новые данные из приложения'); }
-      } catch (e) { /* сеть моргнула — попробуем в следующий раз */ }
+        const a = await api('/api/pult/app?' + query), sig = appSig(a);
+        if (token !== S.token || query !== q() || view !== S.view || pulse !== S.pulse || sig === S.appSig) return;
+        S.appSig = sig;
+        S.pulse.app = a;
+        const live = $('#liveApp');
+        if (live) {
+          live.innerHTML = view === 'sales' ? liveSales(a) : liveProd(a);
+          toast('Пришли новые данные из приложения');
+        }
+      } catch (e) { /* Повторим при следующем обновлении. */ }
     }, 6000);
   }
-  /* «Перетекающий» указатель раздела: край по ходу движения едет быстро, второй его догоняет. */
-  function movePill(animate = true) {
-    const pill = $('#pill'), nav = $('#nav'), btn = $(`.rail-btn[data-view="${S.view}"]`);
-    if (!pill || !btn) return;
-    $$('.rail-btn').forEach((b) => b.toggleAttribute('aria-current', false));
-    btn.setAttribute('aria-current', 'page');
-    const top = btn.offsetTop, bottom = nav.clientHeight - top - btn.offsetHeight;
-    const was = parseFloat(pill.style.top || '0');
-    pill.className = 'rail-pill' + (animate ? (top > was ? ' down' : ' up') : '');
-    pill.style.height = 'auto'; pill.style.top = top + 'px'; pill.style.bottom = bottom + 'px';
+  function setMenu(open) {
+    const rail = $('#rail'), toggle = $('#navToggle');
+    if (!rail || !toggle) return;
+    const wasOpen = rail.classList.contains('is-open');
+    rail.classList.toggle('is-open', open);
+    $('#navScrim').hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open) requestAnimationFrame(() => { if (rail.classList.contains('is-open')) $('#navClose')?.focus(); });
+    else if (wasOpen) toggle.focus();
+  }
+  function renderNav() {
+    const nav = $('#nav');
+    if (!nav) return;
+    const entries = myViews();
+    const group = (id, label, extra = '') => {
+      const links = entries.filter((v) => v.group === id).map((v) => {
+        const count = v.id === 'attention' ? S.pulse?.alerts.length : v.id === 'decisions' ? S.openCount : 0;
+        const current = v.id === S.view && !S.pain ? ' aria-current="page"' : '';
+        return `<button class="rail-btn" data-view="${v.id}"${current}>${v.icon}<span>${esc(v.name)}</span>${count ? `<b class="rail-count">${count}</b>` : ''}</button>`;
+      }).join('') + extra;
+      return links ? `<div class="rail-group">${label ? `<p>${label}</p>` : ''}${links}</div>` : '';
+    };
+    const contour = S.contour?.dept === S.view ? S.contour : null;
+    const painLinks = contour ? contour.pains.map((p) => `<button class="rail-btn" data-jump="${esc(p.id)}"${p.id === S.pain ? ' aria-current="page"' : ''}>${I.report}
+      <span>${esc(PAIN_NAV[p.id] || p.title)}</span>
+      ${['bad', 'warn'].includes(p.status) ? `<span class="rail-indicator st-${p.status}" role="img" aria-label="${WORD[p.status]}"></span>` : ''}</button>`).join('') : '';
+    const topics = painLinks ? `<div class="rail-group"><p>Рабочие вопросы</p>${painLinks}</div>` : '';
+    const departments = group('contours', S.user.role === 'head' ? '' : 'Отделы');
+    nav.innerHTML = group('main', '') + (S.user.role === 'head' ? departments + topics : topics)
+      + group('work', '', `<button class="rail-btn" data-rail="report"${S.pulse ? '' : ' disabled'}>${I.report}<span>Отчёт за период</span></button>`)
+      + (S.user.role === 'head' ? '' : departments)
+      + group('manage', '', `<button class="rail-btn" data-rail="logout">${I.out}<span>Выйти</span></button>`);
   }
   function renderTop() {
-    const v = VIEWS.find((x) => x.id === S.view), p = S.pulse;
-    const bad = p ? p.alerts.length : 0;
-    $('#topbar').innerHTML = `<div class="crumbs"><span>Фотопринт</span><i>/</i><b>${v.name}</b></div>
-      <button class="search" id="openPal" aria-label="Поиск и команды">${I.search.replace('<svg', '<svg width="17" height="17"')}<kbd>⌘K</kbd></button>
+    const p = S.pulse;
+    const open = $('#rail').classList.contains('is-open');
+    $('#topbar').innerHTML = `<button class="btn btn-icon nav-toggle" id="navToggle" aria-label="Меню" aria-controls="rail" aria-expanded="${open}">${I.menu}</button>
+      <button class="search" id="openPal" aria-label="Поиск и команды"${p ? '' : ' disabled'}>${I.search}<span>Поиск</span><kbd>⌘K</kbd></button>
       <span class="spacer"></span>
       <div class="seg" role="group" aria-label="Период">${[7, 14, 30, 60].map((d) => `<button data-days="${d}" aria-pressed="${S.days === d}">${d} дн.</button>`).join('')}</div>
-      <select class="select" id="fProduct" aria-label="Продукт"><option value="">Все продукты</option>${p ? p.products.map((x) => `<option value="${x.id}" ${S.product === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('') : ''}</select>
-      ${p && p.depts.length > 1 ? `<select class="select" id="fDept" aria-label="Подразделение"><option value="">Все подразделения</option>${p.depts.map((x) => `<option value="${x.id}" ${S.dept === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}
-      <span class="chip live" title="Данные обновлены: дата и время"><i></i>${p ? ftime(p.asof) : 'загрузка'}</span>
-      <button class="btn btn-icon bell" id="bell" aria-label="Отклонения: ${bad}">${I.bell.replace('<svg', '<svg width="18" height="18"')}${bad ? `<b>${bad}</b>` : ''}</button>
-      <button class="btn btn-primary" id="newDec">${I.plus.replace('<svg', '<svg width="16" height="16"')} Решение</button>
-      <button class="btn btn-icon" id="logout" aria-label="Выйти (${esc(S.user.name)})" title="Выйти: ${esc(S.user.name)}, ${esc(S.user.title)}">${I.out.replace('<svg', '<svg width="18" height="18"')}</button>`;
+      <select class="select" id="fProduct" aria-label="Продукт"><option value="">Все продукты</option>${p ? p.products.map((x) => `<option value="${esc(x.id)}" ${S.product === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('') : ''}</select>
+      <time class="data-stamp" title="Данные обновлены">${p ? ftime(p.asof) : 'Загрузка…'}</time>
+      ${canDecide() ? `<button class="btn" id="newDec"${p ? '' : ' disabled'}>${I.plus.replace('<svg', '<svg width="16" height="16"')} Новое решение</button>` : ''}`;
+    $('#navToggle').onclick = () => setMenu(!$('#rail').classList.contains('is-open'));
     $('#openPal').onclick = openPalette;
     $$('[data-days]').forEach((b) => b.onclick = () => { S.days = +b.dataset.days; reload(); });
     $('#fProduct').onchange = (e) => { S.product = e.target.value; reload(); };
-    if ($('#fDept')) $('#fDept').onchange = (e) => { S.dept = e.target.value; renderView(); };
-    $('#bell').onclick = () => { go('pulse'); setTimeout(() => { const a = $('#alerts'); if (a) a.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 60); };
-    $('#newDec').onclick = () => openDecisionForm({});
-    $('#logout').onclick = () => logout();
+    if ($('#newDec')) $('#newDec').onclick = () => openDecisionForm({});
   }
-  function go(view) {
+  function go(view, pain = null) {
     if (!myViews().some((v) => v.id === view)) return;
-    S.view = view;
-    history.replaceState(null, '', `#v=${view}&d=${S.days}`);
-    movePill(true); renderTop(); renderView();
-    const m = $('#view'); if (m) window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (S.view !== view || S.pain !== pain) {
+      S.view = view;
+      S.pain = pain;
+      history.pushState(null, '', viewHash());
+      renderNav(); renderTop(); renderView();
+    }
+    $('#view').focus({ preventScroll: true });
+    window.scrollTo(0, 0);
   }
-  function reload() { S.cache = {}; history.replaceState(null, '', `#v=${S.view}&d=${S.days}`); load(); }
+  window.addEventListener('hashchange', () => {
+    if (!$('#view') || !S.user) return;
+    const params = new URLSearchParams(location.hash.slice(1));
+    Object.assign(S, routeView(params));
+    const filters = routeFilters(params);
+    if (filters.days !== S.days || filters.product !== S.product) {
+      Object.assign(S, filters);
+      load();
+    } else { renderNav(); renderTop(); renderView(); }
+    window.scrollTo(0, 0);
+  });
+  function reload() {
+    S.cache = {};
+    history.replaceState(null, '', viewHash());
+    load();
+  }
+  async function refreshDecisionCount() {
+    const token = S.token, cache = S.cache;
+    try {
+      const decisions = await cached('decisions', '/api/pult/decisions');
+      if (token !== S.token || cache !== S.cache) return;
+      S.openCount = decisions.filter((d) => d.status !== 'закрыто').length;
+      const link = $('#nav [data-view="decisions"]');
+      if (link) {
+        $('.rail-count', link)?.remove();
+        if (S.openCount) link.insertAdjacentHTML('beforeend', `<b class="rail-count">${S.openCount}</b>`);
+      }
+    } catch (e) { /* Реестр покажет ошибку при открытии. */ }
+  }
   async function load() {
+    const seq = ++S.loadSeq;
+    S.seq++;
     S.err = null;
-    if (!S.pulse) $('#view').innerHTML = `<div class="skel" style="height:64px"></div><div class="grid2"><div class="skel" style="height:420px"></div><div class="skel" style="height:420px"></div></div>`;
-    try { S.pulse = await api('/api/pult/pulse?' + q()); S.appSig = appSig(S.pulse.app); } catch (e) { S.err = e; }
-    renderTop(); renderView();
+    S.pulse = null;
+    renderTop();
+    $('#view').innerHTML = '<div class="skel" role="status" aria-label="Загрузка данных"></div>';
+    try {
+      const [pulse, contours] = await Promise.all([api('/api/pult/pulse?' + q()), api('/api/pult/contours?' + q())]);
+      if (seq !== S.loadSeq) return;
+      S.pulse = pulse;
+      S.appSig = appSig(pulse.app);
+      S.contours = contours;
+    } catch (e) {
+      if (seq !== S.loadSeq) return;
+      S.err = e;
+    }
+    renderNav(); renderTop(); renderView();
+    if (S.pulse) refreshDecisionCount();
   }
   function errorBox(e, retry = 'load') {
     return `<div class="glass state"><h2>${e.code === 403 ? 'Нет доступа' : 'Не получилось загрузить данные'}</h2><p class="muted">${esc(e.message)}</p>
@@ -217,14 +330,14 @@
   /* ---------- графики ---------- */
   function spark(series, st) {
     const pts = series.map((v, i) => [i, v]).filter((p) => p[1] != null);
-    if (pts.length < 2) return '<svg class="spark"></svg>';
+    if (pts.length < 2) return '';
     const ys = pts.map((p) => p[1]), min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
     const X = (i) => 3 + (i / (series.length - 1)) * 102, Y = (v) => 26 - ((v - min) / span) * 22;
     const d = pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
     const last = pts[pts.length - 1];
     return `<svg class="spark" viewBox="0 0 108 30" aria-hidden="true"><path d="${d}" fill="none" stroke="${COLOR[st] || 'var(--ink3)'}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.6" fill="${COLOR[st] || 'var(--ink3)'}"/></svg>`;
   }
-  function lineChart(k) {
+  function lineChart(k, gradient = 'chart-area') {
     const W = 520, H = 190, L = 44, R = 12, T = 14, B = 26;
     const vals = k.series.filter((v) => v != null).concat(k.plan != null && k.unit !== 'BYN' && k.unit !== 'чел.' ? [k.plan] : []);
     if (vals.length < 2) return '';
@@ -237,10 +350,10 @@
     const showPlan = k.plan != null && k.unit !== 'BYN' && k.unit !== 'чел.';
     const step = Math.max(1, Math.ceil(n / 6));
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Динамика показателя «${esc(k.name)}» по дням">
-      <defs><linearGradient id="ar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E9806F" stop-opacity=".30"/><stop offset="1" stop-color="#E9806F" stop-opacity="0"/></linearGradient></defs>
+      <defs><linearGradient id="${gradient}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--brand)" stop-opacity=".30"/><stop offset="1" stop-color="var(--brand)" stop-opacity="0"/></linearGradient></defs>
       ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="var(--edge)"/><text x="${L - 8}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--ink4)" font-family="JetBrains Mono">${fmt(t)}</text>`).join('')}
       ${showPlan ? `<line x1="${L}" x2="${W - R}" y1="${Y(k.plan).toFixed(1)}" y2="${Y(k.plan).toFixed(1)}" stroke="var(--ink3)" stroke-dasharray="5 5" opacity=".7"/><text x="${W - R}" y="${(Y(k.plan) - 6).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--ink3)">план ${fmt(k.plan)}</text>` : ''}
-      <path d="${area}" fill="url(#ar)"/><path d="${path}" fill="none" stroke="var(--brand)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="${area}" fill="url(#${gradient})"/><path d="${path}" fill="none" stroke="var(--brand)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
       ${pts.map((p) => `<circle cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="2.4" fill="var(--brand)"><title>${k.labels[p[0]]}: ${fmt(p[1])} ${k.unit}</title></circle>`).join('')}
       ${k.labels.map((l, i) => i % step === 0 ? `<text x="${X(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--ink4)" font-family="JetBrains Mono">${l}</text>` : '').join('')}
     </svg>`;
@@ -249,7 +362,8 @@
     const max = Math.max(...rows.map((r) => Math.abs(r.value || 0)), 1e-9);
     return `<div class="bars">${rows.map((r, i) => `<div class="bar"><span>${esc(r.name)}${r.count != null && opts.count !== false ? ` <small>· ${fmt(r.count)}</small>` : ''}</span>
       <span class="tr"><i class="${opts.calm ? 'calm' : ''}" style="width:${Math.max(2, (Math.abs(r.value || 0) / max) * 100).toFixed(1)}%;animation-delay:${i * 40}ms"></i></span>
-      <b>${fmt(r.value)} ${esc(r.unit || unit || '')}</b></div>`).join('')}</div>`;
+      <b>${fmt(r.value)} ${esc(r.unit || unit || '')}</b>
+      ${r.extra || r.delta != null ? `<small class="bar-detail">${r.delta != null ? `К прошлому периоду: ${r.delta > 0 ? '+' : ''}${fmt(r.delta)} %` : ''}${r.delta != null && r.extra ? ' · ' : ''}${esc(r.extra)}</small>` : ''}</div>`).join('')}</div>`;
   }
 
   /* ---------- карта компании ---------- */
@@ -270,11 +384,10 @@
     }).join('');
     const coreColor = COLOR[p.pulse.status];
     return `<svg id="map" viewBox="0 0 ${W} ${H}" role="group" aria-label="Карта компании: сквозной поток заказа">
-      <defs><radialGradient id="core" cx="50%" cy="45%" r="60%"><stop offset="0" stop-color="#F3B5A8" stop-opacity=".7"/><stop offset="60%" stop-color="#F6C9C4" stop-opacity=".35"/><stop offset="100%" stop-color="#F6C9C4" stop-opacity="0"/></radialGradient></defs>
       <path class="ring" d="${ring}"/>
       ${nodes.map((n) => `<path class="spoke" d="M${cx} ${cy} Q${((cx + n.x) / 2 + Math.sin(n.a) * 18).toFixed(1)} ${((cy + n.y) / 2 - Math.cos(n.a) * 18).toFixed(1)} ${n.x.toFixed(1)} ${n.y.toFixed(1)}" stroke="${COLOR[n.status]}"/>`).join('')}
       ${nodes.map(twigs).join('')}
-      <circle cx="${cx}" cy="${cy}" r="118" fill="url(#core)"/>
+      <circle cx="${cx}" cy="${cy}" r="118" fill="var(--bg0)"/>
       <circle cx="${cx}" cy="${cy}" r="66" fill="rgba(255,255,255,.92)" stroke="${coreColor}" stroke-width="2"/>
       <circle cx="${cx}" cy="${cy}" r="76" fill="none" stroke="${coreColor}" stroke-width="1" opacity=".35"/>
       <text class="core-t" x="${cx}" y="${cy - 22}" text-anchor="middle">ПУЛЬС</text>
@@ -292,57 +405,52 @@
   }
 
   /* ---------- плитки и отклонения ---------- */
-  function kpiTile(k) {
+  function kpiTile(k, fromPulse = false) {
     if (k.locked) return `<div class="glass-flat kpi locked" aria-label="${esc(k.name)}: ${WORD[k.status]}, значение закрыто"><div class="kpi-top"><span class="kpi-name">${esc(k.name)}</span>${chip(k.status)}</div>
       <div class="lock-note">${I.lock}<span>${esc(k.dept_name)} — значения закрыты для вашей роли</span></div></div>`;
-    const d = k.prev != null && k.value != null ? k.value - k.prev : null;
-    const good = d == null ? '' : (d * k.dir >= 0 ? 'st-ok' : 'st-bad');
-    return `<button class="glass-flat kpi is-${k.status}" data-kpi="${k.id}"><div class="kpi-top"><span class="kpi-name">${esc(k.name)}</span>${chip(k.status)}</div>
-      <div class="kpi-val"><b class="num">${fmt(k.value)}</b><span>${esc(k.unit)}</span></div>
-      <div class="kpi-meta">план ${fmt(k.plan)}${d != null ? ` · <span class="${good}">${d > 0 ? '+' : '−'}${fmt(Math.abs(d))}</span> к прошлому` : ''}</div>
-      <div class="kpi-foot"><span class="kpi-fc">прогноз ${fmt(k.forecast)}</span>${spark(k.series, k.status)}</div></button>`;
+    return `<button class="glass-flat kpi" ${fromPulse ? 'data-company-kpi' : 'data-kpi'}="${k.id}"><div class="kpi-top"><span class="kpi-name">${esc(k.name)}</span></div>
+      <div class="kpi-val"><b>${fmt(k.value)}</b><span>${esc(k.unit)}</span></div>
+      <div class="kpi-trend">${spark(k.series, k.status)}</div>
+      <div class="kpi-context">${k.plan == null ? '' : `<span class="kpi-meta">План ${fmt(k.plan)} ${esc(k.unit)}</span>`}
+        ${k.status !== 'ok' && k.status !== 'none' ? chip(k.status) : ''}</div></button>`;
   }
-  const kpisOf = (p) => p.kpis.filter((k) => !S.dept || k.dept === S.dept);
-  /* Экран директора словами заказчика: открыл — и по каждому отделу три показателя. */
   function deptCards(p) {
-    const list = p.departments.filter((c) => !S.dept || c.id === S.dept || (c.depts || []).includes(S.dept));
-    if (!list.length) return '';
-    return `<section class="depts" aria-label="Отделы">${list.map((c) => c.hero
-      ? `<button class="glass-flat dept hero" data-go="${c.view}"><div><header><h3>${esc(c.name)}</h3>${chip(c.status)}</header>
-          <div class="big">${esc(c.metrics[0][1].replace(' %', ''))}<small> %</small></div><p>${esc(c.metrics[0][0])} — главный показатель компании. План 96 %.</p></div>
-          <ul>${c.metrics.slice(1).map((m) => `<li><b>${esc(m[1])}</b><span>${esc(m[0])}</span></li>`).join('')}<li><b>${p.pulse.critical}</b><span>показателей требуют решения</span></li></ul></button>`
-      : `<button class="glass-flat dept${c.note ? ' wide' : ''}" data-go="${c.view}"><header><h3>${esc(c.name)}</h3>${chip(c.status)}</header>
-          <ul>${c.metrics.map((m) => `<li><b>${esc(m[1])}</b><span>${esc(m[0])}</span></li>`).join('')}</ul>${c.note ? `<small>${esc(c.note)}</small>` : ''}</button>`).join('')}${S.dept ? '' : appCard(p)}</section>`;
+    return `<section class="depts" aria-label="Отделы">${p.departments.map((c) =>
+      `<button class="glass-flat dept" data-go="${c.id === 'service' ? 'support' : c.id}"><header><h3>${esc(c.name)}</h3>${chip(c.status)}</header>
+        <ul>${c.metrics.map(([label, value]) => `<li><b>${esc(value)}</b><span>${esc(label)}</span></li>`).join('')}</ul></button>`).join('')}</section>`;
+  }
+  function signalList(alerts) {
+    return alerts.length ? `<ul class="signal-list">${alerts.map((a) => `<li><button type="button" class="signal-row" data-kpi="${a.kpi}" data-by="${a.by}">
+      <span class="signal-text"><strong>${esc(a.title)}</strong><small>${esc(a.dept_name)} · ${esc(a.owner)}</small></span>
+      ${chip(a.level)}<span class="signal-arrow" aria-hidden="true">›</span></button></li>`).join('')}</ul>`
+      : '<p class="signal-empty">Отклонений за выбранный период нет.</p>';
+  }
+  function overviewQueue(b) {
+    if (!b || b.ok) return '';
+    return `<section class="glass-flat overview-queue"><h2 class="sec-title">Узкое место сейчас</h2>
+      <div class="queue-body"><h3>${esc(b.name)}</h3>
+      <p>В очереди ${fmt(b.count)}, дольше нормы — ${fmt(b.stuck)}.${b.clear_h == null ? '' : ` Оценка разбора очереди · ${fmt(b.clear_h)} ч.`}</p>
+      <details class="queue-detail"><summary>Подробности</summary><p>${esc(b.text)}</p>${b.advice ? `<p>${esc(b.advice)}</p>` : ''}
+        <p class="src">${esc(b.source)} · ${ftime(b.asof)}</p>
+        ${canDecide() ? '<button class="btn btn-sm" data-act="bneckDecide">Оформить решение</button>' : ''}</details>
+      <button class="btn btn-sm" data-kpi="on_time" data-by="stage">Открыть очередь</button></div></section>`;
   }
   /* Живые данные мобильного приложения: заказ, оформленный с телефона, виден здесь через несколько секунд. */
   const mins = (v) => v == null ? '—' : v < 1 ? 'меньше 1' : fmt(v);
-  const appSig = (a) => a ? JSON.stringify([a.sessions, a.orders && a.orders.count, a.orders && a.orders.by_stage, a.stages, a.funnel, a.support]) : '';
-  function appCard(p) {
-    const a = p.app; if (!a || !a.orders) return '';
-    const o = a.orders, nums = [];
-    if (a.see.sales) nums.push(['Открыли приложение', fmt(a.sessions)], ['Оформили заказ', fmt(o.count)], ['Оформляют заказ за', o.time_sec ? fmt(o.time_sec) + ' с' : '—']);
-    else nums.push(['Заказов из приложения', fmt(o.count)]);
-    nums.push(['Сейчас в работе', fmt(o.in_work)]);
-    const empty = !o.count && !(a.sessions > 0);
-    return `<button class="glass-flat dept full" data-go="${a.see.sales ? 'sales' : 'production'}"><header><h3>Приложение picPac</h3><span class="chip live"><i></i>живые данные</span></header>
-      ${empty ? '<p class="muted">Пока никто не заходил. Оформите тестовый заказ в приложении — он появится здесь через несколько секунд.</p>'
-        : `<ul style="grid-template-columns:repeat(${nums.length}, minmax(0, 1fr))">${nums.map((m) => `<li><b>${esc(m[1])}</b><span>${esc(m[0])}</span></li>`).join('')}</ul>`}
-      <small>${esc(a.drop || 'Шаги клиента и отметки этапов приходят из приложения в общий слой событий.')}</small></button>`;
-  }
+  const appSig = (a) => a ? JSON.stringify([a.sessions, a.orders, a.stages, a.people, a.funnel, a.support]) : '';
   function liveSales(a) {
-    if (!a || !a.see.sales) return '';
-    const max = Math.max(...a.funnel.map((r) => r.count), 1), o = a.orders;
+    if (!a?.see?.sales) return '';
+    const o = a.orders;
     return `<section class="glass panel"><header><h2>Приложение picPac — живые данные</h2><span class="chip live"><i></i>обновляется само</span><span class="spacer"></span><a class="btn btn-sm" href="/t2/" target="_blank" rel="noopener">Открыть приложение</a></header>
       <div class="grid2"><div><p class="eyebrow" style="margin-bottom:10px">Воронка за ${a.days} дн. · дошли до заказа ${fmt(a.conversion)} %</p>
-          <div class="funnel" style="min-height:170px">${a.funnel.map((r, i) => `<div class="fstep"><b>${fmt(r.count)}</b><div class="col" style="height:${Math.max(4, (r.count / max) * 110).toFixed(0)}px;animation-delay:${i * 50}ms"></div><span>${esc(r.name)}</span>
-            <small>${r.pass != null ? 'проходит ' + fmt(r.pass) + ' %' : 'вход'}</small></div>`).join('')}</div>${a.drop ? `<p class="note" style="margin-top:12px">${esc(a.drop)}</p>` : ''}</div>
+          ${funnel(a.funnel)}${a.drop ? `<p class="note" style="margin-top:12px">${esc(a.drop)}</p>` : ''}</div>
         <div><p class="eyebrow" style="margin-bottom:10px">Заказы: ${fmt(o.count)} на ${fmt(o.total)} BYN · в работе ${fmt(o.in_work)}</p>
           <div class="scroll-x"><table class="tbl"><thead><tr><th>Заказ</th><th>Когда</th><th>Этап</th><th class="n">Оформлен за</th><th class="n">Сумма, BYN</th></tr></thead><tbody>
           ${o.list.map((x) => `<tr><td class="num">${esc(x.number)}</td><td class="num">${ftime(x.ts)}</td><td>${esc(x.stage)} <span class="faint">${esc(x.stage_status)}</span></td><td class="n">${x.time_sec ? fmt(x.time_sec) + ' с' : '—'}</td><td class="n">${fmt(x.total)}</td></tr>`).join('') || '<tr><td colspan="5" class="faint">Заказов из приложения пока нет</td></tr>'}</tbody></table></div></div></div>
       <p class="src">Обращений из приложения: ${a.support.count}, открыто ${a.support.open}, привязано к заказу ${a.support.linked}. Источник: ${esc(a.source)}. Данные на ${ftime(a.asof)}.</p></section>`;
   }
   function liveProd(a) {
-    if (!a || !a.see.prod) return '';
+    if (!a?.see?.prod) return '';
     const st = Object.fromEntries(a.orders.by_stage.map((x) => [x.id, x]));
     return `<section class="glass panel"><header><h2>Заказы из приложения: этапы и отметки</h2><span class="chip live"><i></i>обновляется само</span><span class="spacer"></span><a class="btn btn-sm" href="/t2/admin.html" target="_blank" rel="noopener">Экран участка</a></header>
       <div class="grid2"><div class="scroll-x"><table class="tbl"><thead><tr><th>Этап</th><th class="n">Сейчас</th><th class="n">В работе</th><th class="n">Пройдено</th><th class="n">Ждал, мин</th><th class="n">Работа, мин</th><th class="n">Брак</th></tr></thead><tbody>
@@ -355,129 +463,173 @@
   function alertCard(a) {
     return `<article class="glass-flat alert ${a.level}"><div class="row">${chip(a.level)}<span class="who">${esc(a.dept_name)}</span></div>
       <h3>${esc(a.title)}</h3><p>${esc(a.cause)}</p><p class="who">Отвечает: ${esc(a.owner)} · ${esc(a.context)}</p>
-      <div class="row"><button class="btn btn-sm" data-kpi="${a.kpi}" data-by="${a.by}">К причине</button><button class="btn btn-sm btn-accent" data-decide="${a.kpi}">Оформить решение</button></div></article>`;
+      <div class="hyp" data-hyp="${a.kpi}"><span class="faint">Проверяю версии причины…</span></div>
+      <div class="row"><button class="btn btn-sm" data-kpi="${a.kpi}" data-by="${a.by}">К причине</button>${canDecide() ? `<button class="btn btn-sm btn-primary" data-decide="${a.kpi}">Оформить решение</button>` : ''}</div></article>`;
+  }
+
+  /* Версии причины: каждая проверена данными — «подтвердилась» или «не подтвердилась», с цифрой. Решает человек. */
+  function hypHtml(h, full) {
+    if (!h || !h.items || !h.items.length) return '<span class="faint">Версий для проверки нет — смотрите разбивку показателя.</span>';
+    const items = full ? h.items : h.items.slice(0, 3);
+    return `<p class="hyp-head">Проверено версий: ${h.checked} · подтвердилось: <b>${h.confirmed}</b></p>
+      <ul>${items.map((i) => `<li class="${i.verdict === 'да' ? 'yes' : 'no'}"><span class="mark" aria-label="${i.verdict === 'да' ? 'подтвердилась' : 'не подтвердилась'}">${i.verdict === 'да' ? '✓' : '✕'}</span>
+        <span><b>${esc(i.text)}</b>${i.verdict === 'да' ? '' : ' <span class="faint">— не подтвердилась</span>'}<small>${esc(i.evidence)}</small>
+        ${full && i.by ? `<button class="linkbtn" data-kpi="${h.kpi}" data-by="${i.by}">открыть разбивку</button>` : ''}</span></li>`).join('')}</ul>`;
+  }
+  async function fillHyps() {
+    for (const box of $$('[data-hyp]')) {
+      try { const h = await why(box.dataset.hyp); if (document.contains(box)) box.innerHTML = hypHtml(h, false); }
+      catch (e) { if (document.contains(box)) box.innerHTML = ''; }
+    }
+  }
+  function funnel(rows) {
+    const max = Math.max(...rows.map((r) => r.count), 1);
+    return `<div class="funnel">${rows.map((r) => {
+      const drop = r.pass != null && r.pass_prev != null && r.pass < r.pass_prev - 4;
+      return `<div class="fstep"><b>${fmt(r.count)}</b><div class="funnel-bar" style="--share:${r.count / max}" aria-hidden="true"></div><span>${esc(r.name)}</span>
+        <small class="${drop ? 'drop' : ''}">${r.pass == null ? '—' : `Проходит ${fmt(r.pass)} %${r.pass_prev == null ? '' : ` · было ${fmt(r.pass_prev)} %`}`}</small></div>`;
+    }).join('')}</div>`;
+  }
+  function pairsChart(rows, names, unit) {
+    const max = Math.max(...rows.flatMap((r) => [r.a, r.b]), 1);
+    return `<figure class="pair-chart">
+      <figcaption><span><i></i>${esc(names[0])}</span><span><i></i>${esc(names[1])}</span>${unit ? `<span>Шаг — ${esc(unit)}</span>` : ''}</figcaption>
+      <div class="pair-groups" style="--groups:${rows.length}">
+        ${rows.map((r) => {
+          const label = `${fdate(r.day)} · ${names[0]}: ${fmt(r.a)} · ${names[1]}: ${fmt(r.b)}`;
+          return `<div class="pair-group" role="img" aria-label="${esc(label)}" title="${esc(label)}">
+            <div class="pair-bars"><i style="height:${r.a / max * 100}%"></i><i style="height:${r.b / max * 100}%"></i></div><small aria-hidden="true">${fdate(r.day)}</small></div>`;
+        }).join('')}
+      </div></figure>`;
+  }
+  function painTable({ cols, rows, num = [], hot = [] }) {
+    const n = (j) => num.includes(j) ? ' class="n"' : '';
+    return `<div class="scroll-x"><table class="tbl pain-table"><thead><tr>${cols.map((c, j) => `<th scope="col"${n(j)}>${esc(c)}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map((row, i) => `<tr class="${hot.includes(i) ? 'hot' : ''}">${row.map((cell, j) =>
+        `<td${n(j)} data-label="${esc(cols[j])}">${esc(cell ?? '—')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+  function painDetail(p) {
+    const empty = '<p class="empty">Нет данных за выбранный период.</p>';
+    if (p.pairs) return p.pairs.length ? pairsChart(p.pairs, p.pair_names, p.pair_unit) : empty;
+    if (p.bars) return p.bars.length ? bars(p.bars) : empty;
+    if (p.table) return p.table.rows.length ? painTable(p.table) : empty;
+    if (p.funnel) return p.funnel.length ? funnel(p.funnel) : empty;
+    if (p.weeks) {
+      const deficit = p.weeks.find((w) => !w.fact && w.demand > w.capacity);
+      return p.weeks.length ? weeksChart({ weeks: p.weeks, deficit_week: deficit?.week }) : empty;
+    }
+    if (p.list) return p.list.length ? `<ul class="pain-list">${p.list.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : empty;
+    return '';
+  }
+  function painCard(p, preview = false) {
+    const detail = painDetail(p);
+    const absences = p.bars && p.list?.length ? `<ul class="pain-list">${p.list.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
+    const chart = preview && (p.pairs || p.bars || p.funnel || p.weeks)
+      ? `<div class="pain-chart-preview" data-pain-link="${esc(p.id)}">${detail}</div>` : detail;
+    const action = preview ? `<button class="btn btn-sm" data-pain-link="${esc(p.id)}">Открыть разбор</button>`
+      : p.kpi && p.by ? `<button class="btn btn-sm" data-kpi="${esc(p.kpi)}" data-by="${esc(p.by)}">Причины и разбивки</button>` : '';
+    return `<article class="glass panel pain">${preview ? `<header><h2>${esc(p.title)}</h2>${p.status !== 'none' ? chip(p.status) : ''}</header>` : ''}
+      ${p.big?.length ? `<dl class="pain-facts">${p.big.map((b) => `<div class="fact"><dt>${esc(b.label)}</dt>
+        <dd class="st-${esc(b.st)}"><b>${typeof b.value === 'number' ? fmt(b.value) : esc(b.value ?? '—')}</b>${b.unit ? ` <span>${esc(b.unit)}</span>` : ''}</dd></div>`).join('')}</dl>` : ''}
+      ${p.note ? `<p class="note">${esc(p.note)}</p>` : ''}
+      ${chart}${absences}
+      <footer><p class="src">Источник: ${esc(p.source)}</p>${action}</footer></article>`;
+  }
+  function deptAppPanel(dept) {
+    const app = S.pulse?.app;
+    const html = dept === 'sales' ? liveSales(app) : dept === 'production' ? liveProd(app) : '';
+    return html ? `<div id="liveApp">${html}</div>` : '';
+  }
+  function detailHeader(c, title, status) {
+    return `<div class="detail-back"><button class="btn btn-sm" data-go="${esc(c.dept)}">← Сводка отдела</button></div>
+      <header class="page-head contour-head"><div><h1>${esc(title)}</h1><p class="lead">
+        ${esc(c.name)} · ${fdate(c.period.from)} — ${fdate(c.period.to)}</p></div>
+        ${status && status !== 'none' ? chip(status) : ''}</header>`;
+  }
+  function kpiContext(k, title = k.name) {
+    return `<section class="glass panel detail-kpi"><header><h2>${esc(title)}</h2></header>
+      <div class="facts"><div class="fact"><small>Факт</small><b>${fmt(k.value)}</b> <span class="faint">${esc(k.unit)}</span></div>
+        <div class="fact"><small>План</small><b>${fmt(k.plan)}</b></div>
+        <div class="fact"><small>Прошлый период</small><b>${fmt(k.prev)}</b></div>
+        <div class="fact"><small>Прогноз</small><b>${fmt(k.forecast)}</b></div></div>
+      ${lineChart(k)}
+      <p class="src">${esc(k.formula)} · ${esc(k.source)}</p></section>`;
+  }
+  function contourDetail(c) {
+    const pain = c.pains.find((p) => p.id === S.pain);
+    const kpi = c.kpis.find((k) => !k.locked && (pain ? k.id === pain.kpi : 'kpi-' + k.id === S.pain));
+    if (pain) return detailHeader(c, pain.title, pain.status) + painCard(pain)
+      + (kpi ? kpiContext(kpi) : '')
+      + (['queue', 'funnel'].includes(pain.id) ? deptAppPanel(c.dept) : '');
+    if (kpi) return detailHeader(c, kpi.name, kpi.status) + kpiContext(kpi, 'Динамика и план')
+      + `<div><button class="btn" data-kpi="${esc(kpi.id)}">Причины и разбивки</button></div>`;
+    return detailHeader(c, 'Разбор не найден') + '<p class="muted">Откройте рабочий вопрос из меню или вернитесь к сводке отдела.</p>';
+  }
+  function getContour(dept) {
+    return cached('contour:' + dept, '/api/pult/contour?dept=' + dept + '&' + q());
+  }
+  async function openCompanyKpi(id) {
+    const kpi = S.pulse?.kpis.find((k) => k.id === id);
+    if (!kpi || kpi.locked || !myViews().some((v) => v.id === kpi.dept)) return openKpi(id);
+    const seq = S.seq;
+    try {
+      const c = await getContour(kpi.dept);
+      if (seq !== S.seq) return;
+      const pain = c.pains.find((p) => p.kpi === id);
+      go(kpi.dept, pain?.id || 'kpi-' + id);
+    } catch (e) { if (seq === S.seq) toast(e.message); }
+  }
+  function contourView(c) {
+    const showCharts = S.user.role !== 'head';
+    const questions = showCharts ? `<div class="grid2">${c.pains.map((p) => painCard(p, true)).join('')}</div>`
+      : `<ul class="glass-flat signal-list topic-list">${c.pains.map((p) => `<li><button class="signal-row" data-pain-link="${esc(p.id)}">
+          <span class="signal-text"><strong>${esc(p.title)}</strong></span>
+          ${p.status !== 'none' ? chip(p.status) : '<span></span>'}<span class="signal-arrow" aria-hidden="true">›</span></button></li>`).join('')}</ul>`;
+    const overview = (c.overview || []).map((item) => `<button class="glass-flat dept-summary" data-pain-link="${esc(item.pain)}">
+      <span class="dept-summary-label">${esc(item.label)}</span>
+      <span class="dept-summary-reading st-${esc(item.st)}"><b>${fmt(item.value)}</b>${item.unit ? ` <small>${esc(item.unit)}</small>` : ''}</span>
+      <span class="dept-summary-when">${esc(item.when)}<span aria-hidden="true">›</span></span></button>`).join('');
+    return `<header class="page-head contour-head"><div><h1>${esc(c.name)}</h1>
+      <p class="lead">${esc(c.head)} · ${fdate(c.period.from)} — ${fdate(c.period.to)}${S.user?.role === 'analyst' ? ' · Только чтение' : ''}</p></div>${chip(c.status)}</header>
+      ${overview ? `<section class="dept-summary-grid" aria-label="Сводка отдела">${overview}</section>` : ''}
+      <section class="contour-analysis"><h2 class="sec-title">Рабочие вопросы</h2>
+        ${questions}</section>
+      <section class="all-kpis" aria-label="Показатели отдела"><h2 class="sec-title">Показатели отдела</h2><div class="kpi-grid">${c.kpis.map((k) => kpiTile(k)).join('')}</div></section>
+      ${showCharts && c.alerts.length ? `<section class="glass-flat signals" id="alerts"><header><h2 class="sec-title">Отклонения от плана</h2></header>${signalList(c.alerts)}</section>` : ''}
+      ${showCharts ? deptAppPanel(c.dept) : ''}`;
   }
 
   /* ---------- разделы ---------- */
   const views = {
     pulse(p) {
-      const ks = kpisOf(p), al = p.alerts.filter((a) => !S.dept || a.dept === S.dept);
-      const lead = p.pulse.critical ? `Из ${p.pulse.total} показателей ${p.pulse.critical} требуют решения, ещё ${p.pulse.warn} — под вниманием. Щёлкните узел карты или показатель, чтобы дойти до причины.`
-        : 'Критических отклонений нет. Щёлкните показатель, чтобы увидеть динамику и формулу.';
-      return `<header class="page-head"><div><h1>Пульс компании</h1><p class="lead">${lead}</p></div><span class="spacer"></span>
-          <button class="btn" data-act="report">${I.report.replace('<svg', '<svg width="17" height="17"')} Отчёт за период</button></header>
-        ${deptCards(p)}
-        <section class="pulse-grid">
-          <div class="glass map-panel"><header><h2 class="sec-title">Карта компании</h2><span class="faint" style="font-size:13px">сквозной поток заказа</span>
-            <div class="legend"><span><i style="background:var(--ok)"></i>в норме</span><span><i style="background:var(--warn)"></i>внимание</span><span><i style="background:var(--bad)"></i>плохо</span></div></header>${mapSvg(p)}</div>
-          <div class="alerts" id="alerts"><h2 class="sec-title">Требует решения <span class="count">${al.length}</span></h2>
-            ${al.length ? (S.allAlerts ? al : al.slice(0, 3)).map(alertCard).join('') : '<div class="glass-flat empty">Отклонений по доступным вам показателям нет.</div>'}
-            ${al.length > 3 ? `<button class="btn btn-sm more" data-act="alerts">${S.allAlerts ? 'Свернуть' : 'Показать все: ' + al.length}</button>` : ''}</div>
-        </section>
-        <section><h2 class="sec-title" style="margin-bottom:12px">Показатели <span class="count">${ks.length}</span></h2><div class="kpi-grid">${ks.map(kpiTile).join('')}</div>
-          <p class="src">Период: ${fdate(p.period.from)} — ${fdate(p.period.to)}. Прогноз — на следующий такой же период по движению последних двух недель. У каждого показателя внутри — формула, источник и время обновления.</p></section>`;
+      const primary = ['on_time', 'revenue', 'margin', 'sla'].map((id) => p.kpis.find((k) => k.id === id)).filter(Boolean);
+      const al = p.alerts, queue = overviewQueue(p.bottleneck);
+      const map = `<section class="glass-flat map-panel" aria-labelledby="company-map-title"><header><h2 class="sec-title" id="company-map-title">Карта компании</h2><div class="legend"><span><i style="background:var(--ok)"></i>в норме</span><span><i style="background:var(--brand2)"></i>внимание</span><span><i style="background:var(--bad)"></i>критично</span></div></header>${mapSvg(p)}</section>`;
+      return `<header class="page-head"><div><h1>Пульс компании</h1><p class="lead">${fdate(p.period.from)} — ${fdate(p.period.to)}</p></div></header>
+        <section aria-label="Ключевые показатели"><div class="kpi-grid primary-kpis">${primary.map((k) => kpiTile(k, true)).join('')}</div></section>
+        <div class="overview-grid${queue ? ' with-queue' : ''}">
+          <section class="glass-flat signals"><header><h2 class="sec-title">Требует решения</h2>
+            ${al.length ? `<button class="btn btn-sm" data-go="attention">Все отклонения · ${al.length}</button>` : ''}</header>
+            ${signalList(al.slice(0, 3))}</section>
+          ${queue}</div>
+        ${map}
+        <details class="section-details glass-flat"><summary>Сводка по отделам</summary><div class="section-details-body">${deptCards(p)}</div></details>
+        <section class="all-kpis"><h2 class="sec-title">Все показатели <span class="cnt">${p.kpis.length}</span></h2>
+          <div class="kpi-grid">${p.kpis.map((k) => kpiTile(k, true)).join('')}</div></section>`;
     },
-    async sales(p) {
-      const own = p.kpis.filter((k) => k.dept === 'sales' || k.dept === 'support');
-      const open = own.some((k) => !k.locked);
-      let body = '';
-      if (open) {
-        const [steps, prod, chan, rep] = await Promise.all([drill('app_conv', 'step'), drill('revenue', 'product'), drill('revenue', 'channel'), drill('repeat', 'client')]);
-        const max = Math.max(...steps.rows.map((r) => r.count), 1);
-        body = `<section class="grid2">
-          <div class="glass panel"><header><h2>Воронка приложения</h2><span class="spacer"></span><button class="btn btn-sm" data-kpi="app_conv" data-by="step">Подробнее</button></header>
-            <div class="funnel">${steps.rows.map((r, i) => `<div class="fstep"><b>${fmt(r.count)}</b><div class="col" style="height:${Math.max(4, (r.count / max) * 130).toFixed(0)}px;animation-delay:${i * 60}ms"></div><span>${esc(r.name)}</span>
-              <small class="${r.pass != null && r.pass_prev != null && r.pass < r.pass_prev - 4 ? 'drop' : ''}">${r.pass != null ? 'проходит ' + fmt(r.pass) + ' %' + (r.pass_prev != null ? ' · было ' + fmt(r.pass_prev) : '') : 'вход'}</small></div>`).join('')}</div>
-            ${steps.note ? `<p class="note" style="margin-top:14px">${esc(steps.note)}</p>` : ''}<p class="src">Источник: ${esc(steps.source)}</p></div>
-          <div class="glass panel"><header><h2>Оборот по продуктам</h2><span class="spacer"></span><button class="btn btn-sm" data-kpi="revenue" data-by="product">Подробнее</button></header>${bars(prod.rows, 'BYN')}
-            ${prod.note ? `<p class="note" style="margin-top:14px">${esc(prod.note)}</p>` : ''}</div>
-          <div class="glass panel"><header><h2>Оборот по каналам</h2></header>${bars(chan.rows, 'BYN', { calm: true })}<p class="src">Источник: ${esc(chan.source)}</p></div>
-          <div class="glass panel"><header><h2>Повторные покупки по типу клиента</h2></header>${bars(rep.rows, '%', { calm: true })}${rep.note ? `<p class="note" style="margin-top:14px">${esc(rep.note)}</p>` : ''}</div>
-        </section>`;
-      }
-      return `<header class="page-head"><div><h1>Продажи и клиент</h1><p class="lead">Воронка, конверсия, средний чек, повторные покупки, каналы и сегменты. Обращения и ответы — данные из действующей системы клиентского сервиса: мы её не заменяем, а подключаемся к ней.</p></div></header>
-        <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${liveSales(p.app)}${body}`;
-    },
-    async production(p) {
-      const own = p.kpis.filter((k) => k.dept === 'production' || k.dept === 'logistics');
-      const open = p.kpis.some((k) => k.dept === 'production' && !k.locked);
-      let body = '';
-      if (open) {
-        const [st, rs, fc] = await Promise.all([drill('on_time', 'stage'), drill('defect', 'reason'), cached('forecast', '/api/pult/forecast')]);
-        const hot = st.rows.reduce((a, b) => (b.over > a.over ? b : a), st.rows[0]);
-        body = `<section class="glass panel"><header><h2>Этапы производства</h2><span class="faint" style="font-size:13px">медиана времени на этапе и доля заказов, ждущих больше двух норм</span></header>
-            <div class="stages">${st.rows.map((r) => `<div class="glass-flat stg ${r === hot && r.over > 10 ? 'hot' : ''}"><h3>${esc(r.name)}</h3><span class="big">${fmt(r.value)} ч</span>
-              <small>норма ${fmt(r.norm)} ч · было ${fmt(r.prev)} ч</small><small class="${r.over > 10 ? 'st-bad' : ''}">ждут дольше двух норм: ${fmt(r.over)} %</small>
-              <small>людей: ${esc(r.staff)}${r.vacancies ? ` · вакансий ${r.vacancies}` : ''}${r.absent ? ` · отсутствуют ${r.absent}` : ''}</small></div>`).join('')}</div>
-            ${st.note ? `<p class="note" style="margin-top:14px">${esc(st.note)}</p>` : ''}<p class="src">Источник: ${esc(st.source)} · HR: штат и вакансии</p></section>
-          <section class="grid2">
-            <div class="glass panel"><header><h2>Спрос и мощность на 6 недель</h2>${fc.deficit_week ? `<span class="chip chip-bad"><i></i>дефицит с ${fdate(fc.deficit_week)}</span>` : chip('ok')}</header>${weeksChart(fc)}
-              <p class="note" style="margin-top:12px">${fc.deficit_week ? `С недели ${fdate(fc.deficit_week)} спрос превысит мощность. Узкое место — «${esc(fc.bottleneck)}»: если закрыть вакансии, мощность вернётся к плановой.` : 'Мощности хватает на все шесть недель.'}</p>
-              <p class="src">${esc(fc.formula)} Источник: ${esc(fc.source)}</p></div>
-            <div class="glass panel"><header><h2>Причины брака</h2><span class="spacer"></span><button class="btn btn-sm" data-kpi="defect" data-by="reason">Подробнее</button></header>${rs.rows.length ? bars(rs.rows, '% брака') : '<p class="empty">Брака за период нет.</p>'}
-              ${rs.note ? `<p class="note" style="margin-top:14px">${esc(rs.note)}</p>` : ''}</div>
-          </section>
-          <section class="glass panel"><header><h2>Заказы, сорвавшие срок</h2><span class="faint" style="font-size:13px">самые долгие за период</span></header>
-            <div class="scroll-x"><table class="tbl"><thead><tr><th>Заказ</th><th>Продукт</th><th>Где задержался</th><th>Брак</th><th class="n">Часов до ОТК</th></tr></thead>
-            <tbody>${st.orders.map((o) => `<tr><td class="num">${esc(o.id)}</td><td>${esc(o.product)}</td><td>${esc(o.stage)}</td><td>${esc(o.defect || '—')}</td><td class="n">${fmt(o.hours)}</td></tr>`).join('') || '<tr><td colspan="5" class="faint">Таких заказов нет</td></tr>'}</tbody></table></div></section>`;
-      }
-      return `<header class="page-head"><div><h1>Производство и качество</h1><p class="lead">План и факт выпуска, очередь, время изготовления, загрузка, брак и перепечатка, доставка.</p></div></header>
-        <div class="kpi-grid">${own.map(kpiTile).join('')}</div>${liveProd(p.app)}${body}`;
-    },
-    async finance(p) {
-      const f = await cached('finance', '/api/pult/finance');
-      const own = p.kpis.filter((k) => k.dept === 'finance');
-      const mname = (m) => ({ '09': 'сентябрь', 10: 'октябрь', 11: 'ноябрь' }[m.slice(5)] || m);
-      const head = `<header class="page-head"><div><h1>Финансы и бухгалтерия</h1><p class="lead">План и факт доходов и расходов, деньги и долги на начало и конец месяца, расчёты с контрагентами. В 1С такой отчёт собирают часами — здесь он обновляется сам.</p></div></header>`;
-      if (f.locked_fin) return `${head}<div class="glass panel"><div class="lock-note">${I.lock}<span>Финансовые данные закрыты для вашей роли: их видят директор, руководитель финансов и аналитик.</span></div></div>`;
-      const months = [...new Set(f.pnl.map((r) => r.month))];
-      const pnl = `<div class="glass panel"><header><h2>Доходы и расходы: план и факт</h2><span class="faint" style="font-size:13px">BYN</span></header><div class="scroll-x"><table class="tbl"><thead><tr><th>Статья</th>${months.map((m) => `<th class="n">${mname(m)}: план</th><th class="n">факт</th><th class="n">откл.</th>`).join('')}</tr></thead><tbody>
-            ${[...new Set(f.pnl.map((r) => r.article))].map((a) => `<tr><td>${esc(a)}</td>${months.map((m) => { const r = f.pnl.find((x) => x.month === m && x.article === a); const d = 100 * (r.fact - r.plan) / r.plan; const bad = (r.kind === 'доход' ? -d : d) > 3;
-              return `<td class="n">${fmt(r.plan)}</td><td class="n">${fmt(r.fact)}</td><td class="n ${bad ? 'st-bad' : 'faint'}">${d > 0 ? '+' : '−'}${fmt(Math.abs(d))} %</td>`; }).join('')}</tr>`).join('')}
-          </tbody></table></div><p class="src">Источник: ${esc(f.source)}, обновлено ${ftime(f.synced)}. ${esc(f.fin_note)}. Ноябрь — с начала месяца.</p></div>`;
-      const row = (name, a, b, goodUp) => { const d = b - a; const cls = d === 0 ? 'faint' : (d > 0) === goodUp ? 'st-ok' : 'st-bad'; return `<td class="n">${fmt(a)}</td><td class="n">${fmt(b)}</td><td class="n ${cls}">${d > 0 ? '+' : '−'}${fmt(Math.abs(d))}</td>`; };
-      const bal = `<div class="glass panel"><header><h2>На начало и конец месяца</h2><span class="faint" style="font-size:13px">BYN</span></header><div class="scroll-x"><table class="tbl"><thead><tr><th>Месяц</th><th class="n">Деньги: начало</th><th class="n">конец</th><th class="n">изм.</th><th class="n">Нам должны: начало</th><th class="n">конец</th><th class="n">изм.</th><th class="n">Мы должны: начало</th><th class="n">конец</th><th class="n">изм.</th></tr></thead><tbody>
-          ${f.balances.map((x) => `<tr><td>${mname(x.month)}</td>${row('', x.cash_start, x.cash_end, true)}${row('', x.receivable_start, x.receivable_end, false)}${row('', x.payable_start, x.payable_end, false)}</tr>`).join('')}</tbody></table></div>
-          <p class="note" style="margin-top:12px">В ноябре долг покупателей вырос заметнее обычного — стоит посмотреть просрочку по контрагентам.</p></div>`;
-      const cps = `<div class="glass panel"><header><h2>Расчёты с контрагентами</h2><span class="spacer"></span><button class="btn btn-sm" data-kpi="overdue_recv" data-by="counterparty">Просрочка подробнее</button></header><div class="scroll-x"><table class="tbl"><thead><tr><th>Контрагент</th><th>Кто</th><th class="n">Долг, BYN</th><th class="n">Просрочено, BYN</th><th class="n">Дней</th></tr></thead><tbody>
-          ${f.counterparties.map((c) => `<tr><td>${esc(c.name)}</td><td class="muted">${esc(c.kind)}</td><td class="n">${c.debt < 0 ? 'мы: ' + fmt(-c.debt) : fmt(c.debt)}</td><td class="n ${c.overdue_sum ? 'st-bad' : 'faint'}">${c.overdue_sum ? fmt(c.overdue_sum) : '—'}</td><td class="n ${c.overdue_days > 14 ? 'st-bad' : 'faint'}">${c.overdue_days || '—'}</td></tr>`).join('')}</tbody></table></div>
-          <p class="src">Источник: 1С: расчёты с контрагентами. Названия условные — данные тестовые.</p></div>`;
-      return `${head}<div class="kpi-grid">${own.map(kpiTile).join('')}</div>${pnl}<section class="grid2">${bal}${cps}</section>`;
-    },
-    async people(p) {
-      const f = await cached('finance', '/api/pult/finance');
-      const own = p.kpis.filter((k) => k.dept === 'hr' || k.dept === 'office');
-      const maxM = Math.max(1, ...f.moves.map((w) => Math.max(w.hired, w.fired)));
-      const moves = `<div class="glass panel"><header><h2>Приём и увольнение по неделям</h2><span class="legend" style="margin-left:auto"><span><i style="background:var(--ok)"></i>принято</span><span><i style="background:var(--brand)"></i>уволено</span></span></header>
-          <div class="funnel" style="min-height:150px">${f.moves.map((w, i) => `<div class="fstep"><div style="display:flex;gap:4px;align-items:flex-end;height:100px">
-            <div class="col" style="flex:1;background:var(--ok);height:${Math.max(3, w.hired / maxM * 96).toFixed(0)}px;animation-delay:${i * 40}ms" title="Принято: ${w.hired}"></div>
-            <div class="col" style="flex:1;height:${Math.max(3, w.fired / maxM * 96).toFixed(0)}px;animation-delay:${i * 40 + 40}ms" title="Уволено: ${w.fired}"></div></div>
-            <b>+${w.hired} / −${w.fired}</b><span>${fdate(w.week)}</span></div>`).join('') || '<p class="empty">Движения за период нет.</p>'}</div>
-          <p class="src">Источник: ${esc(f.hr_source)}: приём и увольнение. Имён здесь нет.</p></div>`;
-      const att = `<div class="glass panel"><header><h2>Явка по табелю за две недели</h2><span class="spacer"></span><button class="btn btn-sm" data-kpi="attendance">Подробнее</button></header>
-          <div class="bars">${f.attendance.map((r) => `<div class="bar"><span>${esc(r.name)}</span><span class="tr"><i class="${r.value < 92 ? '' : 'calm'}" style="width:${r.value}%"></i></span><b class="${r.value < 92 ? 'st-bad' : ''}">${fmt(r.value)} %</b></div>`).join('')}</div>
-          <p class="src">Вышли на смену ÷ должны были выйти по графику. Источник: HR: табель.</p></div>`;
-      const staff = `<div class="glass panel"><header><h2>Штат: работает и по плану</h2></header><div class="bars">${f.staff.flatMap((d) => d.sections && f.staff.length === 1 ? d.sections : [d]).map((d) => `<div class="bar"><span>${esc(d.name)}</span><span class="tr"><i class="${d.fact / d.plan < 0.93 ? '' : 'calm'}" style="width:${(100 * d.fact / d.plan).toFixed(1)}%"></i></span><b>${d.fact} из ${d.plan}</b></div>`).join('')}</div>
-          <p class="src">Источник: ${esc(f.hr_source)}, обновлено ${ftime(f.hr_synced)}. Зарплат и личных данных здесь нет.</p></div>`;
-      const vac = `<div class="glass panel"><header><h2>Вакансии</h2><span class="cnt">${f.vacancies.length}</span></header>
-          <div class="scroll-x"><table class="tbl"><thead><tr><th>Должность</th><th>Где</th><th class="n">Открыта, дней</th></tr></thead><tbody>${f.vacancies.map((v) => `<tr><td>${esc(v.title)}</td><td>${esc(v.where)}</td><td class="n ${v.days > 14 ? 'st-bad' : ''}">${v.days}</td></tr>`).join('') || '<tr><td colspan="3" class="faint">Открытых вакансий нет</td></tr>'}</tbody></table></div>
-          <h2 style="font-size:15px;margin:16px 0 8px">Отсутствуют сегодня</h2><div class="bars">${f.absences.map((a) => `<div class="bar"><span>${esc(a.where)}</span><span class="faint">${esc(a.kind)}</span><b>${a.people} чел.</b></div>`).join('') || '<p class="empty">Все на месте.</p>'}</div></div>`;
-      const o = f.office;
-      const office = o ? `<section class="glass panel"><header><h2>Делопроизводство: документы в работе</h2><span class="cnt">${o.open}</span>${o.overdue ? `<span class="chip chip-bad"><i></i>просрочено ${o.overdue}</span>` : ''}<span class="spacer"></span><button class="btn btn-sm" data-kpi="docs_on_time">Кто срывает сроки</button></header>
-          <div class="scroll-x"><table class="tbl"><thead><tr><th>Документ</th><th>Вид</th><th>Подразделение</th><th class="n">Срок</th></tr></thead><tbody>${o.list.map((d) => `<tr><td class="num">${esc(d.id)}</td><td>${esc(d.kind)}</td><td>${esc(d.dept)}</td><td class="n ${d.overdue ? 'st-bad' : ''}">${fdate(d.due)}${d.overdue ? ' — просрочен' : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="faint">Все документы исполнены</td></tr>'}</tbody></table></div>
-          <p class="src">Всего в реестре ${fmt(o.total)} документов. Источник: ${esc(o.source)}, обновлено ${ftime(o.synced)}.</p></section>` : '';
-      return `<header class="page-head"><div><h1>Кадры и документы</h1><p class="lead">Приём и увольнение, табель, штат и вакансии, документы и поручения в срок — то, что сейчас собирают вручную.</p></div></header>
-        <div class="kpi-grid">${own.map(kpiTile).join('')}</div><section class="grid2">${moves}${att}</section><section class="grid2">${staff}${vac}</section>${office}`;
+    attention(p) {
+      return `<header class="page-head"><h1>${S.user.role === 'head' ? 'Отклонения от плана' : 'Требует решения'}</h1><span class="cnt">${p.alerts.length}</span></header>
+        <section class="alerts">${p.alerts.map(alertCard).join('') || '<p class="glass-flat empty">Отклонений нет.</p>'}</section>`;
     },
     async decisions() {
       const list = await cached('decisions', '/api/pult/decisions');
       const overdue = list.filter((d) => d.overdue).length;
-      return `<header class="page-head"><div><h1>Реестр решений</h1><p class="lead">Каждое решение — проблема, причина, действие, владелец и срок. Закрыть можно только с проверкой: что изменилось после него.${overdue ? ` Просрочено: ${overdue}.` : ''}</p></div>
-          <span class="spacer"></span><button class="btn btn-primary" data-act="newDecision">${I.plus.replace('<svg', '<svg width="16" height="16"')} Новое решение</button></header>
+      return `<header class="page-head"><div><h1>Реестр решений</h1>${overdue ? `<p class="lead">Просрочено · ${overdue}</p>` : ''}</div>
+          ${canDecide() ? `<span class="spacer"></span><button class="btn btn-primary" data-act="newDecision">${I.plus.replace('<svg', '<svg width="16" height="16"')} Новое решение</button>` : ''}</header>
         <div class="board">${STATUSES.map((s) => { const items = list.filter((d) => d.status === s);
           return `<section class="glass col" aria-label="${s}"><header>${s[0].toUpperCase() + s.slice(1)} <span class="cnt">${items.length}</span></header>
             ${items.map((d) => `<button class="glass-flat card" data-decision="${d.id}"><h3>${esc(d.title)}</h3><div class="meta"><span>${esc(d.owner)}</span><span>·</span><span class="${d.overdue ? 'st-bad' : ''}">срок ${fdate(d.due)}${d.overdue ? ' — просрочено' : ''}</span></div>
-              <div class="meta"><span class="chip ${d.priority === 'высокий' ? 'chip-bad' : ''}">${esc(d.priority)}</span><span class="faint">${esc(d.id)}</span></div></button>`).join('') || '<p class="empty">Пусто</p>'}</section>`; }).join('')}</div>`;
+              ${effLine(d)}<div class="meta"><span class="chip ${d.priority === 'высокий' ? 'chip-bad' : ''}">${esc(d.priority)}</span><span class="faint">${esc(d.id)}</span></div></button>`).join('') || '<p class="empty">Пусто</p>'}</section>`; }).join('')}</div>`;
     },
     async data() {
       let ql = null, qerr = null;
@@ -497,19 +649,38 @@
           ${audit.slice(0, 60).map((a) => `<tr><td class="num">${ftime(a.ts)}</td><td>${esc(a.who)}</td><td>${esc(a.action)}</td><td class="num">${esc(a.object || '—')}</td><td class="${a.result === 'отказ' ? 'st-bad' : ''}">${esc(a.result || 'ok')}</td><td class="muted">${esc(a.detail || '')}</td></tr>`).join('') || '<tr><td colspan="6" class="faint">Записей пока нет</td></tr>'}</tbody></table></div></section>`;
     },
   };
+  /* Эффект решения считается сам: показатель за две недели до решения и за последние две недели после. */
+  const EFF_CLS = { 'лучше': 'st-ok', 'хуже': 'st-bad', 'без изменений': 'faint' };
+  /* Закрыто, а показатель хуже или так и остался вне плана — честно подсветить. */
+  const effWarn = (d, e) => d.status === 'закрыто' && e.after != null && (e.verdict === 'хуже' || (e.verdict === 'без изменений' && e.status && e.status !== 'ok'));
+  function effLine(d) {
+    const e = d.effect_auto; if (!e) return '';
+    if (e.after == null) return `<div class="eff faint">${esc(e.name)}: ${esc(e.verdict)}</div>`;
+    const warn = effWarn(d, e);
+    return `<div class="eff"><span>${esc(e.name)}: ${fmt(e.before)} → <b>${fmt(e.after)}</b> ${esc(e.unit)}</span> <span class="${EFF_CLS[e.verdict] || ''}">${esc(e.verdict)}</span>${warn ? ' <span class="st-bad">· закрыто без улучшения</span>' : ''}</div>`;
+  }
+  function effBlock(d) {
+    const e = d.effect_auto; if (!e) return '';
+    const warn = effWarn(d, e);
+    return `<div class="eff-box ${e.verdict === 'лучше' ? 'good' : e.verdict === 'хуже' ? 'bad' : ''}"><p class="eyebrow">Эффект решения — считается сам</p>
+      ${e.after == null ? `<p>${esc(e.text)}</p>` : `<div class="eff-nums"><div><small>2 недели до решения (до ${fdate(e.since)})</small><b>${fmt(e.before)}</b></div><span aria-hidden="true">→</span>
+        <div><small>после${e.window === 'до закрытия' ? ', до закрытия' : ''}: ${e.days_after} дн.</small><b>${fmt(e.after)}</b></div><div><small>план</small><b>${fmt(e.plan)}</b></div></div>
+        <p><span class="${EFF_CLS[e.verdict] || ''}"><b>${esc(e.verdict[0].toUpperCase() + e.verdict.slice(1))}.</b></span> ${esc(e.name)}, ${esc(e.unit)}. Источник: ${esc(e.source)}.</p>
+        ${warn ? '<p class="st-bad">Решение закрыто, но показатель не улучшился — стоит вернуть его в работу.</p>' : ''}
+        ${canDecide() ? '<button class="btn btn-sm" type="button" id="effFill">Вписать в «Что изменилось»</button>' : ''}`}</div>`;
+  }
   function weeksChart(fc) {
     const W = 520, H = 210, L = 40, R = 10, T = 16, B = 30, n = fc.weeks.length;
-    const max = Math.max(...fc.weeks.map((w) => Math.max(w.demand, w.capacity, w.capacity_plan || 0))) * 1.1;
+    const max = Math.max(...fc.weeks.map((w) => Math.max(w.demand, w.capacity, w.capacity_plan || 0)), 1) * 1.1;
     const bw = (W - L - R) / n, Y = (v) => T + (1 - v / max) * (H - T - B);
     const line = (key) => fc.weeks.map((w, i) => { const v = w[key] || w.capacity; return `${i ? 'L' : 'M'}${(L + i * bw).toFixed(1)} ${Y(v).toFixed(1)} L${(L + (i + 1) * bw).toFixed(1)} ${Y(v).toFixed(1)}`; }).join(' ');
-    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Спрос и мощность по неделям">
+    return `<figure class="weeks-chart"><figcaption><span><i></i>Спрос</span><span><i></i>Мощность сейчас</span><span><i></i>После закрытия вакансий</span></figcaption><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Спрос и мощность по неделям">
       ${[0, 0.5, 1].map((k) => `<line x1="${L}" x2="${W - R}" y1="${Y(max * k / 1.1).toFixed(1)}" y2="${Y(max * k / 1.1).toFixed(1)}" stroke="var(--edge)"/><text x="${L - 6}" y="${(Y(max * k / 1.1) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--ink4)" font-family="JetBrains Mono">${fmt(max * k / 1.1)}</text>`).join('')}
       ${fc.weeks.map((w, i) => { const over = !w.fact && w.demand > w.capacity; return `<rect x="${(L + i * bw + 5).toFixed(1)}" y="${Y(w.demand).toFixed(1)}" width="${(bw - 10).toFixed(1)}" height="${(H - B - Y(w.demand)).toFixed(1)}" rx="5" fill="${over ? 'var(--bad)' : w.fact ? 'var(--ink4)' : 'var(--brand2)'}" opacity="${w.fact ? 0.5 : 0.85}"><title>Неделя с ${fdate(w.week)}: спрос ${w.demand}, мощность ${w.capacity}</title></rect>
         <text x="${(L + i * bw + bw / 2).toFixed(1)}" y="${H - 10}" text-anchor="middle" font-size="10.5" fill="${w.week === fc.deficit_week ? 'var(--bad)' : 'var(--ink4)'}" font-family="JetBrains Mono">${fdate(w.week)}</text>`; }).join('')}
       <path d="${line('capacity_plan')}" fill="none" stroke="var(--ok)" stroke-width="1.6" stroke-dasharray="5 5" opacity=".8"/>
       <path d="${line('capacity')}" fill="none" stroke="var(--accent)" stroke-width="2"/>
-      <text x="${W - R}" y="${T - 2}" text-anchor="end" font-size="11" fill="var(--ink3)">столбики — спрос (светлые — факт) · тёмная линия — мощность сейчас · пунктир — после закрытия вакансий</text>
-    </svg>`;
+    </svg></figure>`;
   }
   async function renderView() {
     const el = $('#view'); if (!el) return;
@@ -517,10 +688,21 @@
     if (S.err) { el.innerHTML = errorBox(S.err); return; }
     if (!S.pulse) return;
     try {
-      const html = await views[S.view](S.pulse);
-      if (my !== S.seq) return;
-      el.innerHTML = html;
+      const view = S.view;
+      if (isContour(view)) {
+        el.innerHTML = '<div class="skel" role="status" aria-label="Загрузка контура"></div>';
+        const contour = await getContour(view);
+        if (my !== S.seq) return;
+        S.contour = contour;
+        el.innerHTML = S.pain ? contourDetail(contour) : contourView(contour);
+        renderNav();
+      } else {
+        const html = await views[view](S.pulse);
+        if (my !== S.seq) return;
+        el.innerHTML = html;
+      }
       el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+      fillHyps();
     } catch (e) { if (my === S.seq) el.innerHTML = errorBox(e, 'rerender'); }
   }
 
@@ -536,7 +718,7 @@
   function closeLayer() { const L = $('#layer'); L.innerHTML = ''; if (lastFocus && document.contains(lastFocus)) lastFocus.focus(); }
 
   async function openKpi(id, by) {
-    const k = S.pulse.kpis.find((x) => x.id === id);
+    const k = S.pulse?.kpis.find((x) => x.id === id);
     if (!k) return;
     if (k.locked) { toast('Показатель закрыт для вашей роли'); return; }
     const dim = by && k.dims.some((d) => d.id === by) ? by : k.dims[0].id;
@@ -545,30 +727,38 @@
       <div class="drawer-body">
         <div class="facts"><div class="fact"><small>Сейчас</small><b>${fmt(k.value)}</b> <span class="faint">${esc(k.unit)}</span></div><div class="fact"><small>План</small><b>${fmt(k.plan)}</b></div>
           <div class="fact"><small>Прошлый период</small><b>${fmt(k.prev)}</b></div><div class="fact"><small>Прогноз</small><b>${fmt(k.forecast)}</b></div></div>
-        ${lineChart(k)}
+        ${lineChart(k, 'drawer-chart-area')}
+        ${k.status !== 'ok' ? `<div><p class="eyebrow" style="margin-bottom:8px">Почему — проверка версий</p><div class="hyp full" id="whyBox"><span class="faint">Проверяю версии причины…</span></div></div>` : ''}
         <div><p class="eyebrow" style="margin-bottom:8px">От показателя к причине</p><div class="tabs" id="dims">${k.dims.map((d) => `<button data-dim="${d.id}" aria-pressed="${d.id === dim}">${esc(d.name)}</button>`).join('')}</div></div>
         <div id="drill"><div class="skel"></div></div>
         <dl class="dl"><dt>Как считается</dt><dd>${esc(k.formula)}</dd><dt>Источник</dt><dd>${esc(k.source)}</dd><dt>Обновлено</dt><dd class="num">${ftime(k.updated)}</dd>${k.extra ? `<dt>Ещё</dt><dd>${esc(k.extra)}</dd>` : ''}</dl>
       </div>
-      <footer>${k.status !== 'ok' ? `<button class="btn btn-accent" data-decide="${k.id}">Оформить решение</button>` : ''}<button class="btn" data-act="closeLayer">Закрыть</button></footer></aside>`);
+      <footer>${k.status !== 'ok' && canDecide() ? `<button class="btn btn-primary" data-decide="${k.id}">Оформить решение</button>` : ''}<button class="btn" data-act="closeLayer">Закрыть</button></footer></aside>`);
     const show = async (d) => {
       $$('#dims button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.dim === d));
       const box = $('#drill'); if (!box) return;
       box.innerHTML = '<div class="skel"></div>';
       try {
         const r = await drill(id, d);
-        if (!$('#drill')) return;
+        if ($('#drill') !== box || $('#dims [aria-pressed="true"]')?.dataset.dim !== d) return;
         S.lastDrill = r;
-        const rows = d === 'day' ? r.rows.slice(-14) : r.rows;
-        box.innerHTML = `${r.note ? `<p class="note" style="margin-bottom:12px">${esc(r.note)}</p>` : ''}${bars(rows, r.unit === 'BYN' ? 'BYN' : r.unit)}
+        const series = d === 'day' && !r.rows.length
+          ? k.series.flatMap((value, i) => value == null ? [] : [{ name: k.labels[i], value }])
+          : r.rows;
+        const rows = d === 'day' ? series.slice(-14) : series;
+        box.innerHTML = `${r.note ? `<p class="note" style="margin-bottom:12px">${esc(r.note)}</p>` : ''}${rows.length ? bars(rows, r.unit) : '<p class="empty">Нет данных за выбранный период.</p>'}
           ${r.orders && r.orders.length ? `<p class="eyebrow" style="margin:16px 0 6px">Заказы, сорвавшие срок</p><table class="tbl"><tbody>${r.orders.slice(0, 5).map((o) => `<tr><td class="num">${esc(o.id)}</td><td>${esc(o.product)}</td><td>${esc(o.stage)}</td><td class="n">${fmt(o.hours)} ч</td></tr>`).join('')}</tbody></table>` : ''}`;
-      } catch (e) { box.innerHTML = `<p class="note">${esc(e.message)}</p>`; }
+      } catch (e) {
+        if ($('#drill') === box && $('#dims [aria-pressed="true"]')?.dataset.dim === d) box.innerHTML = `<p class="note">${esc(e.message)}</p>`;
+      }
     };
     $('#dims').onclick = (e) => { const b = e.target.closest('[data-dim]'); if (b) show(b.dataset.dim); };
     show(dim);
+    if ($('#whyBox')) why(id).then((h) => { const box = $('#whyBox'); if (box) box.innerHTML = hypHtml(h, true); }).catch(() => { const box = $('#whyBox'); if (box) box.innerHTML = ''; });
   }
 
   async function openDecisionForm(pre) {
+    if (!canDecide() || !S.pulse) return;
     let people = [];
     try { people = await cached('people', '/api/pult/people'); } catch (e) { toast(e.message); return; }
     const k = pre.kpi ? S.pulse.kpis.find((x) => x.id === pre.kpi) : null;
@@ -611,7 +801,7 @@
         e.target.disabled = true;
         try {
           const d = await api('/api/pult/decisions', { body: Object.assign({}, draft, { key, kpi: k ? k.id : '', kpi_start: k ? k.value : null, dept: k ? k.dept : '' }) });
-          S.draft = null; delete S.cache['decisions|' + q()]; closeLayer();
+          S.draft = null; delete S.cache['decisions|' + q()]; refreshDecisionCount(); closeLayer();
           toast(`Решение ${d.id} сохранено и назначено: ${d.owner}`, { label: 'Открыть реестр', run: () => go('decisions') });
           if (S.view === 'decisions') renderView();
         } catch (err) { $('.modal .err').textContent = err.message + (err.code === 0 ? ' Повторное нажатие не создаст второе решение.' : ''); e.target.disabled = false; }
@@ -631,21 +821,23 @@
         <dl class="dl"><dt>Проблема</dt><dd>${esc(d.problem)}</dd><dt>Влияние</dt><dd>${esc(d.impact || '—')}</dd><dt>Причина</dt><dd>${esc(d.cause)}</dd><dt>Действие</dt><dd>${esc(d.action)}</dd>
           <dt>Владелец</dt><dd>${esc(d.owner)}</dd><dt>Срок</dt><dd class="${d.overdue ? 'st-bad' : ''}">${fdate(d.due)}.${(d.due || '').slice(0, 4)}</dd><dt>Приоритет</dt><dd>${esc(d.priority)}</dd><dt>Автор</dt><dd>${esc(d.author || '—')}</dd>
           ${d.effect ? `<dt>Результат</dt><dd>${esc(d.effect)}</dd>` : ''}</dl>
-        ${k && !k.locked ? `<div class="note"><b>Повторная проверка.</b> ${esc(k.name)}: ${d.kpi_start != null ? 'при создании ' + fmt(d.kpi_start) + ' → ' : ''}сейчас ${fmt(k.value)} ${esc(k.unit)}, план ${fmt(k.plan)}. ${chip(k.status)}</div>` : ''}
-        <form id="updForm" style="display:flex;flex-direction:column;gap:12px">
+        ${d.effect_auto ? effBlock(d) : k && !k.locked ? `<div class="note"><b>Повторная проверка.</b> ${esc(k.name)}: ${d.kpi_start != null ? 'при создании ' + fmt(d.kpi_start) + ' → ' : ''}сейчас ${fmt(k.value)} ${esc(k.unit)}, план ${fmt(k.plan)}. ${chip(k.status)}</div>` : ''}
+        ${canDecide() ? `<form id="updForm" style="display:flex;flex-direction:column;gap:12px">
           <div class="frow"><label class="field">Статус<select class="select" name="status">${STATUSES.map((s) => `<option ${s === d.status ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
             <label class="field">Срок<input class="input" type="date" name="due" value="${esc(d.due)}"></label></div>
           <label class="field">Комментарий<textarea class="textarea" name="comment" placeholder="Что сделано или почему сдвигаем"></textarea></label>
           <label class="field">Что изменилось после решения (нужно, чтобы закрыть)<textarea class="textarea" name="effect" placeholder="Например: заказы в срок 91 % → 96 %">${esc(d.effect || '')}</textarea></label>
           <p class="err" role="alert"></p>
-        </form>
+        </form>` : ''}
         <div><p class="eyebrow" style="margin-bottom:8px">История изменений</p><ul class="hist">${(d.history || []).slice().reverse().map((h) => `<li><time>${ftime(h.ts)}</time><span><b>${esc(h.who)}</b> — ${esc(h.change)}</span></li>`).join('')}</ul></div>
-      </div><footer><button class="btn btn-primary" id="updSave">Сохранить изменения</button><button class="btn" data-act="closeLayer">Закрыть</button></footer></aside>`);
-    $('#updSave').onclick = async (e) => {
+      </div><footer>${canDecide() ? '<button class="btn btn-primary" id="updSave">Сохранить изменения</button>' : ''}<button class="btn" data-act="closeLayer">Закрыть</button></footer></aside>`);
+    const ef = $('#effFill');
+    if (ef) ef.onclick = () => { const e = d.effect_auto; $('#updForm').effect.value = `${e.name}: ${fmt(e.before)} → ${fmt(e.after)} ${e.unit} за ${e.days_after} дн. после решения (план ${fmt(e.plan)}) — ${e.verdict}.`; $('#updForm').effect.focus(); };
+    if ($('#updSave')) $('#updSave').onclick = async (e) => {
       const f = $('#updForm'); e.target.disabled = true;
       try {
         await api('/api/pult/decisions/' + id, { body: { status: f.status.value, due: f.due.value, comment: f.comment.value, effect: f.effect.value } });
-        delete S.cache['decisions|' + q()]; closeLayer(); toast('Изменения сохранены и записаны в историю');
+        delete S.cache['decisions|' + q()]; refreshDecisionCount(); closeLayer(); toast('Изменения сохранены и записаны в историю');
         if (S.view === 'decisions') renderView();
       } catch (err) { $('.err', f).textContent = err.message; e.target.disabled = false; }
     };
@@ -655,6 +847,7 @@
   async function openReport() {
     const t0 = performance.now();
     const p = S.pulse;
+    if (!p) return;
     let decs = [];
     try { decs = await cached('decisions', '/api/pult/decisions'); } catch (e) { /* без решений */ }
     const open = decs.filter((d) => d.status !== 'закрыто');
@@ -664,7 +857,7 @@
       <div class="report-body">
         <div><p class="eyebrow">Фотопринт · управленческий отчёт</p><h1>Итоги за ${fdate(p.period.from)} — ${fdate(p.period.to)}</h1>
           <p class="muted">Данные на ${ftime(p.asof)}. Составил: ${esc(S.user.name)}, ${esc(S.user.title.toLowerCase())}. Из ${p.pulse.total} показателей требуют решения ${p.pulse.critical}, под вниманием ${p.pulse.warn}.</p></div>
-        <section><h2>Отделы</h2><table class="tbl"><tbody>${p.departments.map((c) => `<tr><td><b>${esc(c.name)}</b></td>${c.metrics.map((m) => `<td>${esc(m[0])}: <b>${esc(m[1])}</b></td>`).join('')}<td>${chip(c.status)}</td></tr>`).join('')}</tbody></table></section>
+        ${S.user.role !== 'head' ? `<section><h2>Отделы</h2><table class="tbl"><tbody>${p.departments.map((c) => `<tr><td><b>${esc(c.name)}</b></td>${c.metrics.map((m) => `<td>${esc(m[0])}: <b>${esc(m[1])}</b></td>`).join('')}<td>${chip(c.status)}</td></tr>`).join('')}</tbody></table></section>` : ''}
         <section><h2>Что требует решения</h2>${p.alerts.length ? `<table class="tbl"><thead><tr><th>Отклонение</th><th>Причина</th><th>Отвечает</th></tr></thead><tbody>${p.alerts.map((a) => `<tr><td>${esc(a.title)}</td><td>${esc(a.cause)}</td><td>${esc(a.owner)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Отклонений нет.</p>'}</section>
         <section><h2>Показатели</h2><table class="tbl"><thead><tr><th>Показатель</th><th class="n">Факт</th><th class="n">План</th><th class="n">Прошлый период</th><th class="n">Прогноз</th><th>Статус</th></tr></thead><tbody>
           ${p.kpis.map((k) => `<tr><td>${esc(k.name)}, ${esc(k.unit)}</td><td class="n">${fmt(k.value)}</td><td class="n">${fmt(k.plan)}</td><td class="n">${fmt(k.prev)}</td><td class="n">${fmt(k.forecast)}</td><td class="st-${k.status}">${WORD[k.status]}</td></tr>`).join('')}</tbody></table></section>
@@ -697,10 +890,13 @@
     try { decs = await cached('decisions', '/api/pult/decisions'); } catch (e) { /* без решений */ }
     const items = [
       ...myViews().map((v) => ({ t: v.name, s: 'раздел', run: () => go(v.id) })),
+      ...(S.contour?.dept === S.view ? S.contour.pains.map((p) => ({
+        t: p.title, s: S.contour.name, run: () => go(S.view, p.id),
+      })) : []),
       { t: 'Отчёт за период', s: 'действие', run: openReport },
       ...S.pulse.kpis.filter((k) => !k.locked).map((k) => ({ t: k.name, s: `показатель · ${fmt(k.value)} ${k.unit}`, run: () => openKpi(k.id) })),
       ...decs.map((d) => ({ t: d.title, s: `решение ${d.id} · ${d.status}`, run: () => openDecision(d.id) })),
-      { t: 'Новое решение', s: 'действие', run: () => openDecisionForm({}) },
+      ...(canDecide() ? [{ t: 'Новое решение', s: 'действие', run: () => openDecisionForm({}) }] : []),
       { t: 'Спросить помощника', s: 'действие', run: openChat },
       { t: 'Выйти', s: 'действие', run: () => logout() },
     ];
@@ -753,27 +949,38 @@
 
   /* ---------- общие нажатия ---------- */
   document.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act],[data-kpi],[data-decide],[data-decision],[data-node],[data-go]');
+    const t = e.target.closest('[data-act],[data-kpi],[data-company-kpi],[data-decide],[data-decision],[data-node],[data-go],[data-pain-link]');
     if (!t) return;
     if (t.dataset.act === 'closeLayer') return closeLayer();
     if (t.dataset.act === 'load') return load();
     if (t.dataset.act === 'rerender') return renderView();
     if (t.dataset.act === 'newDecision') return openDecisionForm({});
     if (t.dataset.act === 'report') return openReport();
-    if (t.dataset.act === 'alerts') { S.allAlerts = !S.allAlerts; return renderView(); }
+    if (t.dataset.act === 'bneckDecide' && S.pulse && S.pulse.bottleneck) {
+      const b = S.pulse.bottleneck;
+      S.draft = Object.assign({}, S.draft || {}, { title: `Разгрузить участок «${b.name}»`, problem: b.text, cause: `На участке ${b.staff ? 'работает ' + b.staff + ', ' : ''}вакансий ${b.vacancies}, отсутствуют ${b.absent}`, action: b.advice || '' });
+      return openDecisionForm({ kpi: 'on_time' });
+    }
+    if (t.dataset.painLink) return go(S.view, t.dataset.painLink);
+    if (t.dataset.companyKpi) return openCompanyKpi(t.dataset.companyKpi);
     if (t.dataset.go) return go(t.dataset.go);
     if (t.dataset.decide) return openDecisionForm({ kpi: t.dataset.decide });
     if (t.dataset.decision) return openDecision(t.dataset.decision);
     if (t.dataset.kpi) return openKpi(t.dataset.kpi, t.dataset.by);
-    if (t.dataset.node) return openKpi(t.dataset.node);
+    if (t.dataset.node) return openCompanyKpi(t.dataset.node);
   });
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && S.pulse) { e.preventDefault(); openPalette(); return; }
-    if (e.key === 'Escape') { if ($('#layer').innerHTML) closeLayer(); else if ($('#chat')) $('#chatX').click(); return; }
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#map .node')) { e.preventDefault(); openKpi(e.target.dataset.node); }
+    if (e.key === 'Escape') {
+      if ($('#layer').innerHTML) closeLayer();
+      else if ($('#rail')?.classList.contains('is-open')) setMenu(false);
+      else if ($('#chat')) $('#chatX').click();
+      return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#map .node')) { e.preventDefault(); openCompanyKpi(e.target.dataset.node); }
   });
   window.addEventListener('offline', () => toast('Нет сети. Данные на экране могли устареть, введённое в формах сохранено.'));
-  window.addEventListener('online', () => toast('Сеть вернулась', { label: 'Обновить данные', run: reload }));
+  window.addEventListener('online', () => $('#view') && toast('Сеть вернулась', { label: 'Обновить данные', run: reload }));
 
   start();
 })();
