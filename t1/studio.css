@@ -53,7 +53,7 @@ html.studio-on, html.studio-on body { overflow: hidden; }
 .st-foot { position: relative; width: 100%; max-width: 900px; margin: 0 auto; padding: 0 20px 20px; }
 .st-compose { display: flex; gap: 6px; align-items: flex-end; padding: 8px; border-radius: 28px; }
 .st-compose textarea { flex: 1; resize: none; min-height: 40px; max-height: 160px; padding: 9px 8px; border: 0; background: transparent; font-size: 16px; line-height: 1.4; outline: none; }
-.st-compose textarea::placeholder { color: var(--ink4); }
+.st-compose textarea::placeholder { color: var(--ink4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .st-compose:focus-within { box-shadow: var(--shine), var(--shadow), 0 0 0 2px rgba(56, 82, 79, .35); }
 .st-compose .btn-icon { flex: none; }
 .st-docs { position: absolute; left: 20px; bottom: calc(100% + 4px); width: min(380px, calc(100% - 40px)); max-height: min(56vh, 520px); z-index: 3;

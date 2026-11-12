@@ -235,7 +235,7 @@
           </div>
           <form class="st-compose glass" id="stForm">
             <button type="button" class="btn btn-icon btn-ghost" data-sa="docs" aria-label="Документы: краткое содержание и вопросы" data-tip="Документы" aria-expanded="false">${svg(IC.doc, 19)}</button>
-            <textarea id="stIn" rows="1" maxlength="600" placeholder="Спросите о показателях, попросите график или документ"></textarea>
+            <textarea id="stIn" rows="1" maxlength="600" placeholder="Ваш вопрос"></textarea>
             <button type="button" class="btn btn-icon btn-ghost" data-sa="mode" data-m="voice" aria-label="Говорить голосом" data-tip="Говорить голосом">${svg(IC.mic, 19)}</button>
             <button class="btn btn-primary btn-icon" aria-label="Отправить">${svg(IC.send)}</button>
           </form>
@@ -254,7 +254,6 @@
         </div>
       </main>`;
     const inp = $('#stIn', el);
-    if (innerWidth < 760) inp.placeholder = 'Вопрос, график или документ…';
     inp.addEventListener('input', () => { inp.style.height = 'auto'; inp.style.height = Math.min(160, inp.scrollHeight) + 'px'; });
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#stForm').requestSubmit(); } });
     $('#stForm', el).onsubmit = (e) => { e.preventDefault(); const v = inp.value.trim(); if (!v || St.busy) return; inp.value = ''; inp.style.height = 'auto'; ask(v); };
