@@ -203,10 +203,12 @@
   function classify(list) {
     list = list || S.draft.photos;
     const sorted = list.map((p) => p.sharp).sort((a, b) => a - b), median = sorted[Math.floor(sorted.length / 2)] || 0;
-    list.forEach((p) => { p.blur = p.sharp < 12 || (p.sharp < median * 0.3 && p.sharp < 150); p.dark = p.bright < 48; p.dup = false; });
+    list.forEach((p) => { p.blur = p.sharp < 14 || (p.sharp < median * 0.2 && p.sharp < 100);    /* кадр с ровным небом или песком мягкий от природы — размытым считаем только тот, что в разы мягче остальных */ p.dark = p.bright < 48; p.dup = false; });
     for (let i = 0; i < list.length; i++) for (let j = 0; j < i; j++) {
       if (list[j].dup || list[i].dup) continue;
-      if (hamming(list[i].hash, list[j].hash) <= 10) (list[i].sharp >= list[j].sharp ? list[j] : list[i]).dup = true;
+      // дубль — тот же кадр серии: совпадают отпечаток, пропорции и яркость (у разных снимков с ровным небом отпечатки тоже бывают близки)
+      const A = list[i], B = list[j], same = Math.abs(A.w / A.h - B.w / B.h) < 0.02 && Math.abs(A.bright - B.bright) < 20;
+      if (same && hamming(A.hash, B.hash) <= 10) (A.sharp >= B.sharp ? B : A).dup = true;
     }
   }
   function bestWindow(E, frac) {
@@ -263,7 +265,7 @@
         if (Math.min(w, h) < 400) { rej.push({ name: f.name, why: 'слишком маленькое (' + w + '×' + h + '): нужно хотя бы 400 пикселей по короткой стороне' }); URL.revokeObjectURL(url); S.busy.done++; continue; }
         const a = analyze(img, w, h), id = 'f' + rid() + rid().slice(0, 3);
         const p = { id, name: (f.name || 'Фото').slice(0, 60), w, h, qty: 1, crop: null, sharp: a.sharp, bright: a.bright, hash: a.hash, up: false }; if (by) p.by = by;
-        S.thumbs[id] = thumbOf(img, w, h, 360); S.energy[id] = { colE: a.colE, rowE: a.rowE };
+        S.thumbs[id] = thumbOf(img, w, h, 520); S.energy[id] = { colE: a.colE, rowE: a.rowE };
         await IDB.put('blobs', id, f); await IDB.put('thumbs', id, S.thumbs[id]);
         URL.revokeObjectURL(url);
         if (replaced) { const i = d.photos.findIndex((x) => x.id === replaced); if (i >= 0) { dropPhotoData(d.photos[i].id); d.photos[i] = p; } else d.photos.push(p); replaced = null; }
@@ -284,15 +286,22 @@
   async function addDemo(toPool) {
     const D = window.DemoGallery;
     if (!toPool && !S.draft.t0) S.draft.t0 = Date.now();
-    S.busy = { done: 0, total: D.DEMO.length }; rerender();
-    const files = [];
-    for (const [scene, seed, size, mod] of D.DEMO) {
-      const c = D.render1(scene, seed, size, mod), big = document.createElement('canvas');
-      const k = mod === 'small' ? 1024 / c.width : 3; big.width = Math.round(c.width * k); big.height = Math.round(c.height * k);
-      const bx = big.getContext('2d'); bx.imageSmoothingQuality = 'high'; bx.drawImage(c, 0, 0, big.width, big.height);
-      const blob = await new Promise((r) => big.toBlob(r, 'image/jpeg', 0.82));
-      files.push(new File([blob], D.NAMES[scene] + (mod ? ' (' + mod + ')' : '') + '.jpg', { type: 'image/jpeg' }));
-      S.busy.done++; renderBusy(); await sleep(0);
+    S.busy = { done: 0, total: (D.REAL || D.DEMO).length }; rerender();
+    const files = [], blobOf = (c, q) => new Promise((r) => c.toBlob(r, 'image/jpeg', q));
+    try {                                                   // настоящие снимки; нет сети — рисованные кадры
+      for (const [n, name, mod] of D.REAL) {
+        files.push(new File([await blobOf(await D.realCanvas(n, mod), 0.85)], name + '.jpg', { type: 'image/jpeg' }));
+        S.busy.done++; renderBusy(); await sleep(0);
+      }
+    } catch (e) {
+      files.length = 0; S.busy.done = 0; S.busy.total = D.DEMO.length;
+      for (const [scene, seed, size, mod] of D.DEMO) {
+        const c = D.render1(scene, seed, size, mod), big = document.createElement('canvas');
+        const k = mod === 'small' ? 1024 / c.width : 3; big.width = Math.round(c.width * k); big.height = Math.round(c.height * k);
+        const bx = big.getContext('2d'); bx.imageSmoothingQuality = 'high'; bx.drawImage(c, 0, 0, big.width, big.height);
+        files.push(new File([await blobOf(big, 0.82)], D.NAMES[scene] + (mod ? ' (' + mod + ')' : '') + '.jpg', { type: 'image/jpeg' }));
+        S.busy.done++; renderBusy(); await sleep(0);
+      }
     }
     await addFiles(files, toPool);
   }
@@ -502,7 +511,7 @@
     if (!n) return {
       html: `<section class="hello"><h1>Выберите фото</h1><p>${esc(prod.name)}: ${prod.photos.min === prod.photos.max ? prod.photos.min : 'от ' + prod.photos.min} ${plural(prod.photos.max, 'фото', 'фото', 'фото')}. Принимаем JPEG и PNG до 25 МБ.</p></section>
         ${rejectsHtml()}${inboxHtml()}<div class="pick"><label class="btn btn-primary btn-xl" for="file">${ICON.photos.replace('<svg', '<svg width="22" height="22"')} Выбрать из галереи</label>
-        <button class="btn btn-lg" id="demo">Тестовая галерея · 20 кадров</button></div>
+        <button class="btn btn-lg" id="demo">Тестовая галерея · 26 снимков</button></div>
         <div class="trust"><div>${ICON.ok} Проверим резкость, свет и дубли на телефоне</div><div>${ICON.ok} Черновик сохраняется сам — можно закрыть и вернуться</div><div>${ICON.ok} Подгоним под формат и честно скажем, хватает ли пикселей</div></div>`,
       bind() { $('#demo').onclick = () => addDemo(false); $('#file').accept = accept; bindShare(); },
     };
@@ -635,7 +644,7 @@
     } catch (e) { S.aiMsg = e.offline ? 'Нет сети — правка по команде работает только онлайн. Страницы можно править вручную.' : e.message; }
     rerender();
   }
-  function renderPgSheet() {
+  function renderPgSheet(quiet) {
     const old = $('#sheet'); if (old) old.remove();
     const d = S.draft, i = S.pgSheet; if (i == null || !d.layout[i]) return;
     const E = S.ed || (S.ed = { tab: 'tpl', sel: null });
@@ -644,30 +653,30 @@
     const where = {}; lay.forEach((x, k) => x.forEach((id) => { where[id] = k; }));
     const name = cal ? (i < 12 ? MONTHS[i] : 'Обложка') : 'Страница ' + (i + 1) + ' из ' + lay.length, curT = tplOf(m, n), si = pg.indexOf(E.sel);
     const zs = E.sel ? ((m.z || {})[E.sel] || {}).s || 1 : 1;
+    const tools = E.sel ? `<div class="ed-sel"><button class="btn btn-sm" data-a="rm">Убрать</button><button class="btn btn-sm" data-a="sl" ${si <= 0 ? 'disabled' : ''} aria-label="Поставить левее">← Левее</button><button class="btn btn-sm" data-a="sr" ${si >= pg.length - 1 ? 'disabled' : ''} aria-label="Поставить правее">Правее →</button></div>
+        <label class="ed-zoom">Крупнее<input type="range" id="edz" min="1" max="2.5" step="0.05" value="${zs}" aria-label="Увеличить фото"></label>` : '';
     const panel = {
       tpl: () => n ? `<div class="ed-tpls">${TPL[n].map(([k, nm]) => `<button class="ed-tpl" data-t="${k}" aria-pressed="${curT === k}"><span class="pv mini n${n} t${n}${k}">${'<i class="sl"></i>'.repeat(n)}</span><small>${nm}</small></button>`).join('')}</div>
           <button class="btn btn-sm btn-ghost" data-a="tall">Так же на всех страницах, где ${n} фото</button>`
         : '<p class="ed-tip">На странице пока нет фото. Откройте «Фото» и добавьте до четырёх.</p>',
-      photo: () => `<p class="ed-tip">${E.sel ? 'Выберите фото на замену выделенному' : n >= 4 ? 'На странице уже 4 фото. Нажмите на фото на странице, чтобы заменить его' : 'Нажмите на фото, чтобы добавить его на эту страницу'}</p>
-          <div class="ed-photos">${d.photos.map((ph) => `<button class="ed-ph${where[ph.id] === i ? ' here' : ''}" data-ph="${ph.id}" aria-label="Фото ${esc(ph.name || '')}">${S.thumbs[ph.id] ? `<img src="${S.thumbs[ph.id]}" alt="">` : ''}${where[ph.id] == null ? '<small class="free">не в книге</small>' : where[ph.id] === i ? '<small>здесь</small>' : `<small>${cal ? 'мес.' : 'стр.'} ${where[ph.id] + 1}</small>`}</button>`).join('')}</div>`,
+      photo: () => `${tools}<p class="ed-tip">${E.sel ? 'Фото выбрано: двигайте его пальцем в рамке. Нажмите другое фото ниже — оно встанет на это место' : n >= 4 ? 'На странице уже 4 фото. Нажмите на фото на странице, чтобы заменить его' : 'Нажмите на фото ниже — оно добавится на страницу'}</p>
+          <div class="ed-photos">${d.photos.map((ph) => `<button class="ed-ph${where[ph.id] === i ? ' here' : ''}${E.sel === ph.id ? ' cur' : ''}" data-ph="${ph.id}" aria-label="Фото ${esc(ph.name || '')}">${S.thumbs[ph.id] ? `<img src="${S.thumbs[ph.id]}" alt="">` : ''}${where[ph.id] == null ? '<small class="free">не в книге</small>' : where[ph.id] === i ? '<small>здесь</small>' : `<small>${cal ? 'мес.' : 'стр.'} ${where[ph.id] + 1}</small>`}</button>`).join('')}</div>`,
       text: () => `<div class="field"><label for="edtx">Подпись на странице</label><input class="input" id="edtx" maxlength="60" value="${esc(m.tx || '')}" placeholder="Например: Лето 2026, Нарочь"></div>
           <div class="seg" role="group" aria-label="Где подпись"><button data-tp="b" aria-pressed="${m.tp !== 't'}">Снизу</button><button data-tp="t" aria-pressed="${m.tp === 't'}">Сверху</button></div>`,
       bg: () => `<div class="ed-bgs">${BGS.map(([c, nm]) => `<button class="ed-bg" data-bg="${c}" style="background:${c}" aria-label="${nm}" title="${nm}" aria-pressed="${(m.bg || '#FFFFFF') === c}"></button>`).join('')}</div>
           <button class="btn btn-sm btn-ghost" data-a="ball">Этот фон — на все страницы</button>`,
+      page: () => `<div class="row2"><button class="btn btn-sm" data-a="up" ${i === 0 ? 'disabled' : ''}>← Раньше</button><button class="btn btn-sm" data-a="dn" ${i === lay.length - 1 ? 'disabled' : ''}>Позже →</button></div>
+          <button class="btn btn-sm" data-a="clr" ${n ? '' : 'disabled'}>Убрать все фото со страницы</button><p class="ed-tip">Страница меняется местами с соседней. Убранные фото остаются на вкладке «Фото».</p>`,
     };
-    const selBar = E.sel ? `<div class="ed-sel"><button class="btn btn-sm" data-a="repl">Заменить</button><button class="btn btn-sm" data-a="sl" ${si <= 0 ? 'disabled' : ''}>← Левее</button><button class="btn btn-sm" data-a="sr" ${si >= pg.length - 1 ? 'disabled' : ''}>Правее →</button><button class="btn btn-sm" data-a="rm">Убрать</button>
-        <label class="ed-zoom">Крупнее<input type="range" id="edz" min="1" max="2.5" step="0.05" value="${zs}" aria-label="Увеличить фото"></label></div><p class="ed-tip">Фото можно двигать пальцем внутри рамки</p>`
-      : `<p class="ed-tip">${n ? 'Нажмите на фото — его можно заменить, подвинуть, увеличить или убрать' : 'Пустая страница. Добавьте фото на вкладке «Фото»'}</p>`;
-    const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet';
+    const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet' + (quiet ? ' quiet' : '');      // перерисовка внутри редактора — без повторной анимации листа
     el.innerHTML = `<div class="sheet-bg" data-x></div><div class="sheet-body ed-body" role="dialog" aria-label="Конструктор: ${name}">
-      <div class="ed-top"><button data-a="prev" aria-label="Предыдущая страница" ${i === 0 ? 'disabled' : ''}>${ICON.back}</button><b>${name}</b><button data-a="next" class="fwd" aria-label="Следующая страница" ${i === lay.length - 1 ? 'disabled' : ''}>${ICON.back}</button></div>
-      <div class="ed-stage">${pv(d, i, { edit: true, sel: E.sel })}</div>${selBar}
-      <div class="ed-tabs" role="tablist">${[['tpl', 'Шаблон'], ['photo', 'Фото'], ['text', 'Подпись'], ['bg', 'Фон']].map(([k, nm]) => `<button role="tab" data-tab="${k}" aria-pressed="${E.tab === k}">${nm}</button>`).join('')}</div>
-      <div class="ed-panel">${panel[E.tab]()}</div>
-      <div class="row2"><button class="btn btn-sm" data-a="up" ${i === 0 ? 'disabled' : ''}>Страницу раньше</button><button class="btn btn-sm" data-a="dn" ${i === lay.length - 1 ? 'disabled' : ''}>Страницу позже</button></div>
-      <button class="btn btn-accent btn-lg" data-x>Готово</button></div>`;
+      <div class="ed-top"><button class="ed-nav" data-a="prev" aria-label="Предыдущая страница" ${i === 0 ? 'disabled' : ''}>${ICON.back}</button><b>${name}</b><button class="ed-nav fwd" data-a="next" aria-label="Следующая страница" ${i === lay.length - 1 ? 'disabled' : ''}>${ICON.back}</button><button class="btn btn-sm btn-accent ed-done" data-x>Готово</button></div>
+      <div class="ed-stage">${pv(d, i, { edit: true, sel: E.sel })}</div>
+      ${E.sel ? '' : `<p class="ed-tip">${n ? 'Нажмите на фото, чтобы подвинуть, увеличить, заменить или убрать его' : 'Пустая страница — добавьте фото на вкладке «Фото»'}</p>`}
+      <div class="ed-tabs" role="tablist">${[['tpl', 'Шаблон'], ['photo', 'Фото'], ['text', 'Подпись'], ['bg', 'Фон'], ['page', 'Страница']].map(([k, nm]) => `<button role="tab" data-tab="${k}" aria-pressed="${E.tab === k}">${nm}</button>`).join('')}</div>
+      <div class="ed-panel">${panel[E.tab]()}</div></div>`;
     $('.app').appendChild(el);
-    const body = el.querySelector('.ed-body'), keep = () => { const t = body.scrollTop; renderPgSheet(); const b = $('#sheet .ed-body'); if (b) b.scrollTop = t; };
+    const body = el.querySelector('.ed-body'), keep = () => { const t = body.scrollTop; renderPgSheet(true); const b = $('#sheet .ed-body'); if (b) b.scrollTop = t; };
     const save = () => { LS.set('pp_draft', d); syncSoon(); };
     const done = () => { S.pgSheet = null; S.ed = null; el.remove(); saveDraft(); rerender(); };
     el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = done; });
@@ -694,7 +703,7 @@
           c.x = Math.round(Math.min(100, Math.max(0, st.c.x - dx / st.r.width * k))); c.y = Math.round(Math.min(100, Math.max(0, st.c.y - dy / st.r.height * k))); c.s = st.c.s || 1; paint(id);
         };
         b.onpointerup = b.onpointercancel = () => { if (moved) save(); st = null; };
-        b.onclick = () => { if (moved) { moved = false; return; } E.sel = E.sel === id ? null : id; keep(); };
+        b.onclick = () => { if (moved) { moved = false; return; } E.sel = E.sel === id ? null : id; if (E.sel) E.tab = 'photo'; keep(); };
       });
     }
     bindSlots();
@@ -711,9 +720,9 @@
       prev: () => { S.pgSheet = i - 1; E.sel = null; }, next: () => { S.pgSheet = i + 1; E.sel = null; },
       up: () => { [lay[i], lay[i - 1]] = [lay[i - 1], lay[i]]; pmOf(d, i - 1); [d.pm[i], d.pm[i - 1]] = [d.pm[i - 1], d.pm[i]]; S.pgSheet = i - 1; },
       dn: () => { [lay[i], lay[i + 1]] = [lay[i + 1], lay[i]]; pmOf(d, i + 1); [d.pm[i], d.pm[i + 1]] = [d.pm[i + 1], d.pm[i]]; S.pgSheet = i + 1; },
-      repl: () => { E.tab = 'photo'; },
+      clr: () => { pg.length = 0; E.sel = null; toast('Страница пустая. Фото остались на вкладке «Фото»'); },
       sl: () => { [pg[si], pg[si - 1]] = [pg[si - 1], pg[si]]; }, sr: () => { [pg[si], pg[si + 1]] = [pg[si + 1], pg[si]]; },
-      rm: () => { pg.splice(si, 1); E.sel = null; toast('Фото убрано со страницы. Оно осталось на вкладке «Фото»'); },
+      rm: () => { pg.splice(si, 1); E.sel = null; E.tab = pg.length ? 'tpl' : 'photo'; toast('Фото убрано со страницы. Оно осталось на вкладке «Фото»'); },
       tall: () => { let c = 0; lay.forEach((x, k) => { if (Math.min(x.length, 4) === n) { pmOf(d, k).t = m.t; c++; } }); toast('Шаблон применён к страницам: ' + c); },
       ball: () => { lay.forEach((x, k) => { pmOf(d, k).bg = m.bg; }); toast('Фон применён ко всем страницам'); },
     };
@@ -828,26 +837,47 @@
     let body;
     if (I === 'offline') body = `<div class="warnbox">${ICON.info.replace('<svg', '<svg width="20" height="20"')}<span>Нет сети. Подробную проверку сделаем на сервере, когда она появится. Можно продолжить: черновик сохранён.</span></div>`;
     else if (!I || !I.length) body = `<div class="done-hero" style="padding-top:6px"><div class="ok-ico">${ICON.ok}</div><h1 style="font-size:20px">Всё в порядке</h1><p class="muted">${d.photos.length} ${plural(d.photos.length, 'фото', 'фото', 'фото')}: пустых мест нет, пикселей хватает</p></div>`;
-    else body = '<div class="issues">' + I.slice().sort((a, b) => ({ error: 0, warn: 1, info: 2 }[a.level] - { error: 0, warn: 1, info: 2 }[b.level])).map((x, k) => {
-      const ph = x.photo && d.photos.find((p) => p.id === x.photo), lv = x.level === 'error' ? 'bad' : x.level === 'warn' ? 'warn' : 'info';
-      return `<div class="issue ${lv}"><div class="ic">${lv === 'info' ? ICON.info : ICON.warn}</div><div><p>${esc(x.text)}</p>${ph ? `<div class="ia"><img src="${S.thumbs[ph.id] || ''}" alt=""><button class="btn btn-sm" data-rep="${ph.id}">Заменить</button><button class="btn btn-sm" data-del="${ph.id}">Убрать</button></div>` : ''}</div></div>`;
-    }).join('') + '</div>';
+    else {
+      const LV = { error: 0, warn: 1, info: 2 }, cls = (l) => (l === 'error' ? 'bad' : l === 'warn' ? 'warn' : 'info');
+      const WHY = { blur: 'кадр размыт', dark: 'слишком тёмный', low_res: 'мало пикселей для этого формата — на бумаге будет заметно', soft: 'напечатается чуть мягче обычного — это допустимо' };
+      const general = I.filter((x) => !x.photo), crops = I.filter((x) => x.code === 'crop'), per = new Map();
+      I.filter((x) => x.photo && x.code !== 'crop').forEach((x) => { const g = per.get(x.photo) || { why: [], level: 'info' }; g.why.push(WHY[x.code] || x.text); if (LV[x.level] < LV[g.level]) g.level = x.level; per.set(x.photo, g); });
+      d.photos.filter((ph) => ph.dup).forEach((ph) => { const g = per.get(ph.id) || { why: [], level: 'warn' }; g.why.push('повтор соседнего кадра'); g.level = LV[g.level] < 1 ? g.level : 'warn'; per.set(ph.id, g); });
+      const gen = general.sort((x, y) => LV[x.level] - LV[y.level]).map((x) => `<div class="issue ${cls(x.level)}"><div class="ic">${x.level === 'info' ? ICON.info : ICON.warn}</div><div><p>${esc(x.text)}</p>${x.code === 'empty_pages' ? '<div class="ia"><button class="btn btn-sm" data-goto="photos">Добавить фото</button><button class="btn btn-sm" data-goto="layout">В конструктор</button></div>' : ''}</div></div>`).join('');
+      const cards = [...per.entries()].sort((x, y) => LV[x[1].level] - LV[y[1].level]).map(([id, g]) => {
+        const ph = d.photos.find((x) => x.id === id); if (!ph) return '';
+        return `<div class="issue photo ${cls(g.level)}">${S.thumbs[id] ? `<img class="ith" src="${S.thumbs[id]}" alt="">` : ''}<div><b>${esc(String(ph.name || 'Фото').replace(/\.(jpe?g|png)$/i, ''))}</b><p>${esc(g.why.join(' · '))}</p>
+          <div class="ia"><button class="btn btn-sm" data-rep="${id}">Заменить</button><button class="btn btn-sm" data-del="${id}">Убрать</button></div></div></div>`;
+      }).join('');
+      const cut = crops.length ? Math.max(...crops.map((x) => +(String(x.text).match(/(\d+) %/) || [0, 0])[1])) : 0;
+      const crop = !crops.length ? '' : hasLayout(d)
+        ? `<div class="issue info"><div class="ic">${ICON.info}</div><div><p>Фото на странице обрезается под её форму — так и задумано. Подвинуть или увеличить кадр можно в конструкторе.</p><div class="ia"><button class="btn btn-sm" data-goto="layout">В конструктор</button></div></div></div>`
+        : `<div class="issue info"><div class="ic">${ICON.info}</div><div><p>У ${crops.length} фото по краям обрежется до ${cut} %. С белыми полями фото войдёт целиком.</p><div class="ia"><button class="btn btn-sm" id="fitall">Включить белые поля</button></div></div></div>`;
+      S.issueCount = general.length + per.size;
+      body = '<div class="issues">' + gen + cards + crop + '</div>';
+    }
     const errs = Array.isArray(I) && I.some((x) => x.level === 'error'), warns = Array.isArray(I) && I.some((x) => x.level === 'warn');
     const nbad = d.photos.filter((p) => p.blur || p.dark || p.dup).length, hasCrop = Array.isArray(I) && I.some((x) => x.code === 'crop') && ['print', 'magnet'].includes(d.product);
     const fixable = Array.isArray(I) && I.length && (nbad || hasCrop);
-    const summary = Array.isArray(I) && I.length ? `<p class="muted" style="font-size:15px">Нашли ${I.length} ${plural(I.length, 'замечание', 'замечания', 'замечаний')}. Печать возможна, но лучше посмотреть.</p>` : '';
+    const nIss = Array.isArray(I) && I.length ? S.issueCount : 0;
+    const summary = !Array.isArray(I) || !I.length ? '' : nIss ? `<p class="muted" style="font-size:15px">Стоит посмотреть: ${nIss} ${plural(nIss, 'замечание', 'замечания', 'замечаний')}. Печать возможна и так.</p>` : '<p class="muted" style="font-size:15px">Замечаний нет — только подсказка.</p>';
     return {
       html: `<p class="sec-t">Перед заказом</p>${summary}${fixable ? `<button class="btn btn-accent btn-lg" id="fixall">${ICON.spark} Исправить автоматически${nbad ? ' · убрать ' + nbad + ' слабых' : ''}${hasCrop ? ' · белые поля' : ''}</button>` : ''}${body}`,
       bar: `<button class="btn btn-primary btn-xl" id="next" ${errs ? 'disabled' : ''}>${warns || I === 'offline' ? 'Всё равно продолжить' : 'Дальше · корзина'}</button>${errs ? '<div class="sub">Исправьте ошибки, чтобы продолжить</div>' : warns ? '<div class="sub">Или вернитесь и замените фото</div>' : ''}`,
       bind(scr) {
         scr.querySelectorAll('[data-rep]').forEach((b) => { b.onclick = () => { S.replace = b.dataset.rep; $('#file').click(); }; });
-        scr.querySelectorAll('[data-del]').forEach((b) => { b.onclick = async () => { const i = d.photos.findIndex((p) => p.id === b.dataset.del); dropPhotoData(d.photos[i].id); d.photos.splice(i, 1); classify(); saveDraft(); await runCheck(); rerender(); }; });
+        scr.querySelectorAll('[data-del]').forEach((b) => { b.onclick = async () => { const i = d.photos.findIndex((p) => p.id === b.dataset.del); dropPhotoData(d.photos[i].id); d.photos.splice(i, 1);
+          if (hasLayout(d) && d.layout) { d.layout.forEach((pg) => { const k = pg.indexOf(b.dataset.del); if (k >= 0) pg.splice(k, 1); }); d.layoutKey = layoutKey(d); }   // остальная раскладка остаётся как была
+          classify(); saveDraft(); await runCheck(); rerender(); }; });
+        scr.querySelectorAll('[data-goto]').forEach((b) => { b.onclick = () => go(b.dataset.goto); });
+        const fa = $('#fitall'); if (fa) fa.onclick = async () => { d.fit = true; recrop(); saveDraft(); await runCheck(); toast('Белые поля включены'); rerender(); };
         const fx = $('#fixall');
         if (fx) fx.onclick = async () => {
           d.photos.filter((p) => p.blur || p.dark || p.dup).forEach((p) => dropPhotoData(p.id));
           d.photos = d.photos.filter((p) => !(p.blur || p.dark || p.dup));
           if (hasCrop) d.fit = true;
-          classify(); recrop(); if (hasLayout(d)) d.layoutKey = ''; saveDraft(); await runCheck(); toast('Готово: исправила что смогла'); rerender();
+          classify(); recrop(); if (hasLayout(d)) { d.layoutPrev = null; ensureLayout(true); }      // макет пересобираем сразу: на проверку уходит уже новый
+          saveDraft(); await runCheck(); toast('Готово: слабые кадры убраны, макет пересобран'); rerender();
         };
         $('#next').onclick = () => { S.accept = warns || I === 'offline'; refreshPrice(); step('cart'); go('cart'); };
       },

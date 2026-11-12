@@ -182,5 +182,35 @@
     ['dunes', 20, 'l'], ['forest', 21, 'p', 'dark'], ['autumn', 22, 'p'], ['flower', 23, 'l', 'small'], ['coffee', 14, 's', 'dup'],
     ['bridge', 24, 'l'], ['beach', 25, 'p', 'blur'], ['lighthouse', 26, 'p'], ['city', 27, 'l'], ['lake', 28, 'p'],
   ];
-  window.DemoGallery = { DEMO, render1, NAMES, SIZES };
+  /* Тестовая галерея из настоящих снимков (Unsplash, список в docs/Лицензии.md): 26 кадров одной поездки, 20 удачных.
+     Недостатки для показа авто-проверки делаются здесь же: три кадра размыты, один затемнён, два — повторы соседних; один удачный — маленький. */
+  const REAL = [
+    [1, 'Прогулка в поле'], [2, 'Море, первый день'], [13, 'Качели в парке', 'blur'], [3, 'Мама и Миша'], [3, 'Мама и Миша (2)', 'dup'],
+    [4, 'Прыжок с дюны'], [24, 'Первый пляж'], [8, 'Озеро утром'], [6, 'Все вместе у моря'], [17, 'Девочки на набережной', 'blur'],
+    [7, 'Обнимашки'], [9, 'Горное озеро'], [15, 'Пикник в парке', 'dark'], [10, 'Перевал'], [20, 'Утка на озере'],
+    [14, 'Замок из песка', 'small'], [12, 'Смех во дворе'], [12, 'Смех во дворе (2)', 'dup'], [21, 'Цветной парашют'], [22, 'Гамак в лесу'],
+    [16, 'Закат в поле', 'blur'], [11, 'Запускаем змея'], [23, 'Сёстры в поле'], [19, 'Вся семья'], [18, 'Отражение'], [5, 'Вечер у воды'],
+  ];
+  function realCanvas(n, mod) {
+    return new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => {
+        const k = mod === 'small' ? 1024 / Math.max(im.naturalWidth, im.naturalHeight) : 2, W = Math.round(im.naturalWidth * k), H = Math.round(im.naturalHeight * k);
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
+        const x = c.getContext('2d'); x.imageSmoothingQuality = 'high';
+        if (mod === 'dup') { x.drawImage(im, -W * 0.02, -H * 0.015, W * 1.04, H * 1.03); x.fillStyle = 'rgba(255,255,255,.05)'; x.fillRect(0, 0, W, H); }   // тот же кадр через секунду
+        else x.drawImage(im, 0, 0, W, H);
+        if (mod === 'dark') { x.fillStyle = 'rgba(5,8,20,.86)'; x.fillRect(0, 0, W, H); }
+        if (mod === 'blur') {                               // смазанный кадр: сильное уменьшение и растяжение обратно
+          const t = document.createElement('canvas'); t.width = Math.max(8, Math.round(W / 44)); t.height = Math.max(8, Math.round(H / 44));
+          const tx = t.getContext('2d'); tx.imageSmoothingQuality = 'high'; tx.drawImage(c, 0, 0, t.width, t.height);
+          x.drawImage(t, 0, 0, W, H);
+        }
+        res(c);
+      };
+      im.onerror = () => rej(new Error('нет снимка'));
+      im.src = '/t2/gallery/' + String(n).padStart(2, '0') + '.jpg';
+    });
+  }
+  window.DemoGallery = { DEMO, render1, NAMES, SIZES, REAL, realCanvas };
 })();

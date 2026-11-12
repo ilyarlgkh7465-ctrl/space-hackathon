@@ -216,7 +216,7 @@ body { background: #EDEDF0; }
 .ed-sel { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; align-items: center; }
 .ed-zoom { display: flex; align-items: center; gap: 10px; width: 100%; font-size: 13px; font-weight: 600; color: var(--ink2); }
 .ed-zoom input { flex: 1; accent-color: #141414; }
-.ed-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 4px; border-radius: 16px; background: var(--glass3); }
+.ed-tabs { display: grid; grid-template-columns: repeat(5, auto); gap: 3px; padding: 4px; border-radius: 16px; background: var(--glass3); }
 .ed-tabs button { border: 0; background: none; border-radius: 12px; min-height: 40px; padding: 0 2px; font-size: 13.5px; font-weight: 600; color: var(--ink2); }
 .ed-tabs button[aria-pressed="true"] { background: var(--ink); color: #fff; }
 .ed-panel { min-height: 128px; display: flex; flex-direction: column; gap: 10px; }
@@ -259,3 +259,17 @@ body { background: #EDEDF0; }
 .ostat-steps em { font-style: normal; font-size: 10.5px; color: var(--ink4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ostat-steps .on em { color: var(--ink2); } .ostat-steps .cur em { color: var(--ink); font-weight: 700; }
 .ostat-t { font-size: 13.5px; line-height: 1.35; color: var(--ink2); }
+
+/* редактор страницы: «Готово» в шапке, инструменты фото — на вкладке «Фото» */
+.ed-top { gap: 6px; } .ed-top b { flex: 1; text-align: center; font-size: 15.5px; white-space: nowrap; }
+.ed-top .ed-nav { width: 36px; height: 36px; flex: none; }
+.ed-top .ed-done { width: auto; height: 36px; min-height: 36px; padding: 0 14px; border-radius: 999px; background: var(--ink); color: #fff; flex: none; font-size: 14px; }
+.ed-stage { width: min(100%, 270px); }
+.ed-tabs button { font-size: 13px; padding: 0 6px; }
+.ed-sel .btn { flex: 1; }
+.ed-ph.cur { box-shadow: inset 0 0 0 3px var(--ink); }
+/* проверка перед заказом: карточка на фото */
+.issue.photo { align-items: flex-start; }
+.issue .ith { width: 64px; height: 64px; flex: none; object-fit: cover; border-radius: 12px; }
+.issue.photo b { display: block; font-size: 15px; } .issue.photo p { margin: 2px 0 0; font-size: 14px; color: var(--ink2); }
+.sheet.quiet .sheet-body, .sheet.quiet .sheet-bg { animation: none; }

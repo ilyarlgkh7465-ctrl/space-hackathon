@@ -168,7 +168,8 @@ def price_line(item):
             raise Bad("Страниц может быть от %d до %d, с шагом %d" % (opt["min"], opt["max"], opt["step"]))
         unit = _d(v["base"]) + max(0, pages - v["pages_incl"]) * _d(v["page_price"])
         total = unit * qty
-        note = "%d стр.: %s + %d доп. × %s" % (pages, v["base"], max(0, pages - v["pages_incl"]), v["page_price"])
+        extra = max(0, pages - v["pages_incl"])
+        note = "%d стр.: %s + %d доп. × %s" % (pages, v["base"], extra, v["page_price"]) if extra else "%d стр. — входят в цену" % pages
     else:
         unit = _d(v["price"])
         total = unit * qty
