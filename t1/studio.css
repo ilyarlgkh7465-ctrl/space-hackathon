@@ -284,3 +284,4 @@ html.wdragging, html.wdragging * { cursor: grabbing !important; user-select: non
 .meet-tr ol { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; color: var(--ink2); max-height: 280px; overflow-y: auto; }
 .meet-tr li { display: flex; gap: 10px; }
 .meet-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.st-empty .st-models { margin-top: 6px; font-size: 12.5px; line-height: 1.4; color: var(--ink4); max-width: 46ch; text-wrap: pretty; }

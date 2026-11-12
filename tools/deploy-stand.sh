@@ -17,7 +17,7 @@ set -e
 id fpstand >/dev/null 2>&1 || useradd --system --home /opt/fp --shell /usr/sbin/nologin fpstand
 mkdir -p /opt/fp/app/data /var/backups/fp-stand
 [ -x /opt/fp/venv/bin/python ] || python3 -m venv /opt/fp/venv
-/opt/fp/venv/bin/pip -q install segno
+/opt/fp/venv/bin/pip -q install segno anthropic
 chown -R fpstand:fpstand /opt/fp/app/data
 cat > /etc/systemd/system/fp-stand.service <<UNIT
 [Unit]
@@ -31,7 +31,6 @@ WorkingDirectory=/opt/fp/app
 EnvironmentFile=/etc/fp-stand.env
 Environment=FP_PUBLIC=1
 Environment=FP_AI_PER_DAY=4000
-Environment="CLAUDE_OFF_NOTE=подключён в системе · на этом стенде выключен"
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=STT_HTTP_URL=http://127.0.0.1:8000/api/voice/stt
 ExecStart=/opt/fp/venv/bin/python -u /opt/fp/app/server.py $PORT
@@ -71,8 +70,8 @@ caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 || { [ -n "\$BAK" ]
 systemctl daemon-reload
 systemctl enable -q fp-stand
 EOF
-  # ключ DeepSeek — из локального файла, на экран не выводится
-  grep -E '^LLM_(API_KEY|BASE_URL|MODEL)=' ../flat-inventory/.env | $SSH 'umask 077; cat > /etc/fp-stand.env; chmod 600 /etc/fp-stand.env; wc -l < /etc/fp-stand.env'
+  # ключи моделей — из локальных файлов, на экран не выводятся. Claude с этого сервера может не отвечать (регион) — тогда работает запасная модель.
+  { grep -E '^LLM_(API_KEY|BASE_URL|MODEL)=' ../flat-inventory/.env; grep -E '^CLAUDE_(API_KEY|MODEL)=' .env 2>/dev/null || true; } | $SSH 'umask 077; cat > /etc/fp-stand.env; chmod 600 /etc/fp-stand.env; wc -l < /etc/fp-stand.env'
 fi
 
 STAGE=$(mktemp -d)

@@ -200,6 +200,7 @@
       const fab = $('#fab'); if (fab) fab.classList.add('hidden');
       renderShell(el);
       loadDocs();
+      fetch('/api/health').then((r) => r.json()).then((h) => { St.aiMode = h.mode; if (!St.msgs.length) draw(); }).catch(() => { });
     }
     if (opts.voice) return voiceStart();
     if (opts.doc) return askDoc(opts.doc, opts.title);
@@ -271,7 +272,8 @@
   function emptyState() {
     return `<div class="st-empty">${orbHtml('md')}<h1>Чем помочь?</h1>
       <p class="muted">Отвечу по цифрам пульта и документам компании, построю график или таблицу. Можно голосом.</p>
-      <div class="st-ex">${EXAMPLES.map((x) => `<button class="btn" data-sa="example" data-q="${esc(x)}">${esc(x)}</button>`).join('')}</div></div>`;
+      <div class="st-ex">${EXAMPLES.map((x) => `<button class="btn" data-sa="example" data-q="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+      ${St.aiMode === 'auto' ? '<p class="st-models">Модель подбирается под задачу: короткий ответ — быстрая, разбор — сильная, финансы — только локальная.</p>' : ''}</div>`;
   }
   function md(text, cites) {
     const byKey = Object.fromEntries((cites || []).map((c) => [c.doc + ':' + c.n, c]));

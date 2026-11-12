@@ -744,7 +744,7 @@
     const TASK = { finance: 'Финансы', complex: 'Сложный разбор', simple: 'Короткий ответ' };
     const modes = [['auto', '', 'По задаче', 'шлюз сам выбирает модель под каждый запрос', true],
       ['local', '', 'Локальная модель', 'на компьютере компании, наружу ничего не уходит', true],
-      ['cloud', 'claude', 'Claude', av.claude ? 'облако, данные скрыты метками' : av.claude_note, av.claude],
+      ['cloud', 'claude', 'Claude', av.claude && !av.claude_down ? 'облако, данные скрыты метками' : av.claude_note, av.claude],
       ['cloud', 'deepseek', 'DeepSeek', av.deepseek ? 'облако, данные скрыты метками' : 'нет ключа', av.deepseek],
       ['off', '', 'Без модели', 'только встроенные правила', true]];
     const cur = (m, c) => st.mode === m && (m !== 'cloud' || st.cloud === c);

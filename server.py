@@ -276,7 +276,10 @@ def route(task: str) -> list:
     if mode == "local":
         return ["local"]
     if mode == "cloud":
-        return [STATE["cloud"]]
+        # выбранная облачная модель — первой; если она не отвечает, запрос уходит второй, и в ответе и журнале стоит та, что ответила
+        first = STATE["cloud"]
+        return [m for m in (first, "deepseek" if first == "claude" else "claude")
+                if (m == "claude" and _claude_ok()) or (m == "deepseek" and CLOUD["api_key"])]
     if task == "finance":
         return ["local"] if local_alive() else []
     first, second = ("claude", "deepseek") if task == "complex" else ("deepseek", "claude")
@@ -435,8 +438,9 @@ def ai_state() -> dict:
     mode = STATE["mode"]
     names = {"local": LOCAL, "claude": CLAUDE, "deepseek": CLOUD}
     ready, note = llm_gateway.claude_ready(CLAUDE)
-    if ready and time.time() < _claude_down["until"]:
-        note = "сейчас недоступен: " + _claude_down["why"]
+    down = ready and time.time() < _claude_down["until"]
+    if down:
+        note = "сейчас не отвечает — работает запасная модель"
     elif not ready and os.environ.get("CLAUDE_OFF_NOTE"):
         note = os.environ["CLAUDE_OFF_NOTE"]            # стенд, где Claude не подключают намеренно: причина вместо «нет ключа»
     routes = []
@@ -448,12 +452,15 @@ def ai_state() -> dict:
                            "reserve": names[chain[1]]["name"] if len(chain) > 1 else None,
                            "note": "в облако не уходит никогда" + ("" if chain else "; локальная модель сейчас не подключена") if task == "finance" else ""})
     prov = None if mode in ("off", "auto") else LOCAL if mode == "local" else CLAUDE if STATE["cloud"] == "claude" else CLOUD
+    if mode == "cloud":                                  # выбранная модель может не отвечать — тогда показываем ту, что отвечает на деле
+        chain = route("")
+        prov = names[chain[0]] if chain else prov
     return {"mode": mode, "cloud": STATE["cloud"],
             "provider": "по задаче" if mode == "auto" else prov["name"] if prov else "встроенная логика",
             "model": prov["model"] if prov else None,
             "outside": mode == "cloud" or (mode == "auto" and any(r["outside"] for r in routes)),
             "routes": routes, "local_alive": local_alive() if mode in ("auto", "local") else None,
-            "available": {"claude": ready and time.time() >= _claude_down["until"], "claude_note": note,
+            "available": {"claude": ready, "claude_down": down, "claude_note": note,
                           "deepseek": bool(CLOUD["api_key"]), "local": LOCAL["model"]}}
 
 
