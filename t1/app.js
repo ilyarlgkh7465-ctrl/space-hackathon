@@ -257,7 +257,7 @@
     const p = S.pulse;
     const open = $('#rail').classList.contains('is-open');
     $('#topbar').innerHTML = `<button class="btn btn-icon nav-toggle" id="navToggle" aria-label="Меню" aria-controls="rail" aria-expanded="${open}">${I.menu}</button>
-      <button class="search" id="openPal" aria-label="Поиск и команды"${p ? '' : ' disabled'}>${I.search}<span>Поиск</span><kbd>⌘K</kbd></button>
+      <button class="search" id="openPal" aria-label="Поиск и команды"${p ? '' : ' disabled'}>${I.search}<span>Поиск</span></button>
       <span class="spacer"></span>
       <div class="seg" role="group" aria-label="Период">${[7, 14, 30, 60].map((d) => `<button data-days="${d}" aria-pressed="${S.days === d}">${d} дн.</button>`).join('')}</div>
       <select class="select" id="fProduct" aria-label="Продукт"><option value="">Все продукты</option>${p ? p.products.map((x) => `<option value="${esc(x.id)}" ${S.product === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('') : ''}</select>
