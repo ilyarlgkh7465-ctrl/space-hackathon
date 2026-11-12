@@ -1,0 +1,174 @@
+/* picPac — оформление по образцу «travel / booking»: монохром, много воздуха, фото крупно.
+   Подключается ПОСЛЕ t2/app.css и только переопределяет его: логика и разметка приложения те же.
+   Белый фон, светло-серые поля и чипы, чёрные кнопки-«таблетки», красный — только для счётчиков и «нравится».
+   Мобильная база (скилл mobile-native): без серой вспышки при касании, отклик на нажатие, наведение — только у мыши. */
+
+:root {
+  --bg0: #FFFFFF; --bg1: #FFFFFF;
+  --ink: #0E0E10; --ink2: #3A3A3F; --ink3: #6E6E76; --ink4: #A3A3AB;
+  --accent: #0E0E10; --accent-ink: #000000;
+  --brand: #F0444A; --brand2: #FF6A6F; --brand-ink: #D63238;
+  --grad: #0E0E10; --cta: #0E0E10;
+  --ok: #1B9452; --warn: #B8700F; --bad: #E2373D; --none: #A3A3AB;
+  --ok-bg: #EAF6EF; --warn-bg: #FCF2E2; --bad-bg: #FDECEC;
+  --glass: #FFFFFF; --glass2: #FFFFFF; --glass3: #F2F2F4;
+  --edge: #ECECEF; --edge2: #DADADF;
+  --shine: none; --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 10px 30px rgba(0, 0, 0, .06);
+  --sheet: #FFFFFF; --scrim: rgba(14, 14, 16, .42); --field: #F4F4F6; --track: #EEEEF1; --tip: #0E0E10; --tile: #F6F6F8;
+  --blur: none; --r: 24px; --r2: 20px; --r3: 14px;
+  --press: transform 120ms cubic-bezier(.2, .8, .2, 1);
+}
+
+/* ---------- мобильная база ---------- */
+html { -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
+.app button, .app a, .app [role="button"], .app label.btn, .tab3, .occ-i, .pchip, .pcard {
+  touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.app .screen, .app .sheet-body { overscroll-behavior: contain; }
+.app .btn, .icon-btn, .occ-i, .pchip, .pcard, .tab3, .opt, .like, .stepper button, .ocard, .rec, .cont { transition: var(--press), background .15s, color .15s, border-color .15s; }
+.app .btn:active, .icon-btn:active, .occ-i:active, .pchip:active, .tab3:active, .like:active, .ocard:active, .rec:active, .cont:active { transform: scale(.97); }
+.pcard:active { transform: scale(.985); }
+/* на тач-экране наведение «залипает» после касания — гасим его, оставляем только :active */
+@media (hover: none) {
+  .app .btn:hover { background: var(--glass3); border-color: transparent; }
+  .app .btn-primary:hover, .app .btn-accent:hover { background: var(--ink); }
+  .app .btn-ghost:hover { background: transparent; }
+  .icon-btn:hover { background: #fff; border-color: transparent; }
+  .pcard:hover { background: transparent; border-color: transparent; box-shadow: none; }
+  .head-link:hover { background: none; }
+}
+
+/* ---------- сцена на ноутбуке ---------- */
+body { background: #EDEDF0; }
+.aurora, .app::before { display: none; }
+.phone { background: #0E0E10; box-shadow: 0 2px 6px rgba(0, 0, 0, .12), 0 40px 90px rgba(0, 0, 0, .22), inset 0 0 0 1px rgba(255, 255, 255, .12); }
+.phone::before { background: #0E0E10; }
+.side .mark { background: var(--ink); box-shadow: none; }
+.steps li.on::before { background: var(--ink); }
+.glass { background: #fff; border: 1px solid var(--edge); box-shadow: var(--shadow); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* ---------- каркас ---------- */
+.app { background: #fff; }
+.app-head.scrolled { background: rgba(255, 255, 255, .97); box-shadow: 0 1px 0 var(--edge); }
+.logo { font-weight: 800; letter-spacing: -.04em; }
+.logo b { color: var(--brand); }
+.ttl h2 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+.icon-btn { background: #fff; border: 0; box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 6px 18px rgba(0, 0, 0, .08); color: var(--ink); }
+.icon-btn b { min-width: 17px; height: 17px; font: 700 10.5px/17px var(--sans); background: var(--brand); box-shadow: 0 0 0 2px #fff; top: 0; right: 0; }
+.head-link { color: var(--ink); font-weight: 700; }
+.progress i { height: 3px; } .progress i.on { background: var(--ink); }
+.net { background: var(--ink); color: #fff; border-radius: 999px; }
+
+/* ---------- типографика ---------- */
+.hello { padding-top: 4px; }
+.hello h1 { font-size: 28px; line-height: 1.12; font-weight: 700; letter-spacing: -.035em; }
+.hello p { font-size: 15px; color: var(--ink3); margin-top: 8px; }
+.sec-t, .app .eyebrow { text-transform: none; letter-spacing: -.015em; font-size: 19px; font-weight: 700; color: var(--ink); margin-top: 8px; }
+.app .chip { height: 26px; font-weight: 600; }
+.chip-accent { background: var(--glass3); color: var(--ink); }
+
+/* ---------- кнопки и поля ---------- */
+.app .btn { border: 0; border-radius: 999px; background: var(--glass3); color: var(--ink); box-shadow: none; font-weight: 600; }
+.app .btn-primary, .app .btn-accent { background: var(--ink); color: #fff; box-shadow: none; }
+.app .btn-primary:hover, .app .btn-accent:hover { background: #26262B; }
+.app .btn-ghost { background: transparent; }
+.app .btn-xl { min-height: 56px; font-size: 16.5px; }
+.app .input, .app .select, .app .textarea { background: var(--field); border: 1.5px solid transparent; border-radius: 14px; box-shadow: none; }
+.app .input:focus, .app .select:focus, .app .textarea:focus { background: #fff; border-color: var(--ink); box-shadow: none; }
+.field label { color: var(--ink); font-weight: 600; font-size: 14.5px; }
+.app :focus-visible { outline-color: var(--ink); }
+
+/* ---------- поверхности: белые, без стекла ---------- */
+.card { background: #fff; border: 1px solid var(--edge); border-radius: 22px; box-shadow: var(--shadow); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.card-flat, .ai-note, .issue, .totals, .thread, .nitem, .pg, .fcard, .opt, .pchip, .like, .rate button, .allqty {
+  background: #fff; border-color: var(--edge); box-shadow: none; }
+.inset, .trust, .rejects { background: var(--tile); border-color: transparent; }
+.trust svg { color: var(--ink); }
+.ai-ava, .avatar { background: var(--ink); color: #fff; border: 0; box-shadow: none; }
+.cont i { background: var(--ink); }
+.toast { background: var(--ink); border-radius: 999px; }
+.push { background: #fff; border: 1px solid var(--edge); box-shadow: 0 18px 44px rgba(0, 0, 0, .16); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.push i { background: var(--ink); }
+
+/* ---------- чипы и переключатели: как фильтры «Цена / Рейтинг» ---------- */
+.occ-i, .pchip[role="listitem"] { min-height: 40px; border: 0; background: var(--glass3); box-shadow: none; font-weight: 600; font-size: 14.5px; }
+.occ-i[aria-pressed="true"], .pchip[role="listitem"][aria-pressed="true"] { background: var(--ink); color: #fff; }
+.pchip { border: 1.5px solid var(--edge2); border-radius: 18px; }
+.pchip[aria-pressed="true"] { background: #fff; border-color: var(--ink); box-shadow: none; }
+.seg { background: var(--glass3); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: #fff; box-shadow: none; }
+.opt { border-width: 1.5px; }
+.opt:has(input:checked) { border-color: var(--ink); box-shadow: none; }
+.opt input { accent-color: var(--ink); }
+.stepper { gap: 10px; padding: 0; background: transparent; border: 0; }
+.stepper button { width: 40px; height: 40px; background: var(--glass3); border-radius: 50%; font-size: 20px; }
+.stepper output { font: 600 17px var(--sans); }
+[aria-checked="true"] > .switch { background: var(--ink); }
+
+/* ---------- каталог: фото-карточки с плашкой поверх ---------- */
+.pgrid { gap: 14px 12px; }
+.pcard { position: relative; padding: 0; border: 0; background: transparent; box-shadow: none; gap: 2px; }
+.pcard .pic, .pcard:nth-child(n) .pic { height: 176px; border-radius: 22px; margin-bottom: 10px; background: #F1F1F3; }
+.pcard:nth-child(4n+2) .pic { background: #ECECEF; } .pcard:nth-child(4n+3) .pic { background: #F4F4F6; } .pcard:nth-child(4n+4) .pic { background: #EFEFF2; }
+.pcard .pic .art { transform: translateY(24px) scale(1.12); transform-origin: center 35%; }
+.pcard b { font-size: 16px; font-weight: 700; padding: 0 2px; letter-spacing: -.01em; }
+.pcard small { font-size: 13.5px; padding: 0 2px; }
+.pcard em { position: absolute; left: 10px; top: 10px; margin: 0; padding: 5px 11px; border-radius: 999px; background: #fff; color: var(--ink);
+  font: 700 12.5px/1.2 var(--sans); letter-spacing: 0; box-shadow: 0 2px 10px rgba(0, 0, 0, .1); }
+.art i { box-shadow: 0 8px 18px rgba(0, 0, 0, .18); }
+.a-book i { box-shadow: -4px 0 0 var(--ink), 0 8px 18px rgba(0, 0, 0, .2); }
+.rec { border-radius: 22px; }
+.rec em { color: var(--ink); }
+
+/* ---------- продукт: фото во всю ширину, белая шторка наезжает сверху ---------- */
+.phero { gap: 0; }
+.phero .pic { margin: -8px -16px 0; height: 300px; border-radius: 0; background: #EDEDF0; }
+.phero .pic .art { transform: translateY(58px) scale(1.6); transform-origin: center top; }
+.phero > div { position: relative; margin: -28px -16px 0; padding: 22px 16px 4px; background: #fff; border-radius: 28px 28px 0 0; }
+.phero h1 { font-size: 25px; font-weight: 700; letter-spacing: -.03em; }
+.phero p { font-size: 15px; }
+
+/* ---------- нижняя панель: белая «таблетка», выбранная вкладка — чёрная ---------- */
+.actionbar { background: linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, .94) 40%, #fff); }
+.tabs3 { padding: 6px; border-radius: 999px; background: #fff; border: 1px solid var(--edge);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .12), 0 1px 3px rgba(0, 0, 0, .06); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.tab-pill { border-radius: 999px; background: var(--ink); box-shadow: none; }
+.tab3 { min-height: 50px; border-radius: 999px; color: var(--ink); font-weight: 600; font-size: 11px; }
+.tab3 svg { width: 21px; height: 21px; }
+.tab3[aria-current="true"] { color: #fff; }
+
+/* ---------- нижние окна ---------- */
+.sheet-bg { background: var(--scrim); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.sheet-body { background: #fff; border-radius: 28px 28px 0 0; padding-top: 30px; box-shadow: 0 -12px 40px rgba(0, 0, 0, .14); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.sheet-body::before { width: 38px; height: 5px; top: 10px; margin-left: -19px; background: #D6D6DB; }
+.sheet-body > b { text-align: center; font-size: 17px; font-weight: 700; }
+.sheet .slot.big { background: var(--tile); border-radius: 22px; }
+
+/* ---------- фото и макет ---------- */
+.th { border-radius: 16px; }
+.th .ix { background: rgba(14, 14, 16, .78); font-family: var(--sans); font-weight: 600; }
+.th .qb { background: var(--ink); }
+.th .by { color: var(--ink); }
+.fcard { border-radius: 24px; box-shadow: var(--shadow); }
+.fcard.sel { border-color: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
+.ai-say, .rreply, .thread .rep.bot { border-left-color: var(--ink); }
+.loading .bar i, .dist b { background: var(--ink); }
+
+/* ---------- заказ и статус ---------- */
+.done-hero .ok-ico { background: var(--ink); color: #fff; }
+.timer-pill { background: var(--glass3); color: var(--ink); }
+.tl li.on::before { background: var(--ink); }
+.tl li.on i { background: var(--ink); border-color: var(--ink); }
+.tl li.cur i { background: #fff; border-color: var(--ink); color: var(--ink); box-shadow: 0 0 0 5px var(--glass3); }
+.ocard { border-radius: 22px; }
+.ocard .mini i.on { background: var(--ink); } .ocard .mini i.cur { background: var(--brand); }
+.oart, .empty .eart { background: #F1F1F3; }
+
+/* ---------- «Идеи»: обложки в серой гамме, «нравится» — красное сердце ---------- */
+.tone0, .tone1, .tone2, .tone3, .tone4, .tone5 { background: #F1F1F3; }
+.tone1, .tone4 { background: #ECECEF; }
+.tcover .chip { background: #fff; color: var(--ink); }
+.like { border: 0; background: var(--glass3); }
+.like.on { color: var(--brand); background: var(--bad-bg); }
+.stars i.on, .rate button.on { color: #F2A91E; }
+.rate button.on { background: #FFF7E6; border-color: #F2A91E; }
+.nitem.new i { background: var(--brand); }
