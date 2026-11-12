@@ -99,3 +99,6 @@ a { color: var(--brand-ink); text-underline-offset: 3px; }
   .aurora i { animation: none; }
   * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+/* знак «Фотопринт» (shared/brand/fotoprint.svg) на месте прежней плитки с буквой: круглый, без подложки */
+img.logo, img.mark { background: none !important; border-radius: 50% !important; padding: 0; object-fit: contain; flex: none; display: inline-block; }

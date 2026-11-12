@@ -81,7 +81,7 @@
     draw();
   }
   function loginForm(a) {
-    a.innerHTML = `<section class="glass login"><span class="logo" aria-hidden="true">Ф</span>
+    a.innerHTML = `<section class="glass login"><img class="logo" src="/shared/brand/fotoprint.svg" alt="">
       <div><p class="eyebrow">Фотопринт · единая система</p><h1>Экран участка</h1></div>
       <p class="muted">Очередь заказов из приложения picPac. Отметки «Принял», «Сдал» и «Брак» сразу видят клиент и пульт руководителя.</p>
       <form id="f" style="display:flex;flex-direction:column;gap:12px"><label class="field">Логин<input class="input" id="lg" value="operator" autocomplete="username"></label>
@@ -102,7 +102,7 @@
     const D = S.data, mine = D.orders.filter((o) => o.can), list = S.filter === 'mine' ? mine : D.orders;
     const work = mine.filter((o) => o.stage_status === 'started').length, wait = mine.filter((o) => o.stage_status === 'pending').length, bad = D.orders.filter((o) => o.stage_status === 'defect').length;
     const y = window.scrollY;
-    a.innerHTML = `<header class="glass topbar"><span class="logo" aria-hidden="true">Ф</span><div><b>${esc(S.user.name)}</b><small>${esc(S.user.title)}</small></div><span class="spacer"></span>
+    a.innerHTML = `<header class="glass topbar"><img class="logo" src="/shared/brand/fotoprint.svg" alt=""><div><b>${esc(S.user.name)}</b><small>${esc(S.user.title)}</small></div><span class="spacer"></span>
         <span class="chip live"><i></i>обновляется само</span><a class="btn btn-sm" href="/t1/">Пульт</a><button class="btn btn-sm btn-ghost" id="out">Выйти</button></header>
       <div class="head"><p class="eyebrow">Заказы из приложения picPac</p><h1>${D.stages.length ? 'Мои этапы: ' + D.stages.map((s) => NAME[s].toLowerCase()).join(', ') : 'Очередь заказов — только просмотр'}</h1>
         <p>Нажмите «Принял», когда берёте заказ в работу, и «Сдал», когда передаёте дальше. По этим отметкам пульт считает время участка.</p></div>
