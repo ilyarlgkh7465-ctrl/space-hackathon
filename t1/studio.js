@@ -312,7 +312,9 @@
   function draw() {
     const log = $('#stLog'); if (!log) return;
     log.innerHTML = St.msgs.length ? `<div class="st-thread">${St.msgs.map((m, i) => m.me ? `<div class="smsg me">${esc(m.text)}</div>` : aiMsg(m, i)).join('')}</div>` : emptyState();
-    log.scrollTop = log.scrollHeight;
+    // длинный ответ (отчёт по встрече, большой график) показываем с начала, а не с конца: иначе видны только последние строки
+    const last = log.querySelector('.st-thread > :last-child');
+    log.scrollTop = last && last.classList.contains('ai') && last.offsetHeight > log.clientHeight - 24 ? last.offsetTop - 14 : log.scrollHeight;
   }
   const lastWidgets = () => { for (let i = St.msgs.length - 1; i >= 0; i--) { const r = St.msgs[i].res; if (r && r.widgets && r.widgets.length) return r.widgets.map((w) => ({ type: w.type, title: w.title, source: w.source })); } return []; };
   async function ask(text, extra = {}) {

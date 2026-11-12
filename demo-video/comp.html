@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Демо-ролик «Фотопринт»</title>
+<link rel="stylesheet" href="../shared/fonts/fonts.css">
+<style>
+  /* Композиция — чистая функция времени: __render(t) расставляет всё по кадру, анимаций по часам нет. */
+  :root { --ink: #141414; --ink2: #3a3a3a; --ink3: #6b6b6b; --ink4: #9a9a9a; --y: #FFD400; --y2: #FFE869; --line: rgba(20, 20, 20, .1);
+    --sans: 'Onest', system-ui, sans-serif; --mono: 'JetBrains Mono', ui-monospace, monospace; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #fff; }
+  body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
+  #stage { position: absolute; inset: 0; overflow: hidden; background: #fff; }
+  .bg i { position: absolute; border-radius: 50%; filter: blur(120px); }
+  .bg .b1 { width: 900px; height: 900px; left: -260px; top: -360px; background: #FFE98A; opacity: .55; }
+  .bg .b2 { width: 760px; height: 760px; right: -220px; bottom: -340px; background: #FFF1A8; opacity: .6; }
+  .bg .b3 { width: 620px; height: 620px; right: 22%; top: -380px; background: #EFEFEF; opacity: .9; }
+  .scene { position: absolute; inset: 0; opacity: 0; will-change: transform, opacity; }
+
+  /* стекло */
+  .glass { background: linear-gradient(160deg, rgba(255, 255, 255, .86), rgba(255, 255, 255, .62)); border: 1px solid rgba(255, 255, 255, .9);
+    box-shadow: 0 0 0 1px var(--line), 0 30px 90px rgba(0, 0, 0, .12), inset 0 1px 0 #fff; backdrop-filter: blur(24px) saturate(140%); }
+  .mark { display: inline-grid; place-items: center; background: linear-gradient(135deg, #FFE14D, #FFD400); color: var(--ink); font-weight: 700; border-radius: 28%; }
+  .eyebrow { font: 500 21px var(--mono); letter-spacing: .04em; color: var(--ink3); display: flex; align-items: center; gap: 12px; }
+  .eyebrow::before { content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--y); box-shadow: 0 0 0 1px rgba(20, 20, 20, .25); }
+  .w { display: inline-block; white-space: pre; will-change: transform, opacity, filter; }
+
+  /* окно браузера */
+  .win { position: absolute; left: 256px; top: 22px; width: 1408px; border-radius: 26px; overflow: hidden; }
+  .win-bar { height: 46px; display: flex; align-items: center; gap: 9px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+  .win-bar i { width: 13px; height: 13px; border-radius: 50%; background: rgba(20, 20, 20, .16); }
+  .win-bar span { margin-left: 18px; font: 500 15px var(--mono); color: var(--ink3); padding: 5px 16px; border-radius: 99px; background: rgba(20, 20, 20, .05); }
+  .view { position: relative; width: 1408px; height: 880px; overflow: hidden; background: #fff; }
+  .cam { position: absolute; left: 0; top: 0; width: 1408px; height: 880px; transform-origin: 0 0; will-change: transform; }
+  .cam img { position: absolute; left: 0; top: 0; width: 1408px; height: 880px; display: block; }
+  .cursor { position: absolute; left: 0; top: 0; width: 30px; height: 30px; transform-origin: 0 0; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .3)); }
+  .ring { position: absolute; left: 0; top: 0; width: 80px; height: 80px; margin: -40px 0 0 -40px; border-radius: 50%; border: 5px solid var(--y); opacity: 0; }
+
+  /* подпись под окном */
+  #cap { position: absolute; left: 256px; right: 256px; top: 968px; height: 100px; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+  #cap .t { font: 600 44px/1.1 var(--sans); letter-spacing: -.025em; white-space: nowrap; }
+
+  /* телефон и текст рядом */
+  .phone { position: absolute; width: 416px; height: 900px; border-radius: 64px; background: #101010; padding: 11px; transform-origin: 50% 50%;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 50px 120px rgba(0, 0, 0, .22), 0 12px 30px rgba(0, 0, 0, .12); }
+  .phone .scr { position: relative; width: 394px; height: 878px; border-radius: 54px; overflow: hidden; background: var(--top, #fff); }
+  .phone img { position: absolute; left: 0; top: 13px; width: 394px; height: 852.6px; display: block; }
+  .phone .scr::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 14px; background: var(--top, #fff); z-index: 1; }
+  .phone .scr::after { content: ''; position: absolute; left: 50%; top: 10px; width: 104px; height: 28px; margin-left: -52px; border-radius: 99px; background: #101010; z-index: 3; }
+  .tap { position: absolute; left: 0; top: 0; width: 76px; height: 76px; margin: -38px 0 0 -38px; border-radius: 50%; background: rgba(255, 212, 0, .55); border: 3px solid rgba(20, 20, 20, .5); opacity: 0; z-index: 2; }
+  .side { position: absolute; width: 780px; display: flex; flex-direction: column; gap: 26px; }
+  .side h2 { font: 600 76px/1.04 var(--sans); letter-spacing: -.035em; min-height: 240px; position: relative; }
+  .side h2 span.line { position: absolute; left: 0; top: 0; width: 100%; }
+  .chips { display: flex; gap: 12px; flex-wrap: wrap; }
+  .chip { font: 500 22px var(--sans); padding: 12px 22px; border-radius: 99px; background: rgba(255, 255, 255, .8); box-shadow: 0 0 0 1px var(--line); color: var(--ink2); will-change: transform, opacity; }
+  .chip.k { background: var(--ink); color: #fff; box-shadow: none; }
+  .chip.y { background: var(--y); color: var(--ink); box-shadow: none; }
+
+  /* заставка и финал */
+  #intro .c, #outro .c { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 34px; text-align: center; }
+  #intro .mark { width: 132px; height: 132px; font-size: 72px; box-shadow: 0 30px 70px rgba(255, 196, 0, .45), inset 0 2px 0 rgba(255, 255, 255, .7); }
+  #intro h1 { font: 600 92px/1.02 var(--sans); letter-spacing: -.04em; max-width: 1400px; }
+  #intro .sub { font: 400 30px var(--sans); color: var(--ink3); }
+  #outro .c { flex-direction: row; gap: 110px; text-align: left; }
+  #outro h1 { font: 600 104px/1 var(--sans); letter-spacing: -.045em; }
+  #outro .url { font: 500 30px var(--mono); color: var(--ink2); margin-top: 26px; }
+  #outro .qr { width: 400px; height: 400px; border-radius: 48px; padding: 34px; }
+  #outro .qr img { width: 100%; height: 100%; display: block; }
+  #outro .brand { display: flex; align-items: center; gap: 16px; font: 600 34px var(--sans); margin-bottom: 30px; }
+  #outro .brand .mark { width: 62px; height: 62px; font-size: 34px; }
+
+  /* схема шлюза */
+  #gateD .head { position: absolute; left: 150px; top: 96px; display: flex; flex-direction: column; gap: 22px; }
+  #gateD h2 { font: 600 80px/1.03 var(--sans); letter-spacing: -.04em; max-width: 1300px; }
+  .node { position: absolute; border-radius: 34px; padding: 30px 34px; display: flex; flex-direction: column; gap: 10px; will-change: transform, opacity; }
+  .node b { font: 600 34px/1.1 var(--sans); letter-spacing: -.02em; }
+  .node small { font: 400 22px/1.3 var(--sans); color: var(--ink3); }
+  .node.k { background: var(--ink); color: #fff; box-shadow: 0 30px 80px rgba(0, 0, 0, .28); }
+  .node.k small { color: rgba(255, 255, 255, .7); }
+  .node.k .tag { background: var(--y); color: var(--ink); }
+  .tag { align-self: flex-start; font: 500 17px var(--mono); padding: 6px 13px; border-radius: 99px; background: rgba(20, 20, 20, .07); color: var(--ink2); }
+  .node.gw { border: 2px solid var(--ink); }
+  .node.gw ul { list-style: none; display: flex; flex-direction: column; gap: 9px; margin-top: 4px; }
+  .node.gw li { font: 400 22px/1.25 var(--sans); color: var(--ink2); display: flex; gap: 12px; align-items: center; }
+  .node.gw li::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--y); box-shadow: 0 0 0 1px rgba(20, 20, 20, .3); flex: none; }
+  #wires { position: absolute; inset: 0; }
+  #wires path { fill: none; stroke: var(--ink); stroke-width: 2.5; stroke-linecap: round; }
+  #wires circle { fill: var(--y); stroke: var(--ink); stroke-width: 2; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="bg"><i class="b1"></i><i class="b2"></i><i class="b3"></i></div>
+
+  <section class="scene" id="intro"><div class="c">
+    <span class="mark" id="iMark">Ф</span>
+    <h1 id="iH"></h1>
+    <p class="sub" id="iS"></p>
+    <div class="chips" id="iChips"><span class="chip y">Пульт руководителя</span><span class="chip">ИИ-помощник</span><span class="chip">Приложение для клиента</span></div>
+  </div></section>
+
+  <section class="scene" id="s_pulse"><div class="win glass"><div class="win-bar"><i></i><i></i><i></i><span>Фотопринт · пульт руководителя</span></div>
+    <div class="view"><div class="cam" id="camP"><img id="imgP" alt=""><div class="ring" id="ringP"></div><svg class="cursor" id="curP" viewBox="0 0 30 30"><path d="M4 2l20 11-9 2.2-3.4 8.6z" fill="#141414" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/></svg></div></div></div></section>
+
+  <section class="scene" id="gateD">
+    <div class="head"><span class="eyebrow">02 · Защищённый контур</span><h2 id="gH"></h2></div>
+    <svg id="wires" viewBox="0 0 1920 1080"><path id="w0" d="M470 690 H640"/><path id="w1" d="M1100 690 C1190 690 1180 500 1290 500"/><path id="w2" d="M1100 690 H1290"/><path id="w3" d="M1100 690 C1190 690 1180 880 1290 880"/>
+      <circle id="d1" r="9"/><circle id="d2" r="9"/><circle id="d3" r="9"/></svg>
+    <div class="node glass" id="n0" style="left:150px;top:618px;width:320px"><b>Запрос</b><small>вопрос, протокол встречи, документ</small></div>
+    <div class="node glass gw" id="n1" style="left:640px;top:520px;width:460px"><span class="tag">ИИ-шлюз</span><b>Одна точка выхода к моделям</b>
+      <ul><li>скрывает имена, телефоны, суммы</li><li>выбирает модель по задаче</li><li>ведёт журнал без текста запросов</li></ul></div>
+    <div class="node k" id="n2" style="left:1290px;top:412px;width:480px"><span class="tag">закрытый контур</span><b>Локальная модель</b><small>финансы — только здесь, в облако не уходят</small></div>
+    <div class="node glass" id="n3" style="left:1290px;top:622px;width:480px"><span class="tag">облако · данные скрыты</span><b>Claude</b><small>сложные разборы</small></div>
+    <div class="node glass" id="n4" style="left:1290px;top:804px;width:480px"><span class="tag">облако · данные скрыты</span><b>DeepSeek</b><small>короткие ответы</small></div>
+  </section>
+
+  <section class="scene" id="s_gate"><div class="win glass"><div class="win-bar"><i></i><i></i><i></i><span>Фотопринт · данные и журнал</span></div>
+    <div class="view"><div class="cam" id="camG"><img id="imgG" alt=""><div class="ring" id="ringG"></div><svg class="cursor" id="curG" viewBox="0 0 30 30"><path d="M4 2l20 11-9 2.2-3.4 8.6z" fill="#141414" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/></svg></div></div></div></section>
+
+  <div id="cap"><span class="eyebrow" id="capE"></span><div class="t" id="capT"></div></div>
+
+  <section class="scene" id="s_helper">
+    <div class="side" id="sideH" style="left:170px;top:250px"><span class="eyebrow">03 · Помощник руководителя</span><h2 id="hH"></h2>
+      <div class="chips" id="hChips"><span class="chip k">в телефоне, не только на ноутбуке</span><span class="chip">отвечает голосом</span><span class="chip">видит только данные своей роли</span></div></div>
+    <div class="phone" id="phH" style="left:1180px;top:90px"><div class="scr"><img id="imgH" alt=""><div class="tap" id="tapH"></div></div></div>
+  </section>
+
+  <section class="scene" id="s_app">
+    <div class="phone" id="phA" style="left:330px;top:90px"><div class="scr"><img id="imgA" alt=""><div class="tap" id="tapA"></div></div></div>
+    <div class="side" id="sideA" style="left:930px;top:250px"><span class="eyebrow">04 · Приложение для клиента</span><h2 id="aH"></h2>
+      <div class="chips" id="aChips"><span class="chip y">без установки из магазина</span><span class="chip">проверяет фото само</span><span class="chip">статус — прямо с производства</span></div></div>
+  </section>
+
+  <section class="scene" id="outro"><div class="c">
+    <div><div class="brand"><span class="mark">Ф</span>Фотопринт</div><h1 id="oH"></h1><p class="url" id="oU">fotoprint.130-49-141-77.sslip.io/get</p>
+      <div class="chips" id="oChips" style="margin-top:34px"><span class="chip y">Пульт</span><span class="chip k">Помощник</span><span class="chip">Приложение</span></div></div>
+    <div class="qr glass" id="oQ"><img src="assets/qr.svg" alt=""></div>
+  </div></section>
+</div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const io = (k) => (k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);           // плавный разгон и остановка
+const out = (k) => 1 - Math.pow(1 - k, 4);                                               // мягкое торможение
+const lerp = (a, b, k) => a + (b - a) * k;
+let E = null, BASE = '';
+const pending = [];
+
+/* текст по словам: каждое слово приходит из размытия снизу вверх */
+function words(el, text) { if (el.dataset.txt === text) return; el.dataset.txt = text; el.innerHTML = text.split(' ').map((w) => `<span class="w">${w} </span>`).join(''); }
+function reveal(el, t, t0, tOut = 1e9, step = .055, dur = .5) {
+  const ws = el.children, fade = 1 - prog(t, tOut - .3, tOut);
+  for (let i = 0; i < ws.length; i++) {
+    const k = out(prog(t, t0 + i * step, t0 + i * step + dur));
+    ws[i].style.opacity = (k * fade).toFixed(3);
+    ws[i].style.transform = `translateY(${((1 - k) * 34).toFixed(1)}px)`;
+    ws[i].style.filter = k < 1 ? `blur(${((1 - k) * 9).toFixed(1)}px)` : '';
+  }
+}
+function pop(el, t, t0, dur = .55, dy = 26) { const k = out(prog(t, t0, t0 + dur)); el.style.opacity = k.toFixed(3); el.style.transform = `translateY(${((1 - k) * dy).toFixed(1)}px) scale(${lerp(.96, 1, k).toFixed(4)})`; }
+function chips(box, t, t0, gap = .13) { [...box.children].forEach((c, i) => pop(c, t, t0 + i * gap, .5, 18)); }
+
+/* сцена целиком: появление снизу, уход с лёгким увеличением */
+function scene(el, t, t0, t1, fin = .5, fout = .38) {
+  if (t < t0 - .02 || t > t1 + .02) { el.style.opacity = 0; el.style.visibility = 'hidden'; return false; }
+  el.style.visibility = 'visible';
+  const a = out(prog(t, t0, t0 + fin)), b = io(prog(t, t1 - fout, t1));
+  el.style.opacity = (a * (1 - b)).toFixed(3);
+  el.style.transform = `translateY(${((1 - a) * 46).toFixed(1)}px) scale(${(lerp(.975, 1, a) + b * .035).toFixed(4)})`;
+  return true;
+}
+const srcTime = (pcs, t) => { for (const [T0, T1, s0, s1] of pcs) if (t <= T1) return t <= T0 ? s0 : lerp(s0, s1, (t - T0) / (T1 - T0)); const p = pcs[pcs.length - 1]; return p[3]; };
+function frame(img, name, t) {
+  const fr = E.shots[name].frames, ts = srcTime(E.scenes[name], t);
+  let lo = 0, hi = fr.length - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (fr[m][0] <= ts) lo = m; else hi = m - 1; }
+  const url = BASE + name + '/' + fr[lo][1];
+  if (img.dataset.url !== url) { img.dataset.url = url; img.src = url; pending.push(img.decode().catch(() => { })); }
+}
+/* камера внутри окна: точка страницы (x, y) в центре кадра, приближение z */
+function camera(cam, keys, t, sw) {
+  let a = keys[0], b = keys[keys.length - 1];
+  for (let i = 0; i < keys.length - 1; i++) if (t >= keys[i][0] && t <= keys[i + 1][0]) { a = keys[i]; b = keys[i + 1]; break; }
+  if (t <= keys[0][0]) b = a; if (t >= keys[keys.length - 1][0]) a = b;
+  const k = a === b ? 0 : io(prog(t, a[0], b[0])), z = lerp(a[3], b[3], k), sc = 1408 / sw;
+  const hw = sw / 2 / z, hh = 900 * (sw / 1440) / 2 / z;
+  const x = clamp(lerp(a[1], b[1], k), hw, sw - hw), y = clamp(lerp(a[2], b[2], k), hh, 900 - hh);
+  cam.style.transform = `translate(${(704 - z * x * sc).toFixed(2)}px, ${(440 - z * y * sc).toFixed(2)}px) scale(${z.toFixed(4)})`;
+  return z;
+}
+function cursor(cur, ring, list, t, z, sw) {
+  const sc = 1408 / sw; let x = 930, y = 520, click = null;
+  for (const m of list) {
+    if (m.type === 'move') { if (t >= m.Tend) { x = m.x; y = m.y; } else if (t > m.T) { const k = io(prog(t, m.T, m.Tend)); x = lerp(x, m.x, k); y = lerp(y, m.y, k); } }
+    else if (m.type === 'click' && t >= m.T && t < m.T + .6) click = m;
+  }
+  const press = click ? 1 - .22 * Math.sin(Math.PI * prog(t, click.T, click.T + .25)) : 1;
+  cur.style.transform = `translate(${(x * sc).toFixed(2)}px, ${(y * sc).toFixed(2)}px) scale(${(press * 1.25 / z).toFixed(4)})`;
+  if (click) { const k = out(prog(t, click.T, click.T + .6)); ring.style.opacity = (1 - k).toFixed(3); ring.style.transform = `translate(${(click.x * sc).toFixed(1)}px, ${(click.y * sc).toFixed(1)}px) scale(${(lerp(.2, 1.15, k) / z).toFixed(4)})`; }
+  else ring.style.opacity = 0;
+}
+function taps(el, list, t, w) {
+  const sc = 394 / w; const m = list.find((x) => t >= x.T - .02 && t < x.T + .5);
+  if (!m) { el.style.opacity = 0; return; }
+  const k = out(prog(t, m.T, m.T + .5));
+  el.style.opacity = (.9 * (1 - k)).toFixed(3);
+  el.style.transform = `translate(${(m.x * sc).toFixed(1)}px, ${(13 + m.y * sc).toFixed(1)}px) scale(${lerp(.35, 1.25, k).toFixed(3)})`;
+}
+/* заголовок сбоку: фразы сменяют друг друга */
+function phases(h, list, t) {
+  if (!h.dataset.ready) { h.dataset.ready = 1; h.innerHTML = list.map(() => '<span class="line"></span>').join(''); list.forEach((p, i) => words(h.children[i], p[2])); }
+  list.forEach((p, i) => reveal(h.children[i], t, p[0], p[1], .06, .55));
+}
+function phone(el, t, keys) {
+  let a = keys[0], b = keys[keys.length - 1];
+  for (let i = 0; i < keys.length - 1; i++) if (t >= keys[i][0] && t <= keys[i + 1][0]) { a = keys[i]; b = keys[i + 1]; break; }
+  if (t <= keys[0][0]) b = a; if (t >= keys[keys.length - 1][0]) a = b;
+  const k = a === b ? 0 : io(prog(t, a[0], b[0]));
+  el.style.transform = `translate(${lerp(a[1], b[1], k).toFixed(1)}px, ${lerp(a[2], b[2], k).toFixed(1)}px) scale(${lerp(a[3], b[3], k).toFixed(4)}) rotate(${lerp(a[4] || 0, b[4] || 0, k).toFixed(3)}deg)`;
+}
+function wire(id, t, t0, dur = .7) { const p = $(id), len = p.getTotalLength(), k = io(prog(t, t0, t0 + dur)); p.style.strokeDasharray = len; p.style.strokeDashoffset = (len * (1 - k)).toFixed(1); return k; }
+function dot(id, pathId, t, t0, period) { const p = $(pathId), len = p.getTotalLength(), d = $(id); if (t < t0) { d.style.opacity = 0; return; } const k = ((t - t0) % period) / period, pt = p.getPointAtLength(len * io(k)); d.style.opacity = Math.sin(Math.PI * k).toFixed(3); d.setAttribute('cx', pt.x.toFixed(1)); d.setAttribute('cy', pt.y.toFixed(1)); }
+
+window.__load = (edl, base) => { E = edl; BASE = base; };
+window.__render = (t) => {
+  // фон медленно дышит
+  const bg = document.querySelectorAll('.bg i');
+  bg[0].style.transform = `translate(${(Math.sin(t * .11) * 70).toFixed(1)}px, ${(Math.cos(t * .09) * 50).toFixed(1)}px)`;
+  bg[1].style.transform = `translate(${(Math.cos(t * .1) * 80).toFixed(1)}px, ${(Math.sin(t * .13) * 60).toFixed(1)}px)`;
+
+  /* 0–4: заставка */
+  if (scene($('intro'), t, 0, 4.0, .01, .45)) {
+    const k = out(prog(t, .15, 1.1));
+    $('iMark').style.transform = `scale(${lerp(.4, 1, k).toFixed(4)}) rotate(${((1 - k) * -18).toFixed(2)}deg)`;
+    $('iMark').style.opacity = k.toFixed(3);
+    words($('iH'), 'Одна система — руководителю, команде и клиенту'); reveal($('iH'), t, .75, 1e9, .075, .6);
+    words($('iS'), 'Фотопринт · Space Hackathon'); reveal($('iS'), t, 1.7);
+    chips($('iChips'), t, 2.0, .16);
+  }
+  /* 4–16: пульт */
+  if (scene($('s_pulse'), t, 4.0, 16.0)) {
+    frame($('imgP'), 'pulse', t);
+    const z = camera($('camP'), E.cams.pulse, t, 1440);
+    cursor($('curP'), $('ringP'), E.cursor.pulse, t, z, 1440);
+  }
+  /* 16–19.6: схема шлюза */
+  if (scene($('gateD'), t, 16.0, 19.6, .45, .35)) {
+    words($('gH'), 'Данные не уходят наружу без контроля'); reveal($('gH'), t, 16.15, 1e9, .07, .55);
+    pop($('n0'), t, 16.5); wire('w0', t, 16.8, .45); pop($('n1'), t, 16.95, .6);
+    wire('w1', t, 17.5, .6); wire('w2', t, 17.6, .5); wire('w3', t, 17.7, .6);
+    pop($('n2'), t, 17.75, .6); pop($('n3'), t, 17.95, .55); pop($('n4'), t, 18.1, .55);
+    dot('d1', 'w1', t, 18.2, 1.1); dot('d2', 'w2', t, 18.35, 1.1); dot('d3', 'w3', t, 18.5, 1.1);
+  }
+  /* 19.4–24: настоящий экран шлюза */
+  if (scene($('s_gate'), t, 19.4, 24.0, .5, .38)) {
+    frame($('imgG'), 'gate', t);
+    const z = camera($('camG'), E.cams.gate, t, 1440);
+    cursor($('curG'), $('ringG'), E.cursor.gate, t, z, 1440);
+  }
+  /* подпись под окном */
+  const c = E.captions.find((x) => t >= x[0] - .02 && t <= x[1] + .02);
+  $('cap').style.visibility = c ? 'visible' : 'hidden';
+  if (c) { $('capE').textContent = c[2]; $('capE').style.opacity = (out(prog(t, c[0], c[0] + .4)) * (1 - prog(t, c[1] - .3, c[1]))).toFixed(3); words($('capT'), c[3]); reveal($('capT'), t, c[0] + .05, c[1], .05, .5); }
+
+  /* 24–36: помощник */
+  if (scene($('s_helper'), t, 24.0, 36.0)) {
+    frame($('imgH'), 'helper', t);
+    taps($('tapH'), E.taps.helper, t, 390);
+    phone($('phH'), t, [[24.0, 0, 0, 1, 2.5], [25.4, 0, 0, 1, 0], [26.6, -40, 0, 1.06, -1.2], [28.4, -40, 0, 1.06, -1.2], [29.2, 0, 0, 1, 0], [32.2, 0, 0, 1, 0], [33.0, -50, 0, 1.08, -1.5], [36.0, -50, 0, 1.08, -1.5]]);
+    pop($('sideH').children[0], t, 24.25);
+    phases($('hH'), [[24.4, 28.4, 'Спросите голосом — ответит по вашим данным'], [28.6, 32.2, 'На встрече слушает весь разговор'], [32.4, 99, 'И сразу отдаёт отчёт: решения, поручения, сроки']], t);
+    chips($('hChips'), t, 25.3, .22);
+  }
+  /* 36–48: приложение */
+  if (scene($('s_app'), t, 36.0, 48.0)) {
+    frame($('imgA'), 'app', t);
+    $('phA').style.setProperty('--top', t > 36.4 && t < 37.75 ? '#0b0b0c' : '#fff');      // тёмный верх — только пока на экране тёмная заставка
+    taps($('tapA'), E.taps.app, t, 390);
+    phone($('phA'), t, [[36.0, 0, 0, 1, -2.5], [37.4, 0, 0, 1, 0], [39.5, 30, 0, 1.05, 1], [41.5, 30, 0, 1.05, 1], [42.2, 0, 0, 1, 0], [43.4, 0, 0, 1, 0], [44.4, 50, 0, 1.09, 1.4], [48.0, 50, 0, 1.09, 1.4]]);
+    pop($('sideA').children[0], t, 36.25);
+    phases($('aH'), [[36.4, 39.4, 'Заказ печати — за пару касаний'], [39.6, 43.3, 'Само находит слабые кадры и считает цену'], [43.5, 99, 'Клиент видит, на каком этапе его заказ']], t);
+    chips($('aChips'), t, 37.3, .22);
+  }
+  /* 48–53: финал */
+  if (scene($('outro'), t, 48.0, 54.0, .5, .3)) {
+    words($('oH'), 'Попробуйте сами'); reveal($('oH'), t, 48.2, 1e9, .09, .6);
+    pop($('oU'), t, 49.0); chips($('oChips'), t, 49.3, .15);
+    const k = out(prog(t, 48.5, 49.5));
+    $('oQ').style.opacity = k.toFixed(3);
+    $('oQ').style.transform = `translateY(${((1 - k) * 50).toFixed(1)}px) rotate(${((1 - k) * 6).toFixed(2)}deg) scale(${lerp(.9, 1, k).toFixed(4)})`;
+  }
+};
+window.__settle = async () => { const p = pending.splice(0); await Promise.all(p); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); };
+document.fonts.ready.then(() => Promise.all([document.fonts.load('600 40px Onest'), document.fonts.load('500 20px "JetBrains Mono"'), document.fonts.load('400 20px Onest'), document.fonts.load('700 40px Onest')])).then(() => { window.__fontsReady = true; });
+</script>
+</body>
+</html>
