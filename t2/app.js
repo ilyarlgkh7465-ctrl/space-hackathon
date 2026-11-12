@@ -1341,8 +1341,10 @@
 
   (async () => {
     // без стены входа: сразу гость, войти можно в «Профиле» (или кнопкой «Войти» на главной)
-    if (!S.session) { try { await loginGuest(); } catch (e) { await loadCatalog(); go('login', true); return; } }
-    await startApp();
+    window.picpacGo = (v) => { S.stack = []; go(v, true); };          // для заставки входа (t2/intro.js)
+    const ready = () => { window.picpacReady = true; document.dispatchEvent(new Event('picpac:ready')); };
+    if (!S.session) { try { await loginGuest(); } catch (e) { await loadCatalog(); go('login', true); ready(); return; } }
+    await startApp(); ready();
     if (params.get('demo') === '1' && !S.draft) { openProduct('print'); go('photos'); addDemo(false); }
     else deepLink();
   })();

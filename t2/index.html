@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>picPac · печать с телефона</title>
 <meta name="description" content="От фото в галерее до оформленного заказа за минуту: приложение отбирает удачные кадры, кадрирует под формат и считает цену.">
-<meta name="theme-color" content="#FAF7F5">
+<meta name="theme-color" content="#FFFFFF">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -17,6 +17,8 @@
 <link rel="stylesheet" href="/shared/fonts/fonts.css">
 <link rel="stylesheet" href="/shared/glass.css">
 <link rel="stylesheet" href="/t2/app.css">
+<link rel="stylesheet" href="/t2/look.css">
+<link rel="stylesheet" href="/t2/intro.css">
 </head>
 <body>
 <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -42,6 +44,15 @@
       <main class="screen" id="screen"></main>
       <footer class="actionbar" id="bar"></footer>
       <button class="push" id="push" type="button" aria-live="polite"></button>
+      <div class="intro" id="intro">
+        <div class="intro-logo" role="img" aria-label="picPac"><i></i></div>
+        <div class="intro-copy"><h1>Ваши фото — в печать за пару касаний</h1><p>Фотокниги, печать, календари и холсты от «Фотопринта». Доставка по Беларуси.</p></div>
+        <div class="intro-acts">
+          <button class="btn intro-new" id="introNew" type="button">Я новый клиент</button>
+          <button class="btn intro-old" id="introOld" type="button">Я уже заказывал</button>
+          <button class="btn intro-skip" id="introSkip" type="button">Посмотреть без входа</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -68,5 +79,6 @@
 <script src="/shared/api.js"></script>
 <script src="/t2/demo.js"></script>
 <script src="/t2/app.js"></script>
+<script src="/t2/intro.js"></script>
 </body>
 </html>
