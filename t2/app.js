@@ -105,12 +105,15 @@
   const fromPrice = (p) => Math.min(...p.variants.map((v) => v.tiers ? Number(v.tiers[v.tiers.length - 1][1]) : Number(v.base || v.price)));
 
   /* цена «на глаз», когда нет сети; точную считает сервер */
+  const optVal = (o, d) => o.values.find((x) => x.id === (d.options || {})[o.id]) || o.values[0];
+  const optAdd = (prod, d) => prod.options.reduce((sum, o) => sum + (o.kind === 'number' ? 0 : Number(optVal(o, d).price || 0)), 0);
   function localPrice(d) {
     const prod = prodOf(d.product), v = varOf(prod, d.variant), qty = unitsOf(d);
     let unit;
     if (prod.kind === 'print') { unit = Number(v.tiers[0][1]); v.tiers.forEach(([n, p]) => { if (qty >= n) unit = Number(p); }); }
     else if (prod.kind === 'book') { const pg = Number((d.options || {}).pages || 20); unit = Number(v.base) + Math.max(0, pg - v.pages_incl) * Number(v.page_price); }
     else unit = Number(v.price);
+    if (prod.kind !== 'print') unit += optAdd(prod, d);
     const goods = unit * qty, dl = S.catalog.delivery.find((x) => x.id === d.delivery) || S.catalog.delivery[0];
     const dp = dl.free_from && goods >= Number(dl.free_from) ? 0 : Number(dl.price);
     return { goods: goods.toFixed(2), discount: '0.00', delivery: { id: dl.id, name: dl.name, price: dp.toFixed(2) }, total: (goods + dp).toFixed(2),
@@ -311,7 +314,8 @@
   const ICON = {
     back: SV('<path d="M15 18l-6-6 6-6"/>'),
     grid: SV('<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>'),
-    text: SV('<path d="M5 6h14M12 6v13M9 19h6"/>'), drop: SV('<path d="M12 3.5s6 6.2 6 10.4a6 6 0 0 1-12 0C6 9.7 12 3.5 12 3.5z"/>'), check: SV('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+    text: SV('<path d="M5 6h14M12 6v13M9 19h6"/>'), card: SV('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 8l9 6 9-6"/>'),
+    chat: SV('<path d="M4 5h16v11H9l-5 4z"/>'), drop: SV('<path d="M12 3.5s6 6.2 6 10.4a6 6 0 0 1-12 0C6 9.7 12 3.5 12 3.5z"/>'), check: SV('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
     photos: SV('<rect x="3" y="5" width="15" height="13" rx="2"/><path d="M7 3h12a2 2 0 0 1 2 2v10"/><path d="M3 15l4-4 4 4 3-3 4 4"/><circle cx="13.5" cy="9" r="1.3"/>'),
     book: SV('<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/><path d="M9 8h6"/>'),
     cal: SV('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
@@ -329,11 +333,12 @@
     bell: SV('<path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/>'),
     link: SV('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'),
   };
+  const PAK = '<span class="ai-ava pak" aria-hidden="true"><img src="/t2/brand/cat-happy.png" alt=""></span>';   // котик Пак — помощник приложения
   const haptic = (ok) => { try { navigator.vibrate && navigator.vibrate(ok ? [20, 40, 20] : 10); } catch (e) { /* нет вибрации */ } };
 
   /* ---------- навигация и отрисовка ---------- */
-  const TITLES = { home: 'picPac', product: 'Продукт', photos: 'Фото', layout: 'Конструктор', check: 'Проверка', cart: 'Оформление', done: 'Заказ', orders: 'Мои заказы', order: 'Заказ', profile: 'Профиль', login: 'Вход', feed: 'Мои фото', social: 'Идеи', join: 'Общий альбом' };
-  const TABS = ['home', 'feed', 'social', 'orders', 'profile'];
+  const TITLES = { home: 'picPac', product: 'Продукт', photos: 'Фото', layout: 'Конструктор', check: 'Проверка', cart: 'Оформление', done: 'Заказ', orders: 'Мои заказы', order: 'Заказ', profile: 'Профиль', login: 'Вход', feed: 'Мои фото', make: 'Конструктор', social: 'Идеи', join: 'Общий альбом' };
+  const TABS = ['home', 'make', 'social', 'orders', 'profile'];
   const flowOf = () => S.draft && hasLayout(S.draft) ? ['product', 'photos', 'layout', 'check', 'cart'] : ['product', 'photos', 'check', 'cart'];
   function go(view, replace) {
     if (!replace && S.view !== view) S.stack.push(S.view);
@@ -353,13 +358,15 @@
     const guest = S.session && /^g-/.test(S.session.user.id), logo = '<span class="logo">pic<b>Pac</b></span>';
     const unread = S.notes.filter((n) => !n.read).length;
     const bell = `<button class="icon-btn" id="bell" aria-label="Уведомления${unread ? ': новых ' + unread : ''}">${ICON.bell}${unread ? `<b>${unread}</b>` : ''}</button>`;
-    const right = isTab ? `<span class="head-acts">${S.view === 'home' && guest ? '<button class="head-link" id="signin">Войти</button>' : ''}${bell}</span>` : '<span></span>';
+    const right = isTab ? `<span class="head-acts">${S.view === 'home' && guest ? '<button class="head-link" id="signin">Войти</button>' : ''}${bell}</span>` : S.view === 'login' ? '<span></span>' : '<span class="head-acts"><button class="pak-btn" id="pak" aria-label="Помощник Пак. Открыть"><img src="/t2/brand/cat-happy.png" alt=""></button></span>';
     const sub = fi >= 0 ? `<small class="stepno">Шаг ${fi + 1} из ${FLOW.length}</small>` : '';
-    head.innerHTML = `${isTab || S.view === 'login' ? '<span></span>' : `<button class="icon-btn" id="back" aria-label="Назад">${ICON.back}</button>`}<div class="ttl"><h2>${S.view === 'home' ? logo : TITLES[S.view]}</h2>${sub}</div>${right}
+    const pak = S.view === 'login' ? '' : '<button class="pak-btn" id="pak" aria-label="Помощник Пак. Открыть"><img src="/t2/brand/cat-happy.png" alt=""></button>';
+    head.innerHTML = `${S.view === 'login' ? '<span></span>' : isTab ? pak : `<button class="icon-btn" id="back" aria-label="Назад">${ICON.back}</button>`}<div class="ttl"><h2>${S.view === 'home' ? logo : TITLES[S.view]}</h2>${sub}</div>${right}
       ${fi >= 0 ? `<div class="progress" style="grid-template-columns:repeat(${FLOW.length},1fr)" aria-hidden="true">${FLOW.map((_, i) => `<i class="${i <= fi ? 'on' : ''}"></i>`).join('')}</div>` : ''}`;
     const b = $('#back'); if (b) b.onclick = back;
     const si = $('#signin'); if (si) si.onclick = () => { S.stack = []; go('profile', true); };
     const bl = $('#bell'); if (bl) bl.onclick = openNotes;
+    const pk = $('#pak'); if (pk) pk.onclick = () => openPak();
     document.querySelectorAll('#sideSteps li').forEach((li) => { const s = { home: 0, feed: 1, product: 0, photos: 1, layout: 1, check: 2, cart: 3, done: 4, order: 4 }[S.view]; li.classList.toggle('on', +li.dataset.s === s); li.classList.toggle('done', +li.dataset.s < (s == null ? -1 : s)); });
     if (S.busy) { renderBusy(); $('#bar').innerHTML = ''; fitBar(); return; }
     const v = VIEWS[S.view]();
@@ -377,7 +384,7 @@
     const i = TABS.indexOf(S.view), from = S.tabFrom == null ? i : S.tabFrom; S.tabFrom = i;
     const t = (id, ic, name) => `<button class="tab3" data-tab="${id}" aria-current="${S.view === id}">${ICON[ic]}<span>${name}</span></button>`;
     if (from !== i) requestAnimationFrame(() => requestAnimationFrame(() => { const p = $('.tab-pill'); if (p) p.style.setProperty('--i', i); }));
-    return `<nav class="tabs3" aria-label="Разделы"><i class="tab-pill" style="--i:${from}" aria-hidden="true"></i>${t('home', 'home', 'Каталог')}${t('feed', 'photos', 'Мои фото')}${t('social', 'people', 'Идеи')}${t('orders', 'list', 'Заказы')}${t('profile', 'user', 'Профиль')}</nav>`;
+    return `<nav class="tabs3" aria-label="Разделы"><i class="tab-pill" style="--i:${from}" aria-hidden="true"></i>${t('home', 'home', 'Каталог')}${t('make', 'grid', 'Конструктор')}${t('social', 'people', 'Идеи')}${t('orders', 'list', 'Заказы')}${t('profile', 'user', 'Профиль')}</nav>`;
   }
   function renderNet() {
     const n = $('#net'); if (!n) return;
@@ -387,7 +394,7 @@
   }
   function renderBusy() {
     if (!S.busy) return; const { done, total } = S.busy;
-    $('#screen').innerHTML = `<div class="loading"><div class="ai-ava">${ICON.spark}</div>
+    $('#screen').innerHTML = `<div class="loading">${PAK}
       <h3>${esc(S.busy.title || 'Смотрю кадры')}</h3><div class="bar"><i style="width:${total ? done / total * 100 : 0}%"></i></div>
       <p class="num">${done} из ${total}</p><p>${esc(S.busy.note || 'Резкость, свет и дубли проверяю прямо на телефоне')}</p></div>`;
   }
@@ -421,7 +428,7 @@
   }
   const bg = (k) => `style="background-image:url(${ART[k]})"`;
   /* Фото продуктов — снимки с Unsplash (список и лицензия: ios/PHOTO-CREDITS.md); перед запуском заменить на съёмку «Фотопринта». */
-  const PHOTO = { print: 'prints', book: 'book', calendar: 'calendar', magnet: 'magnet', canvas: 'canvas' };
+  const PHOTO = { print: 'prints', book: 'book', calendar: 'calendar', magnet: 'magnet', canvas: 'canvas', card: 'prints-hand' };
   function artOf(kind) {
     if (PHOTO[kind]) return `<img class="art-photo" src="/t2/photos/photo-${PHOTO[kind]}.jpg" alt="">`;
     if (!ART) return ICON.photos;
@@ -434,6 +441,48 @@
     }[kind] || ICON.photos;
   }
   const OCCASIONS = [['Выпускной альбом', 'book', 'classic'], ['Свадьба', 'book', 'premium'], ['Семейная книга', 'book', 'classic'], ['Календарь 2027', 'calendar', 'wall'], ['Печать 10×15', 'print', '10x15'], ['Холст на стену', 'canvas', '30x40']];
+  /* стили книги: одно касание меняет фон и шаблоны на всех страницах */
+  const STYLES = [
+    ['classic', 'Классика', 'Белые страницы, фото во всю ширину', { bg: '#FFFFFF', t: { 1: 'a', 2: 'a', 3: 'a', 4: 'a' } }],
+    ['craft', 'Крафт', 'Кремовый фон, фото карточками', { bg: '#F6F1E7', t: { 1: 'c', 2: 'a', 3: 'b', 4: 'a' } }],
+    ['gallery', 'Галерея', 'Чёрный фон, фото с полями', { bg: '#141414', t: { 1: 'b', 2: 'b', 3: 'a', 4: 'a' } }],
+    ['mag', 'Журнал', 'Без полей, крупные кадры', { bg: '#FFFFFF', t: { 1: 'a', 2: 'c', 3: 'd', 4: 'b' } }],
+    ['sun', 'Солнечный', 'Жёлтые и белые страницы через одну', { bg: '#FFD400', alt: '#FFFFFF', t: { 1: 'b', 2: 'd', 3: 'b', 4: 'c' } }],
+  ];
+  function applyStyle(d, id) {
+    const st = STYLES.find((x) => x[0] === id); if (!st || !d.layout) return;
+    const o = st[3]; d.style = id;
+    d.layout.forEach((pg, i) => { const m = pmOf(d, i), n = Math.min(pg.length, 4); m.bg = o.alt && i % 2 ? o.alt : o.bg; m.t = o.t[n] || 'a'; });
+  }
+  const stylePv = (o, n, alt) => `<span class="pv mini n${n} t${n}${o.t[n]}${darkBg(alt ? o.alt || o.bg : o.bg) ? ' dark' : ''}" style="background:${alt ? o.alt || o.bg : o.bg}">${'<i class="sl"></i>'.repeat(n)}</span>`;
+  VIEWS.make = () => {
+    const cat = S.catalog, d = S.draft, n = d ? d.photos.length : 0;
+    const cont = d && n ? `<button class="card cont" id="cont"><b>Продолжить: ${esc(prodOf(d.product).name)}</b><span>${n} ${plural(n, 'фото', 'фото', 'фото')} · черновик сохранён</span><i aria-hidden="true">${ICON.back}</i></button>` : '';
+    const WHAT = { book: 'Страницы, шаблоны, подписи', calendar: '12 месяцев с вашими фото', card: 'Фото и подпись в конверте', print: 'Отпечатки на фотобумаге', magnet: 'Любимый кадр на холодильник', canvas: 'Один кадр на стену' };
+    const order = ['book', 'card', 'calendar', 'print', 'magnet', 'canvas'];
+    const items = cat ? order.map((id) => prodOf(id)).filter(Boolean).map((p) => `<button class="mk-i" data-pr="${p.id}"><span class="pic">${artOf(p.kind)}</span><b>${esc(p.name.replace(' на 2027', ''))}</b><small>${esc(WHAT[p.kind] || p.short)}</small><em>от ${money(fromPrice(p))}</em></button>`).join('') : '';
+    return {
+      html: `<section class="mk-hero"><img src="/t2/brand/cat-point.png" alt="Котик Пак"><div><h1>Соберём вместе</h1><p>Выберите, что сделать. Раскладку и оформление подскажу — останется поправить.</p></div></section>
+        ${cont}
+        <p class="sec-t">Что собираем</p><div class="mk-grid">${items || '<p class="muted">Загружаю каталог…</p>'}</div>
+        <p class="sec-t">Стиль от Пака</p><p class="muted mk-note">Выберите настроение — соберу фотокнигу в этом стиле из ваших фото.</p>
+        <div class="mk-styles" role="list">${STYLES.map(([id, name, desc, o]) => `<button class="mk-st" role="listitem" data-st="${id}"><span class="mk-st-pv">${stylePv(o, 1)}${stylePv(o, 3, true)}</span><b>${name}</b><small>${desc}</small></button>`).join('')}</div>
+        <p class="sec-t">Ещё</p>
+        <button class="card-flat mk-row" data-goto="feed">${ICON.photos}<span><b>Мои фото</b><small>${S.pool.length ? S.pool.length + ' фото в приложении · ' : ''}напечатать без макета</small></span></button>
+        <button class="card-flat mk-row" data-goto="social">${ICON.people}<span><b>Идеи других покупателей</b><small>Возьмите готовое оформление — фото будут ваши</small></span></button>`,
+      bind(scr) {
+        scr.querySelectorAll('[data-pr]').forEach((b) => { b.onclick = () => openProduct(b.dataset.pr); });
+        scr.querySelectorAll('[data-goto]').forEach((b) => { b.onclick = () => go(b.dataset.goto); });
+        scr.querySelectorAll('[data-st]').forEach((b) => { b.onclick = () => {
+          const same = S.draft && S.draft.product === 'book';
+          if (!same) openProduct('book', 'classic');
+          S.draft.style = b.dataset.st; S.draft.skel = []; S.draft.pm = []; S.draft.layoutKey = ''; saveDraft();
+          toast('Стиль «' + STYLES.find((x) => x[0] === b.dataset.st)[1] + '» выбран'); go(S.draft.photos.length ? 'layout' : 'photos');
+        }; });
+        const c = $('#cont'); if (c) c.onclick = () => go(hasLayout(S.draft) ? 'layout' : 'photos');
+      },
+    };
+  };
   VIEWS.home = () => {
     const cat = S.catalog, d = S.draft, n = d ? d.photos.length : 0;
     const cont = d && n ? `<button class="card cont" id="cont"><b>Продолжить: ${esc(prodOf(d.product).name)}</b><span>${n} ${plural(n, 'фото', 'фото', 'фото')} · черновик сохранён</span><i aria-hidden="true">${ICON.back}</i></button>` : '';
@@ -480,12 +529,40 @@
     step('catalog'); refreshPrice(); go('product');
   }
 
+  function optsHtml(prod, d) {
+    return prod.options.map((o) => o.kind === 'number'
+      ? `<div class="allqty"><span>${esc(o.name)}</span><span class="stepper"><button data-pg="-${o.step}" aria-label="Меньше">−</button><output>${d.options[o.id]}</output><button data-pg="${o.step}" aria-label="Больше">+</button></span></div>`
+      : `<div class="field"><label>${esc(o.name)}</label><div class="chips-row wrap" role="group" aria-label="${esc(o.name)}">${o.values.map((x) => `<button class="pchip" data-op="${o.id}:${x.id}" aria-pressed="${optVal(o, d).id === x.id}"><b>${esc(x.name)}</b><span>${x.price ? '+' + money(x.price) : 'в цене'}</span></button>`).join('')}</div></div>`).join('');
+  }
+  function bindOpts(root, prod, d, upd) {
+    root.querySelectorAll('[data-op]').forEach((b) => { b.onclick = () => { const [k, val] = b.dataset.op.split(':'); d.options[k] = val; upd(); }; });
+    root.querySelectorAll('[data-pg]').forEach((b) => { b.onclick = () => { const o = prod.options.find((x) => x.kind === 'number'); d.options[o.id] = Math.max(o.min, Math.min(o.max, d.options[o.id] + Number(b.dataset.pg))); upd(); }; });
+  }
+  const optsLine = (prod, d) => prod.options.map((o) => o.kind === 'number' ? d.options[o.id] + ' стр.' : optVal(o, d).name.toLowerCase()).join(' · ');
+  /* параметры книги можно менять и из конструктора: формат, страницы, бумага, толщина, покрытие, название на обложке */
+  function openBookSettings() {
+    const old = $('#sheet'), keepTop = old && old.querySelector('.sheet-body') ? old.querySelector('.sheet-body').scrollTop : 0; if (old) old.remove();
+    const d = S.draft, prod = prodOf(d.product), P = S.price || localPrice(d);
+    const vars = prod.variants.map((x) => `<button class="pchip" data-v="${x.id}" aria-pressed="${x.id === d.variant}"><b>${esc(x.name)}</b><span>${money(x.base || x.price)}</span></button>`).join('');
+    const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet' + (old ? ' quiet' : '');
+    el.innerHTML = `<div class="sheet-bg" data-x></div><div class="sheet-body" role="dialog" aria-label="Параметры">
+      <b>Параметры: ${esc(prod.name.toLowerCase())}</b>
+      <div class="field"><label>Формат</label><div class="chips-row wrap" role="group" aria-label="Формат">${vars}</div></div>${optsHtml(prod, d)}
+      ${prod.kind === 'book' ? `<div class="field"><label for="bkt">Название на обложке</label><input class="input" id="bkt" maxlength="40" value="${esc(d.title || '')}" placeholder="Например: Наше лето"></div>` : ''}
+      <div class="totals"><div class="row"><span>Цена сейчас</span><b class="num">${money(P.goods)}</b></div></div>
+      <button class="btn btn-accent btn-lg" data-x>Готово</button></div>`;
+    $('.app').appendChild(el); el.querySelector('.sheet-body').scrollTop = keepTop;
+    const upd = async () => { recrop(); saveDraft(); await refreshPrice(); if ($('#sheet') === el) openBookSettings(); };
+    el.querySelectorAll('[data-v]').forEach((b) => { b.onclick = () => { d.variant = b.dataset.v; upd(); }; });
+    bindOpts(el, prod, d, upd);
+    const bt = $('#bkt'); if (bt) bt.oninput = () => { d.title = bt.value; LS.set('pp_draft', d); syncSoon(); };
+    el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = () => { el.remove(); saveDraft(); rerender(); }; });
+  }
+
   VIEWS.product = () => {
     const d = S.draft, prod = prodOf(d.product), v = varOf(prod, d.variant), P = S.price || localPrice(d);
     const vars = prod.variants.map((x) => `<button class="pchip" data-v="${x.id}" aria-pressed="${x.id === d.variant}"><b>${esc(x.name)}</b><span>${money(x.tiers ? x.tiers[0][1] : (x.base || x.price))}</span></button>`).join('');
-    const opts = prod.options.map((o) => o.kind === 'number'
-      ? `<div class="allqty"><span>${esc(o.name)}</span><span class="stepper"><button data-pg="-${o.step}" aria-label="Меньше">−</button><output>${d.options[o.id]}</output><button data-pg="${o.step}" aria-label="Больше">+</button></span></div>`
-      : `<div class="field"><label>${esc(o.name)}</label><div class="seg" style="grid-template-columns:repeat(${o.values.length},1fr)">${o.values.map((x) => `<button data-op="${o.id}:${x.id}" aria-pressed="${d.options[o.id] === x.id}">${esc(x.name)}</button>`).join('')}</div></div>`).join('');
+    const opts = optsHtml(prod, d);
     const copies = (prod.kind === 'print' || prod.kind === 'magnet') ? '' : `<div class="allqty"><span>Количество</span><span class="stepper"><button data-q="-1" aria-label="Меньше">−</button><output>${d.qty}</output><button data-q="1" aria-label="Больше">+</button></span></div>`;
     const tiers = v.tiers ? `<div class="inset">Чем больше — тем дешевле: ${v.tiers.map(([n, p]) => `от ${n} шт — ${money(p)}`).join(', ')}.</div>` : '';
     return {
@@ -497,8 +574,7 @@
       bind(scr) {
         const upd = () => { recrop(); saveDraft(); refreshPrice(); rerender(); };
         scr.querySelectorAll('[data-v]').forEach((b) => { b.onclick = () => { d.variant = b.dataset.v; upd(); }; });
-        scr.querySelectorAll('[data-op]').forEach((b) => { b.onclick = () => { const [k, val] = b.dataset.op.split(':'); d.options[k] = val; upd(); }; });
-        scr.querySelectorAll('[data-pg]').forEach((b) => { b.onclick = () => { const o = prod.options.find((x) => x.kind === 'number'); d.options[o.id] = Math.max(o.min, Math.min(o.max, d.options[o.id] + Number(b.dataset.pg))); upd(); }; });
+        bindOpts(scr, prod, d, upd);
         scr.querySelectorAll('[data-q]').forEach((b) => { b.onclick = () => { d.qty = Math.max(1, Math.min(99, d.qty + Number(b.dataset.q))); upd(); }; });
         $('#next').onclick = () => go('photos');
       },
@@ -523,7 +599,7 @@
     }).join('');
     const fitSeg = (prod.kind === 'print' || prod.kind === 'magnet') ? `<div class="seg" role="group" aria-label="Как печатать"><button data-fit="0" aria-pressed="${!d.fit}">Заполнить кадр</button><button data-fit="1" aria-pressed="${d.fit}">С белыми полями</button></div>` : '';
     return {
-      html: `${rejectsHtml()}${inboxHtml()}<div class="ai-note"><span class="ai-ava">${ICON.spark}</span><div class="ai-body">${bad ? `Нашла <b>${bad}</b> ${plural(bad, 'слабый кадр', 'слабых кадра', 'слабых кадров')} (размытые, тёмные, дубли). Можно убрать одним касанием.` : `<b>${n}</b> ${plural(n, 'кадр', 'кадра', 'кадров')} — всё выглядит хорошо.`}
+      html: `${rejectsHtml()}${inboxHtml()}<div class="ai-note">${PAK}<div class="ai-body">${bad ? `Нашёл <b>${bad}</b> ${plural(bad, 'слабый кадр', 'слабых кадра', 'слабых кадров')} (размытые, тёмные, дубли). Можно убрать одним касанием.` : `<b>${n}</b> ${plural(n, 'кадр', 'кадра', 'кадров')} — всё выглядит хорошо.`}
         <div class="ai-src">Проверено на телефоне · файлы ${d.photos.every((p) => p.up) ? 'загружены' : 'ждут загрузки'}</div></div></div>
         ${bad ? `<button class="btn" id="dropbad">Убрать слабые (${bad})</button>` : ''}${fitSeg}
         <div class="thumbs">${items}</div>
@@ -544,13 +620,14 @@
   };
 
   /* ---------- автомакет: раскладка фото по страницам книги и календаря ---------- */
-  const hasLayout = (d) => { const k = prodOf(d.product).kind; return k === 'book' || k === 'calendar'; };
-  const pagesOf = (d) => prodOf(d.product).kind === 'calendar' ? 12 : Number((d.options || {}).pages || 20);
+  const hasLayout = (d) => { const k = prodOf(d.product).kind; return k === 'book' || k === 'calendar' || k === 'card'; };
+  const pagesOf = (d) => { const k = prodOf(d.product).kind; return k === 'calendar' ? 12 : k === 'card' ? 1 : Number((d.options || {}).pages || 20); };
   const layoutKey = (d) => d.photos.map((p) => p.id).join(',') + '|' + pagesOf(d);
   /* Правило: порядок съёмки сохраняется; фото делятся по страницам поровну (не больше 4 на странице),
      лишние страницы остаются пустыми — об этом скажет проверка. Календарь: по одному фото на месяц, 13-е — обложка. */
   function buildLayout(d) {
     const ids = d.photos.map((p) => p.id), P = pagesOf(d), N = ids.length;
+    if (prodOf(d.product).kind === 'card') return [ids.slice(0, 4)];           // открытка: одна сторона, до четырёх фото
     if (prodOf(d.product).kind === 'calendar') {
       const pages = Array.from({ length: 12 }, (_, i) => ids[i] ? [ids[i]] : []);
       if (ids[12]) pages.push([ids[12]]);
@@ -571,6 +648,7 @@
     const d = S.draft;
     if (force || !d.layout || d.layoutKey !== layoutKey(d)) {
       d.layout = buildLayout(d); d.layoutKey = layoutKey(d);
+      if (d.style && !(d.skel && d.skel.length) && (force || !d.pm || !d.pm.length)) { d.pm = []; applyStyle(d, d.style); }
       if (d.skel && d.skel.length && (force || !d.pm || !d.pm.length)) d.pm = d.layout.map((pg, i) => { const m = d.skel[i % d.skel.length]; return { t: m.t || 'a', bg: m.bg || '#FFFFFF', tx: '', tp: 'b', z: {} }; });
       saveDraft();
     }
@@ -578,8 +656,8 @@
   /* ---------- конструктор страницы: шаблон, фото, подпись, фон ---------- */
   const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
   const TPL = {
-    1: [['a', 'Во всю страницу'], ['b', 'С полями'], ['c', 'Карточка']], 2: [['a', 'Рядом'], ['b', 'Друг над другом'], ['c', 'Без полей']],
-    3: [['a', 'Крупное слева'], ['b', 'Крупное сверху'], ['c', 'Три в ряд']], 4: [['a', 'Сетка'], ['b', 'Крупное сверху'], ['c', 'Крупное слева']],
+    1: [['a', 'Во всю страницу'], ['b', 'С полями'], ['c', 'Карточка'], ['d', 'Панорама']], 2: [['a', 'Рядом'], ['b', 'Друг над другом'], ['c', 'Без полей'], ['d', 'Большое и малое']],
+    3: [['a', 'Крупное слева'], ['b', 'Крупное сверху'], ['c', 'Три в ряд'], ['d', 'Крупное справа']], 4: [['a', 'Сетка'], ['b', 'Крупное сверху'], ['c', 'Крупное слева'], ['d', 'Лента']],
   };
   const BGS = [['#FFFFFF', 'Белый'], ['#F6F1E7', 'Кремовый'], ['#EDEDF0', 'Серый'], ['#141414', 'Чёрный'], ['#FFD400', 'Жёлтый'], ['#F7D9DD', 'Розовый'], ['#DCE9F5', 'Голубой'], ['#DDEBDD', 'Зелёный']];
   const darkBg = (c) => { const n = parseInt(String(c || '#FFFFFF').slice(1), 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 140; };
@@ -605,27 +683,34 @@
     const d = S.draft; ensureLayout();
     const lay = d.layout, prod = prodOf(d.product), cal = prod.kind === 'calendar', N = d.photos.length, P = pagesOf(d);
     const empty = lay.slice(0, cal ? 12 : P).filter((pg) => !pg.length).length;
-    const page = (pg, i) => `<button class="pg ${pg.length ? '' : 'empty'}" data-pg="${i}" aria-label="${cal ? (i < 12 ? MONTHS[i] : 'Обложка') : 'Страница ' + (i + 1)}, фото: ${pg.length}. Открыть конструктор">
-      ${pv(d, i)}<small>${cal ? (i < 12 ? MONTHS[i] : 'Обложка') : i + 1}</small></button>`;
+    const card = prod.kind === 'card', v = varOf(prod, d.variant), PR = S.price || localPrice(d);
+    const label = (i) => card ? 'Открытка' : cal ? (i < 12 ? MONTHS[i] : 'Обложка') : String(i + 1);
+    const page = (pg, i) => `<button class="pg ${pg.length ? '' : 'empty'}${card ? ' solo' : ''}" data-pg="${i}" aria-label="${card ? 'Открытка' : cal ? label(i) : 'Страница ' + (i + 1)}, фото: ${pg.length}. Открыть конструктор">
+      ${pv(d, i)}<small>${label(i)}</small></button>`;
+    const first = d.photos[0] && S.thumbs[d.photos[0].id];
+    const cover = prod.kind === 'book' ? `<button class="pg cover" id="cov" aria-label="Обложка. Изменить название"><span class="pv n1 t1a"><i class="sl">${first ? `<img src="${first}" alt="">` : ''}</i><span class="cov-t">${esc(d.title || 'Название')}</span></span><small>Обложка</small></button>` : '';
     return {
-      html: `<div class="ai-note"><span class="ai-ava">${ICON.spark}</span><div class="ai-body">Разложила <b>${N}</b> ${plural(N, 'фото', 'фото', 'фото')} по ${cal ? 'месяцам' : P + ' ' + plural(P, 'странице', 'страницам', 'страницам')} в порядке съёмки. ${empty ? `Пустых ${cal ? 'месяцев' : 'страниц'}: <b>${empty}</b>.` : 'Пустых мест нет.'}</div></div>
-        <div class="ctor-how" aria-label="Что можно сделать со страницей"><b>Нажмите на страницу — откроется конструктор</b>
-          <span>${ICON.grid} Шаблон</span><span>${ICON.photos} Фото</span><span>${ICON.text} Подпись</span><span>${ICON.drop} Фон</span></div>
-        ${!cal && N < P ? `<div class="warnbox"><span>Фото меньше, чем страниц. Можно уменьшить книгу${P > prod.options[0].min ? '' : ' (меньше 20 страниц нельзя)'}.</span>${P > prod.options[0].min ? `<button class="btn btn-sm" id="fit">${Math.max(prod.options[0].min, P - 2)} стр.</button>` : ''}</div>` : ''}
-        <div class="pages">${lay.map(page).join('')}</div>
-        <section class="card aiedit" aria-label="Правка альбома с помощью ИИ"><div class="ai-head"><span class="ai-ava">${ICON.spark}</span><b>Править с помощью ИИ</b></div>
+      html: `<button class="card-flat bk-sum" id="bkset" aria-label="Параметры. Изменить"><span><b>${esc(prod.name.replace(' на 2027', ''))} ${esc(v.name)}</b><small>${esc(optsLine(prod, d))}</small></span><em>${money(PR.goods)}</em><i>Изменить</i></button>
+        <div class="ai-note">${PAK}<div class="ai-body">${card ? `Собрал открытку из <b>${Math.min(N, 4)}</b> ${plural(Math.min(N, 4), 'фото', 'фото', 'фото')}. Нажмите на неё — выберите шаблон, фон и подпись.` : `Разложил <b>${N}</b> ${plural(N, 'фото', 'фото', 'фото')} по ${cal ? 'месяцам' : P + ' ' + plural(P, 'странице', 'страницам', 'страницам')} в порядке съёмки. ${empty ? `Пустых ${cal ? 'месяцев' : 'страниц'}: <b>${empty}</b>.` : 'Пустых мест нет.'} Нажмите на страницу — откроется её конструктор.`}</div></div>
+        ${card ? '' : `<p class="sec-t">Стиль ${cal ? 'календаря' : 'книги'}</p><div class="mk-styles sm" role="list">${STYLES.map(([id, name, , o]) => `<button class="mk-st" role="listitem" data-st="${id}" aria-pressed="${d.style === id}"><span class="mk-st-pv">${stylePv(o, 1)}${stylePv(o, 3, true)}</span><b>${name}</b></button>`).join('')}</div>`}
+        ${!cal && !card && N < P ? `<div class="warnbox"><span>Фото меньше, чем страниц. Можно уменьшить книгу${P > prod.options[0].min ? '' : ' (меньше 20 страниц нельзя)'}.</span>${P > prod.options[0].min ? `<button class="btn btn-sm" id="fit">${Math.max(prod.options[0].min, P - 2)} стр.</button>` : ''}</div>` : ''}
+        <p class="sec-t">${card ? 'Лицевая сторона' : 'Страницы'}</p>
+        <div class="pages${card ? ' one' : ''}">${cover}${lay.map(page).join('')}</div>
+        ${card ? '' : `<section class="card aiedit" aria-label="Правка альбома с помощью ИИ"><div class="ai-head">${PAK}<b>Попросить Пака</b></div>
           <div class="chips-row" role="list">${AI_HINTS.map((t, i) => `<button class="pchip" role="listitem" data-hint="${i}">${esc(t)}</button>`).join('')}</div>
           <div class="field"><label for="aiq">Напишите, что изменить</label><textarea class="textarea" id="aiq" rows="2" maxlength="300" placeholder="Например: убери размытые и поставь страницу 5 в начало"></textarea></div>
           ${S.aiMsg ? `<p class="ai-say" role="status">${esc(S.aiMsg)}</p>` : ''}
-          <div class="row2"><button class="btn btn-accent" id="aigo">Применить</button>${d.layoutPrev ? '<button class="btn" id="aiundo">Отменить</button>' : ''}</div></section>
+          <div class="row2"><button class="btn btn-accent" id="aigo">Применить</button>${d.layoutPrev ? '<button class="btn" id="aiundo">Отменить</button>' : ''}</div></section>`}
         <div class="row2"><button class="btn" id="re">Собрать заново</button><button class="btn" id="shtpl">Поделиться шаблоном</button></div>`,
       bar: `<button class="btn btn-primary btn-xl" id="next">Дальше · проверка</button><div class="sub">Макет можно не править: мы уже всё разложили</div>`,
       bind(scr) {
         scr.querySelectorAll('[data-pg]').forEach((b) => { b.onclick = () => { S.pgSheet = +b.dataset.pg; S.ed = { tab: 'tpl', sel: null }; renderPgSheet(); }; });
         scr.querySelectorAll('[data-hint]').forEach((b) => { b.onclick = () => { $('#aiq').value = AI_HINTS[+b.dataset.hint]; $('#aiq').focus(); }; });
-        $('#aigo').onclick = aiEdit;
-        const ud = $('#aiundo'); if (ud) ud.onclick = () => { d.layout = d.layoutPrev; d.layoutPrev = null; S.aiMsg = 'Вернула прежнюю раскладку'; saveDraft(); rerender(); };
-        $('#re').onclick = () => { d.layoutPrev = null; d.pm = []; S.aiMsg = ''; ensureLayout(true); toast('Собрала заново'); rerender(); };
+        const ag = $('#aigo'); if (ag) ag.onclick = aiEdit;
+        $('#bkset').onclick = openBookSettings; const cv = $('#cov'); if (cv) cv.onclick = () => { openBookSettings(); const t = $('#bkt'); if (t) { t.scrollIntoView({ block: 'center' }); t.focus(); } };
+        scr.querySelectorAll('[data-st]').forEach((b) => { b.onclick = () => { applyStyle(d, b.dataset.st); saveDraft(); haptic(true); toast('Стиль «' + STYLES.find((x) => x[0] === b.dataset.st)[1] + '» применён ко всем страницам'); rerender(); }; });
+        const ud = $('#aiundo'); if (ud) ud.onclick = () => { d.layout = d.layoutPrev; d.layoutPrev = null; S.aiMsg = 'Вернул прежнюю раскладку'; saveDraft(); rerender(); };
+        $('#re').onclick = () => { d.layoutPrev = null; d.pm = []; S.aiMsg = ''; ensureLayout(true); toast('Собрал заново'); rerender(); };
         $('#shtpl').onclick = () => shareTemplate();
         const f = $('#fit'); if (f) f.onclick = () => { d.options.pages = Math.max(prod.options[0].min, P - 2); d.layoutKey = ''; saveDraft(); refreshPrice(); rerender(); };
         $('#next').onclick = async () => { await runCheck(); go('check'); };
@@ -651,7 +736,7 @@
     const lay = d.layout, pg = lay[i], m = pmOf(d, i), cal = prodOf(d.product).kind === 'calendar', n = Math.min(pg.length, 4);
     if (E.sel && !pg.includes(E.sel)) E.sel = null;
     const where = {}; lay.forEach((x, k) => x.forEach((id) => { where[id] = k; }));
-    const name = cal ? (i < 12 ? MONTHS[i] : 'Обложка') : 'Страница ' + (i + 1) + ' из ' + lay.length, curT = tplOf(m, n), si = pg.indexOf(E.sel);
+    const name = prodOf(d.product).kind === 'card' ? 'Открытка' : cal ? (i < 12 ? MONTHS[i] : 'Обложка') : 'Страница ' + (i + 1) + ' из ' + lay.length, curT = tplOf(m, n), si = pg.indexOf(E.sel);
     const zs = E.sel ? ((m.z || {})[E.sel] || {}).s || 1 : 1;
     const tools = E.sel ? `<div class="ed-sel"><button class="btn btn-sm" data-a="rm">Убрать</button><button class="btn btn-sm" data-a="sl" ${si <= 0 ? 'disabled' : ''} aria-label="Поставить левее">← Левее</button><button class="btn btn-sm" data-a="sr" ${si >= pg.length - 1 ? 'disabled' : ''} aria-label="Поставить правее">Правее →</button></div>
         <label class="ed-zoom">Крупнее<input type="range" id="edz" min="1" max="2.5" step="0.05" value="${zs}" aria-label="Увеличить фото"></label>` : '';
@@ -862,7 +947,7 @@
     const nIss = Array.isArray(I) && I.length ? S.issueCount : 0;
     const summary = !Array.isArray(I) || !I.length ? '' : nIss ? `<p class="muted" style="font-size:15px">Стоит посмотреть: ${nIss} ${plural(nIss, 'замечание', 'замечания', 'замечаний')}. Печать возможна и так.</p>` : '<p class="muted" style="font-size:15px">Замечаний нет — только подсказка.</p>';
     return {
-      html: `<p class="sec-t">Перед заказом</p>${summary}${fixable ? `<button class="btn btn-accent btn-lg" id="fixall">${ICON.spark} Исправить автоматически${nbad ? ' · убрать ' + nbad + ' слабых' : ''}${hasCrop ? ' · белые поля' : ''}</button>` : ''}${body}`,
+      html: `<p class="sec-t">Перед заказом</p>${summary}${fixable ? `<button class="btn btn-accent btn-lg" id="fixall">${ICON.spark} Исправить автоматически${nbad ? ' · убрать ' + nbad + ' ' + plural(nbad, 'слабый', 'слабых', 'слабых') : ''}${hasCrop ? ' · белые поля' : ''}</button>` : ''}${body}`,
       bar: `<button class="btn btn-primary btn-xl" id="next" ${errs ? 'disabled' : ''}>${warns || I === 'offline' ? 'Всё равно продолжить' : 'Дальше · корзина'}</button>${errs ? '<div class="sub">Исправьте ошибки, чтобы продолжить</div>' : warns ? '<div class="sub">Или вернитесь и замените фото</div>' : ''}`,
       bind(scr) {
         scr.querySelectorAll('[data-rep]').forEach((b) => { b.onclick = () => { S.replace = b.dataset.rep; $('#file').click(); }; });
@@ -1075,6 +1160,53 @@
     };
   };
 
+  /* ---------- котик Пак: помощник, который разворачивается из шапки ---------- */
+  const PAK_TIP = {
+    home: 'Привет! Я Пак. Начните с кнопки «Выбрать фото» или загляните в «Конструктор» — соберём книгу, календарь или открытку.',
+    make: 'Здесь начинается любая сборка. Выберите продукт или стиль — раскладку сделаю сам.',
+    product: 'Выберите формат, бумагу и толщину страниц. Цена внизу меняется сразу.',
+    photos: 'Добавьте снимки. Размытые, тёмные и повторы я отмечу сам — уберёте одним касанием.',
+    layout: 'Нажмите на страницу — откроется её конструктор: шаблон, фото, подпись, фон. Стиль меняет всю книгу сразу.',
+    check: 'Я проверил макет. Слабые кадры могу убрать сам — кнопка «Исправить автоматически».',
+    cart: 'Осталось выбрать получение и оставить имя с телефоном. Платить нужно при получении.',
+    social: 'Смотрите, что собирают другие. Понравилось — «Собрать такой же»: оформление возьму, фото будут ваши.',
+    orders: 'Здесь видно, на каком этапе каждый заказ. Вопрос по заказу можно задать в его карточке.',
+    order: 'Статус обновляется сам, когда участок отмечает этап.', done: 'Заказ принят! Статус теперь виден на главной.',
+    profile: 'Здесь вход, уведомления и ваши данные.', feed: 'Это фото, которые уже в приложении. Нажмите «Напечатать» — закажем без макета.',
+  };
+  const PAK_ASK = {
+    home: ['Что можно заказать?', 'Сколько стоит фотокнига?', 'Где мой заказ?'], make: ['Что быстрее всего сделать?', 'Сколько стоит открытка?', 'Чем книга отличается от календаря?'],
+    product: ['Какую бумагу выбрать?', 'Что такое разворот на 180°?', 'Сколько делают книгу?'], photos: ['Почему фото отмечено размытым?', 'Сколько фото нужно?'],
+    layout: ['Как поменять шаблон?', 'Как добавить подпись?', 'Как подвинуть фото в рамке?'], check: ['Что значит «напечатается мягче»?', 'Можно заказать как есть?'],
+    cart: ['Как получить заказ?', 'Когда платить?'], social: ['Как взять чужой шаблон?', 'Как поделиться своим?'], orders: ['Где мой заказ?', 'Что если брак?'],
+  };
+  S.pak = { msgs: [] };
+  function openPak(quiet) {
+    const old = $('#sheet'); if (old) old.remove();
+    const view = S.view, tip = PAK_TIP[view] || PAK_TIP.home, asks = PAK_ASK[view] || PAK_ASK.home, M = S.pak.msgs;
+    const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet' + (quiet ? ' quiet' : '');
+    el.innerHTML = `<div class="sheet-bg" data-x></div><div class="sheet-body pak-sheet" role="dialog" aria-label="Помощник Пак">
+      <div class="pak-top"><img src="/t2/brand/cat-point.png" alt=""><div class="pak-bub"><b>Пак</b><p>${esc(tip)}</p></div></div>
+      ${M.length ? `<div class="pak-log" id="paklog">${M.map((m) => `<div class="pak-m ${m.me ? 'me' : ''}">${esc(m.text)}</div>`).join('')}${S.pak.busy ? '<div class="pak-m dots">Думаю…</div>' : ''}</div>` : ''}
+      <div class="chips-row wrap" role="list">${asks.map((q, i) => `<button class="pchip" role="listitem" data-pq="${i}">${esc(q)}</button>`).join('')}</div>
+      <form class="pak-form" id="pakf"><input class="input" id="pakq" maxlength="300" placeholder="Спросите Пака" autocomplete="off" aria-label="Вопрос помощнику"><button class="btn btn-accent" id="pakgo" ${S.pak.busy ? 'disabled' : ''}>Спросить</button></form>
+      <button class="btn" data-x>Свернуть</button></div>`;
+    $('.app').appendChild(el);
+    const log = $('#paklog'); if (log) log.scrollTop = log.scrollHeight;
+    el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = () => el.remove(); });
+    const ask = async (q) => {
+      q = String(q || '').trim(); if (q.length < 2 || S.pak.busy) return;
+      M.push({ me: true, text: q }); S.pak.busy = true; openPak(true);
+      let text;
+      try { const r = await call('POST', '/ai/cat', { question: q, view }); text = r.text; }
+      catch (e) { text = e.offline ? 'Нет сети — отвечу, когда она появится. А пока: ' + tip : 'Не получилось ответить. ' + tip; }
+      M.push({ text }); S.pak.busy = false; if (M.length > 30) M.splice(0, M.length - 30);
+      if ($('#sheet') && $('#sheet').querySelector('.pak-sheet')) openPak(true);
+    };
+    el.querySelectorAll('[data-pq]').forEach((b) => { b.onclick = () => ask(asks[+b.dataset.pq]); });
+    $('#pakf').onsubmit = (e) => { e.preventDefault(); ask($('#pakq').value); };
+  }
+
   /* ---------- сообщество: шаблоны от компании и отзывы покупателей ---------- */
   S.soc = { data: LS.get('pp_social', null), tab: 'tpl', occ: 'Все', compose: null, rate: 0, err: '', loading: false, openReply: null };
   async function loadSocial() {
@@ -1098,23 +1230,38 @@
   const pinBy = (t) => t.company === false ? esc(t.author || 'Покупатель') : 'picPac';
   function pinCard(t, k) {
     return `<article class="pin"><button class="pin-cover tone${(t.tone || 0) % 6}" data-pin="${t.id}" style="aspect-ratio:${PIN_R[k % 4]}" aria-label="Открыть идею: ${esc(t.title)}">${pinCover(t)}<span class="chip">${esc(t.occasion)}</span></button>
-      <div class="pin-b"><b>${esc(t.title)}</b><div class="pin-m"><span class="by">${pinBy(t)}${t.mine ? ' · вы' : ''}</span><button class="like${t.liked ? ' on' : ''}" data-tl="${t.id}" aria-pressed="${!!t.liked}" aria-label="Нравится">${heart(t.liked)}<span class="num">${t.likes}</span></button></div></div></article>`;
+      <div class="pin-b"><b>${esc(t.title)}</b><div class="pin-m"><span class="by">${pinBy(t)}${t.mine ? ' · вы' : ''}</span><span class="pin-acts"><span class="cm" aria-label="Комментариев: ${(t.comments || []).length}">${ICON.chat}<span class="num">${(t.comments || []).length}</span></span><button class="like${t.liked ? ' on' : ''}" data-tl="${t.id}" aria-pressed="${!!t.liked}" aria-label="Нравится">${heart(t.liked)}<span class="num">${t.likes}</span></button></span></div></div></article>`;
   }
-  function openPin(t) {
-    const old = $('#sheet'); if (old) old.remove();
-    const prod = prodOf(t.product) || {}, v = (prod.variants || []).find((x) => x.id === t.variant), D = S.soc.data;
+  function openPin(t, quiet) {
+    const old = $('#sheet'), top = old && quiet && old.querySelector('.sheet-body') ? old.querySelector('.sheet-body').scrollTop : 0; if (old) old.remove();
+    const prod = prodOf(t.product) || {}, v = (prod.variants || []).find((x) => x.id === t.variant), D = S.soc.data, C = t.comments || (t.comments = []);
     const meta = [prod.name, v && v.name, t.options && t.options.pages ? t.options.pages + ' стр.' : '', t.per_page > 1 ? 'до ' + t.per_page + ' фото на странице' : ''].filter(Boolean).join(' · ');
-    const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet';
+    const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet' + (quiet ? ' quiet' : '');
     el.innerHTML = `<div class="sheet-bg" data-x></div><div class="sheet-body pin-sheet" role="dialog" aria-label="${esc(t.title)}">
       <div class="pin-big tone${(t.tone || 0) % 6}">${pinCover(t)}</div>
-      <h3>${esc(t.title)}</h3><p>${esc(t.desc || '')}</p><small class="muted">${esc(meta)} · ${pinBy(t)}${t.uses ? ' · собрали ' + t.uses + ' ' + plural(t.uses, 'раз', 'раза', 'раз') : ''}</small>
+      <div class="pin-head"><h3>${esc(t.title)}</h3><button class="like${t.liked ? ' on' : ''}" id="pinlike" aria-pressed="${!!t.liked}" aria-label="Нравится">${heart(t.liked)}<span class="num">${t.likes}</span></button></div>
+      <p>${esc(t.desc || '')}</p><small class="muted">${esc(meta)} · ${pinBy(t)}${t.uses ? ' · собрали ' + t.uses + ' ' + plural(t.uses, 'раз', 'раза', 'раз') : ''}</small>
       ${(t.skel || []).length ? `<p class="sec-t">Страницы шаблона</p><div class="pin-pages">${t.skel.slice(0, 8).map(skelPv).join('')}</div>` : ''}
-      <p class="ed-tip">Оформление возьмём из шаблона, а фото будут только ваши.</p>
       <button class="btn btn-accent btn-lg" data-use>Собрать такой же из своих фото</button>
+      <p class="sec-t">Комментарии · ${C.length}</p>
+      <form class="pak-form" id="cmf"><input class="input" id="cmq" maxlength="300" placeholder="Напишите, как получилось у вас" autocomplete="off" aria-label="Комментарий"><button class="btn btn-accent" id="cmgo">Отправить</button></form>
+      <p class="err" id="cme" role="alert" hidden></p>
+      <div class="cm-list">${C.map((c) => `<div class="cm-i"><span class="avatar sm" aria-hidden="true">${esc((c.name || '?')[0])}</span><div><b>${esc(c.name)}</b>${c.demo ? '<span class="chip">пример</span>' : c.mine ? `<button class="linkbtn" data-cd="${c.id}">убрать</button>` : ''}<p>${esc(c.text)}</p></div></div>`).join('') || '<p class="muted">Пока никто не написал — будьте первым.</p>'}</div>
       <div class="row2"><button class="btn" data-x>Закрыть</button>${(D && D.can_publish && !t.seed) || t.mine ? '<button class="btn" data-del>Убрать из ленты</button>' : ''}</div></div>`;
-    $('.app').appendChild(el);
-    el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = () => el.remove(); });
+    $('.app').appendChild(el); el.querySelector('.sheet-body').scrollTop = top;
+    const store = () => { LS.set('pp_social', D); };
+    el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = () => { el.remove(); if (S.view === 'social') rerender(); }; });
     el.querySelector('[data-use]').onclick = () => { el.remove(); useTemplate(t); };
+    $('#pinlike').onclick = async () => { if (!S.session) return toast('Войдите, чтобы отмечать'); const r = await socCall('/social/templates/' + t.id + '/like').catch(() => null); if (r) { t.likes = r.likes; t.liked = r.liked; store(); haptic(true); openPin(t, true); } };
+    $('#cmf').onsubmit = async (e) => {
+      e.preventDefault(); const text = $('#cmq').value.trim(), er = $('#cme');
+      if (!S.session) return toast('Войдите, чтобы комментировать');
+      if (text.length < 2) { er.hidden = false; er.textContent = 'Напишите пару слов'; return; }
+      $('#cmgo').disabled = true;
+      try { const r = await call('POST', '/social/templates/' + t.id + '/comment', { text }); C.unshift(r); store(); haptic(true); openPin(t, true); }
+      catch (x) { er.hidden = false; er.textContent = x.offline ? 'Нет сети — повторите позже' : x.message; $('#cmgo').disabled = false; }
+    };
+    el.querySelectorAll('[data-cd]').forEach((b) => { b.onclick = async () => { const r = await socCall('/social/templates/' + t.id + '/uncomment', { id: b.dataset.cd }).catch(() => null); if (r) { C.splice(C.findIndex((c) => c.id === b.dataset.cd), 1); store(); openPin(t, true); } }; });
     const del = el.querySelector('[data-del]');
     if (del) del.onclick = async () => { if (!confirm('Убрать шаблон из ленты?')) return; await socCall('/social/templates/' + t.id + '/delete').catch(() => null); el.remove(); loadSocial(); };
   }
@@ -1188,7 +1335,7 @@
   }
   VIEWS.social = () => {
     const so = S.soc, D = so.data;
-    if (!D) return { html: `<div class="loading"><div class="ai-ava" style="margin:0 auto">${ICON.spark}</div><p>${so.off ? 'Нет сети — лента появится, когда она вернётся' : 'Загружаю ленту…'}</p></div>`, bind() { } };
+    if (!D) return { html: `<div class="loading">${PAK}<p>${so.off ? 'Нет сети — лента появится, когда она вернётся' : 'Загружаю ленту…'}</p></div>`, bind() { } };
     const pub = D.can_publish, sm = D.summary;
     const seg = `<div class="seg" role="tablist"><button role="tab" data-sg="tpl" aria-pressed="${so.tab === 'tpl'}">Идеи</button><button role="tab" data-sg="rev" aria-pressed="${so.tab === 'rev'}">Отзывы · ${sm.count}</button></div>`;
     const off = so.off ? '<div class="warnbox"><span>Нет сети — показываю сохранённую ленту</span></div>' : '';
@@ -1206,7 +1353,7 @@
     }
     return {
       html: `<section class="hello"><h1>Идеи</h1><p>Смотрите, что собирают другие, и делайте так же — со своими фото. Понравилось своё оформление — поделитесь им.</p></section>${seg}${off}${body}
-        <p class="src">Отзывы-примеры помечены. Ссылки и контакты в отзывах не публикуются.</p>`,
+        <p class="src">Комментарии и отзывы-примеры помечены, счётчики у идей picPac — демонстрационные. Ссылки и контакты не публикуются.</p>`,
       bind(scr) { bindSocial(scr); },
     };
   };

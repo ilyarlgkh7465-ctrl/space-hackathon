@@ -186,6 +186,23 @@ class Api(unittest.TestCase):
         self.assertEqual(self.call("POST", "/api/app/social/templates", dict(tpl, desc="пишите на www.site.by"), self.client)[0], 400)
         self.assertEqual(self.call("POST", "/api/app/social/templates", dict(tpl, cover="data:text/html;base64,AAAA"), self.client)[0], 400)
         self.assertEqual(self.call("POST", "/api/app/social/templates/%s/delete" % mine["id"], token=self.client)[0], 200)
+        # комментарии к идее: свой можно убрать, ссылки не проходят; у идей picPac — стартовые счётчики и комментарии-примеры
+        seed = next(x for x in feed["templates"] if x["id"] == "t-seed-travel")
+        self.assertTrue(seed["likes"] >= 300 and all(c["demo"] for c in seed["comments"]) and len(seed["comments"]) >= 2)
+        st, cm = self.call("POST", "/api/app/social/templates/t-seed-travel/comment", {"text": "Собрали так отпуск, спасибо за идею"}, self.client)
+        self.assertEqual((st, cm["mine"], cm["demo"]), (201, True, False))
+        self.assertEqual(self.call("POST", "/api/app/social/templates/t-seed-travel/comment", {"text": "заходите на www.site.by"}, self.client)[0], 400)
+        again = next(x for x in self.call("GET", "/api/app/social/feed", token=self.client)[1]["templates"] if x["id"] == "t-seed-travel")
+        self.assertEqual(again["comments"][0]["id"], cm["id"])
+        self.assertEqual(self.call("POST", "/api/app/social/templates/t-seed-travel/uncomment", {"id": cm["id"]}, t)[0], 200)
+        # параметры книги с доплатой и открытка в каталоге; кот-помощник отвечает и без модели
+        cat = self.call("GET", "/api/app/catalog")[1]
+        self.assertTrue(any(p["id"] == "card" for p in cat["products"]))
+        pr = self.call("POST", "/api/app/price", {"items": [{"product": "book", "variant": "classic", "qty": 1, "options": {"pages": 20, "paper": "silk", "thick": "flat"}}], "delivery": "pickup"})[1]
+        self.assertEqual(pr["goods"], "97.90")
+        st, ans = self.call("POST", "/api/app/ai/cat", {"question": "сколько стоит открытка", "view": "home"}, self.client)
+        self.assertEqual(st, 200)
+        self.assertIn("3.90", ans["text"].replace(",", "."))
         self.assertEqual(self.call("POST", "/api/app/social/templates", dict(tpl, variant="нет"), t)[0], 400)
         self.assertEqual(self.call("POST", "/api/app/social/templates", dict(tpl, options={"pages": 23}), t)[0], 400)
         a = self.call("POST", "/api/app/social/templates", tpl, t, {"Idempotency-Key": "t-1"})[1]
