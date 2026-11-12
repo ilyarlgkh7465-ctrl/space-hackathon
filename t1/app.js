@@ -195,6 +195,7 @@
       setMenu(false);
       if (b.dataset.view) go(b.dataset.view);
       if (b.dataset.jump) go(S.view, b.dataset.jump);
+      if (b.hasAttribute('data-mary')) { S.toMary = true; go('support'); }
       if (b.dataset.rail === 'report') openReport();
       if (b.dataset.rail === 'logout') logout();
     };
@@ -230,6 +231,8 @@
     if (open) requestAnimationFrame(() => { if (rail.classList.contains('is-open')) $('#navClose')?.focus(); });
     else if (wasOpen) toggle.focus();
   }
+  /* Mary — ИИ-агент первой линии поддержки: стоит в списке отделов сразу под «Поддержкой клиентов» и ведёт к блоку связки */
+  const MARY_NAV = '<button class="rail-btn rail-mary" data-mary aria-label="Mary — ИИ-агент поддержки. Открыть связку с пультом"><img src="/shared/brand/mary-mark.svg" alt=""><span><b>mary</b></span><i>ИИ-агент</i></button>';
   function renderNav() {
     const nav = $('#nav');
     if (!nav) return;
@@ -238,7 +241,7 @@
       const links = entries.filter((v) => v.group === id).map((v) => {
         const count = v.id === 'attention' ? S.pulse?.alerts.length : v.id === 'decisions' ? S.openCount : 0;
         const current = v.id === S.view && !S.pain ? ' aria-current="page"' : '';
-        return `<button class="rail-btn" data-view="${v.id}"${current}>${v.icon}<span>${esc(v.name)}</span>${count ? `<b class="rail-count">${count}</b>` : ''}</button>${v.id === S.view ? sub : ''}`;
+        return `<button class="rail-btn" data-view="${v.id}"${current}>${v.icon}<span>${esc(v.name)}</span>${count ? `<b class="rail-count">${count}</b>` : ''}</button>${v.id === 'support' ? MARY_NAV : ''}${v.id === S.view ? sub : ''}`;
       }).join('') + extra;
       return links ? `<div class="rail-group">${label ? `<p>${label}</p>` : ''}${links}</div>` : '';
     };
@@ -853,6 +856,7 @@
       }
       el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
       fillHyps();
+      if (S.toMary) { S.toMary = false; const m = $('.mary'); if (m) { m.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); m.classList.add('is-hit'); setTimeout(() => m.classList.remove('is-hit'), 1600); } }
       if (view === 'pulse') (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(() => { if (my === S.seq) fitMap(); });
     } catch (e) { if (my === S.seq) el.innerHTML = errorBox(e, 'rerender'); }
   }

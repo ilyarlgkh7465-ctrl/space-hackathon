@@ -584,3 +584,9 @@ html { scrollbar-color: rgba(20, 20, 20, .28) transparent; scrollbar-width: thin
 .mary-nums b { font-size: 22px; font-weight: 700; letter-spacing: -.02em; color: var(--ink); white-space: nowrap; }
 .mary footer { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; } .mary footer .who { flex: 1 1 320px; font-size: 12px; line-height: 1.4; color: var(--ink4); }
 @media (max-width: 900px) { .mary-grid { grid-template-columns: 1fr; } }
+/* Mary в списке отделов — сразу под «Поддержкой клиентов» */
+.rail-mary { min-height: 32px; margin: 1px 0 3px 18px; width: calc(100% - 18px); padding: 5px 9px; font-size: 12.5px; color: var(--ink2); }
+.rail-mary img { width: 16px; height: 16px; flex: none; display: block; }
+.rail-mary span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .rail-mary b { font-weight: 700; letter-spacing: -.02em; color: var(--ink); }
+.rail-mary i { margin-left: auto; flex: none; padding: 1px 7px; border-radius: 999px; background: var(--brand); color: var(--on-brand); font-style: normal; font-size: 10.5px; font-weight: 600; }
+.mary { scroll-margin-top: 90px; transition: box-shadow .4s; } .mary.is-hit { box-shadow: 0 0 0 3px var(--brand); }
