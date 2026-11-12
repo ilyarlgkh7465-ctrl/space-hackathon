@@ -23,6 +23,7 @@
 Все формулы показателей описаны в KPIS ниже и отдаются вместе со значением.
 """
 import datetime as dt
+import re
 import statistics
 import urllib.parse
 import uuid
@@ -615,10 +616,58 @@ FIRST_DIM = {"attendance": "att_section", "turnover": "hr_dept", "overdue_recv":
              "staffing": "section", "delivery": "client", "load": "day"}
 
 
+def _advise(P, k, cur, cause, days, product, a, b):
+    """Что предложить и чем грозит бездействие. Решение — подсказка по правилам, цифры следствия считаются из тех же данных.
+    Решает человек: текст попадает в карточку решения как черновик."""
+    kid, v, plan = k["id"], k["value"], k["plan"]
+    m = re.search(r"«([^»]+)»", cause or "")
+    what = m.group(1) if m else ""
+    week = lambda n: max(1, int(round(n / max(1, days) * 7)))
+    if kid in ("on_time", "lead_time", "load"):
+        bn = _bottleneck(P, product, {"all": True})
+        act = bn.get("advice") or "Усилить участок, где копится очередь: подработка или перевод людей с соседних участков."
+        late = (cur.get("produced") or 0) * (100 - (cur.get("on_time") or 100)) / 100
+        return act, "Если ничего не менять, около %d заказов в неделю уходят позже срока — и клиенты пишут в поддержку «Где мой заказ»." % week(late)
+    if kid == "defect":
+        cost = sum(o["cost"] for o in P["orders"] if a <= o["d_accepted"] < b and o["defect"] and (not product or o["product"] == product))
+        return ("Устранить главную причину%s: проверить оборудование и материалы на этом этапе, первую партию смены сдавать через контроль." % (" — «%s»" % what if what else ""),
+                "Перепечатки за %d дн. стоили %s BYN; при том же уровне за месяц — около %s BYN." % (days, _fmt(cost), _fmt(cost / max(1, days) * 30)))
+    if kid == "sla":
+        miss = (cur.get("tickets") or 0) * (100 - (v or 100)) / 100
+        return ("На тему «%s» отвечать автоматически — статусом заказа из производства; операторам оставить сложные обращения." % (what or "Где мой заказ"),
+                "Без ответа в срок остаются около %d обращений в неделю." % week(miss))
+    if kid == "overdue_recv":
+        return ("Согласовать график оплаты с тремя крупнейшими должниками; новые заказы им — по предоплате, пока долг не закрыт.",
+                "В обороте не хватает %s BYN сверх допустимой просрочки." % _fmt(max(0, v - plan)))
+    if kid == "app_conv":
+        return ("Упростить шаг «%s» в приложении: готовая раскладка и понятный конструктор вместо ручной сборки." % (what or "Макет"),
+                "До заказа доходит %s %% вместо %s %%: приложение недобирает примерно %s %% заказов." % (_fmt(v), _fmt(plan), _fmt(100 * (plan - v) / plan if plan else 0)))
+    if kid == "attendance":
+        return ("Разобрать пропуски%s: причины, подмены, график смен." % (" на участке «%s»" % what if what else ""),
+                "Меньше людей на смене — длиннее очередь на участке и ниже доля заказов в срок.")
+    if kid == "docs_on_time":
+        return ("Поставить сроки по документам%s на контроль: напоминание исполнителю за два дня до срока." % (" отдела «%s»" % what if what else ""),
+                "Позже срока исполнено около %d из %d документов за период — это задержанные согласования и оплаты." % (
+                    round((cur.get("docs_due") or 0) * (100 - (v or 100)) / 100), cur.get("docs_due") or 0))
+    if kid == "repeat":
+        miss = (cur.get("n") or 0) * max(0, plan - v) / 100
+        return ("Напомнить о себе тем, кто заказывал%s: предложение повторного заказа в приложении." % (" «%s»" % what if what else ""),
+                "Недобор — около %d повторных заказов в неделю." % week(miss))
+    if kid == "delivery":
+        slow = (cur.get("shipped") or 0) * (100 - (v or 100)) / 100
+        return ("Перераспределить отправления между перевозчиками и заранее сообщать клиенту новый срок.",
+                "Около %d доставок в неделю идут дольше двух суток." % week(slow))
+    if kid == "margin":
+        return ("Снизить перепечатки: устранить главную причину брака и перерасход материалов.",
+                "Маржа ниже плана на %s п. п.: при нынешнем обороте это около %s BYN за %d дн." % (_fmt(plan - v), _fmt((cur.get("revenue") or 0) * (plan - v) / 100), days))
+    return ("Назначить ответственного и срок; через неделю сверить показатель.", "Отклонение сохранится, пока причина не устранена.")
+
+
 def _alerts(P, kpis, a, b, product):
     out = []
     days = max(1, int(round(_h(a, b) / 24)))
     fake = {"role": "director"}
+    cur = measure(P, a, b, product)
     for k in kpis:
         if k.get("locked") or k["status"] not in ("bad", "warn"):
             continue
@@ -633,7 +682,12 @@ def _alerts(P, kpis, a, b, product):
         if k["id"] == "margin":
             cause = "Маржу съедают перепечатки бракованных заказов и перерасход материалов."
         gap = k["value"] - k["plan"]
-        out.append({"id": "a-" + k["id"], "kpi": k["id"], "dept": k["dept"], "dept_name": k["dept_name"], "level": k["status"],
+        try:
+            action, effect = _advise(P, k, cur, cause, days, product, a, b)
+        except Exception:                                  # подсказка не должна ломать пульт
+            action, effect = "", ""
+        src = next((x.get("source") for x in KPIS if x["id"] == k["id"]), "") or ""
+        out.append({"action": action, "effect": effect, "source": src, "id": "a-" + k["id"], "kpi": k["id"], "dept": k["dept"], "dept_name": k["dept_name"], "level": k["status"],
                     "title": "%s: %s %s при плане %s" % (k["name"], _fmt(k["value"]), k["unit"], _fmt(k["plan"])),
                     "context": "Отклонение %s%s %s за %d дн." % ("+" if gap > 0 else "−", _fmt(abs(gap)), k["unit"], days),
                     "cause": cause, "by": by, "owner_id": OWNERS[k["dept"]][0], "owner": OWNERS[k["dept"]][1]})

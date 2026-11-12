@@ -285,3 +285,8 @@ html.wdragging, html.wdragging * { cursor: grabbing !important; user-select: non
 .meet-tr li { display: flex; gap: 10px; }
 .meet-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .st-empty .st-models { margin-top: 6px; font-size: 12.5px; line-height: 1.4; color: var(--ink4); max-width: 46ch; text-wrap: pretty; }
+/* отчёт по встрече: варианты решения — предложения помощника */
+.meet-opt .smeta { margin: 0 0 8px; }
+.meet-opt-i { padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--brand) 22%, transparent); margin-bottom: 8px; }
+.meet-opt-i b { display: block; font-size: 13.5px; font-weight: 600; margin-bottom: 4px; }
+.meet-opt-i ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; line-height: 1.4; color: var(--ink2); }

@@ -544,6 +544,8 @@
       ${tasks}
       ${sec('Открытые вопросы', p.questions, (x) => `<li><span>${esc(x.text)}${at(x)}</span></li>`)}
       ${sec('Риски', p.risks, (x) => `<li><span>${esc(x.text)}${at(x)}</span></li>`)}
+      ${(p.options || []).filter((o) => o.variants && o.variants.length).length ? `<section class="meet-sec meet-opt"><h3>Варианты решения</h3><p class="smeta">Предложения помощника по открытым вопросам. На встрече их не принимали — решает руководитель.</p>
+        ${p.options.filter((o) => o.variants && o.variants.length).map((o) => `<div class="meet-opt-i"><b>${esc(o.about)}</b><ol>${o.variants.map((v) => `<li>${esc(v)}</li>`).join('')}</ol></div>`).join('')}</section>` : ''}
       ${sec('Цифры и сроки', p.numbers, (x) => `<li><span>${esc(x.text)}${at(x)}</span></li>`)}
       <details class="meet-tr"><summary>Расшифровка разговора</summary><ol>${r.lines.map((l) => `<li><time>${esc(l.t)}</time><span>${esc(l.text)}</span></li>`).join('')}</ol></details>
       <footer class="meet-foot">${saved || (canSave ? `<button class="btn btn-primary btn-sm" data-sa="msave" data-i="${i}">Сохранить протокол и задачи</button>` : '')}
@@ -555,7 +557,9 @@
     const add = (title, items, f) => { if (items && items.length) { out.push('', title + ':'); items.forEach((x) => out.push('— ' + f(x))); } };
     add('Решения и темы', p.points, (x) => `${x.text} (${x.status})`);
     add('Поручения', p.tasks, (t) => `${t.title} — ${t.owner_name || 'ответственный не назван'}, ${t.due ? 'срок ' + dmy(t.due) : 'срок не назван'}`);
-    add('Открытые вопросы', p.questions, (x) => x.text); add('Риски', p.risks, (x) => x.text); add('Цифры и сроки', p.numbers, (x) => x.text);
+    add('Открытые вопросы', p.questions, (x) => x.text); add('Риски', p.risks, (x) => x.text);
+    (p.options || []).filter((o) => o.variants && o.variants.length).forEach((o, k) => { if (!k) out.push('', 'Варианты решения (предложения помощника):'); out.push('— ' + o.about + ': ' + o.variants.join('; ')); });
+    add('Цифры и сроки', p.numbers, (x) => x.text);
     return out.join('\n');
   }
   async function meetSave(i, b) {

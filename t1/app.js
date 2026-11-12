@@ -540,11 +540,17 @@
       <p class="note" style="margin-top:12px">Время считается от «Принял» до «Сдал». Быстрее — не значит лучше: смотрите его вместе с браком.</p>
       <p class="src">Источник: ${esc(a.source)}. Данные на ${ftime(a.asof)}.</p></section>`;
   }
+  /* Отклонение читается слева направо: показатель → причина → решение → следствие. Решение — подсказка, оформляет его человек. */
   function alertCard(a) {
-    return `<article class="glass-flat alert ${a.level}"><div class="row">${chip(a.level)}<span class="who">${esc(a.dept_name)}</span></div>
-      <h3>${esc(a.title)}</h3><p>${esc(a.cause)}</p><p class="who">Отвечает: ${esc(a.owner)} · ${esc(a.context)}</p>
-      <div class="hyp" data-hyp="${a.kpi}"><span class="faint">Проверяю версии причины…</span></div>
-      <div class="row"><button class="btn btn-sm" data-kpi="${a.kpi}" data-by="${a.by}">К причине</button>${canDecide() ? `<button class="btn btn-sm btn-primary" data-decide="${a.kpi}">Оформить решение</button>` : ''}</div></article>`;
+    const step = (n, name, body) => `<div class="pcrs-i"><span class="pcrs-n"><i>${n}</i>${name}</span>${body}</div>`;
+    return `<article class="glass-flat alert ${a.level}"><div class="row">${chip(a.level)}<span class="who">${esc(a.dept_name)}</span><span class="who">· отвечает ${esc(a.owner)}</span></div>
+      <div class="pcrs">
+        ${step(1, 'Показатель', `<h3>${esc(a.title)}</h3><p class="who">${esc(a.context)}</p>`)}
+        ${step(2, 'Причина', `<p>${esc(a.cause)}</p><div class="hyp" data-hyp="${a.kpi}"><span class="faint">Проверяю версии причины…</span></div>`)}
+        ${step(3, 'Решение', `<p>${esc(a.action || 'Назначить ответственного и срок.')}</p><p class="who">Предлагает система, решает человек</p>`)}
+        ${step(4, 'Следствие', `<p>${esc(a.effect || 'Отклонение сохранится, пока причина не устранена.')}</p>`)}
+      </div>
+      <div class="row">${a.source ? `<span class="who pcrs-src">Данные: ${esc(a.source)}</span>` : ''}<button class="btn btn-sm" data-kpi="${a.kpi}" data-by="${a.by}">К причине</button>${canDecide() ? `<button class="btn btn-sm btn-primary" data-decide="${a.kpi}">Оформить решение</button>` : ''}</div></article>`;
   }
 
   /* Версии причины: каждая проверена данными — «подтвердилась» или «не подтвердилась», с цифрой. Решает человек. */
@@ -701,10 +707,12 @@
       return `<header class="page-head pulse-head"><div><h1>Пульс компании</h1>
           <p class="lead">${lead} ${matchMedia('(hover: none)').matches ? 'Нажмите' : 'Наведите'} на сферу — раскроются её показатели и задачи.</p></div><span class="spacer"></span>
           <div class="legend"><span><i style="background:var(--ok)"></i>в норме</span><span><i style="background:var(--warn-fill)"></i>внимание</span><span><i style="background:var(--bad)"></i>критично</span></div></header>
-        <section class="pulse-map" aria-label="Сферы компании">${mapSvg(p)}</section>`;
+        <section class="pulse-map" aria-label="Сферы компании">${mapSvg(p)}</section>
+        ${p.alerts.length ? `<section class="pulse-now" aria-label="Что решить сейчас"><div class="row"><h2>Что решить сейчас</h2><span class="who">показатель → причина → решение → следствие</span><span class="spacer"></span>${p.alerts.length > 3 ? `<button class="btn btn-sm" data-core>Все отклонения · ${p.alerts.length}</button>` : ''}</div>
+          ${p.alerts.slice(0, 3).map(alertCard).join('')}</section>` : ''}`;
     },
     attention(p) {
-      return `<header class="page-head"><div><h1>Отклонения</h1><p class="lead">${p.alerts.length ? `Требуют решения: ${p.alerts.length}. У каждого — причина, ответственный и кнопка «Оформить решение».` : 'Все показатели в пределах плана.'}</p></div></header>
+      return `<header class="page-head"><div><h1>Отклонения</h1><p class="lead">${p.alerts.length ? `Требуют решения: ${p.alerts.length}. У каждого — причина, решение и следствие, ответственный и кнопка «Оформить решение».` : 'Все показатели в пределах плана.'}</p></div></header>
         <section class="alerts">${p.alerts.map(alertCard).join('') || '<p class="glass-flat empty">Отклонений нет.</p>'}</section>`;
     },
     async decisions() {
@@ -890,7 +898,7 @@
     const k = pre.kpi ? S.pulse.kpis.find((x) => x.id === pre.kpi) : null;
     const a = pre.kpi ? S.pulse.alerts.find((x) => x.kpi === pre.kpi) : null;
     const due = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
-    const draft = Object.assign({ title: k ? 'Вернуть в норму: ' + k.name.toLowerCase() : '', problem: a ? a.title : '', impact: a ? a.context : '', cause: a ? a.cause : '', action: '',
+    const draft = Object.assign({ title: k ? 'Вернуть в норму: ' + k.name.toLowerCase() : '', problem: a ? a.title : '', impact: a ? [a.context, a.effect].filter(Boolean).join(' ') : '', cause: a ? a.cause : '', action: a ? a.action || '' : '',
       owner_id: a ? a.owner_id : (S.user.role === 'head' ? S.user.id : ''), due, priority: a && a.level === 'bad' ? 'высокий' : 'средний' }, S.draft || {});
     const key = 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     const form = () => `<div class="modal glass" role="dialog" aria-modal="true" aria-label="Новое решение"><header><div style="flex:1"><p class="eyebrow">${k ? esc(k.name) + ' · ' + esc(k.dept_name) : 'Реестр решений'}</p><h2>Новое решение</h2></div>

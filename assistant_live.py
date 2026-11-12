@@ -31,11 +31,14 @@ LIVE_SYSTEM = (
     "\"points\": [{\"text\": \"пункт\", \"status\": \"решено|предложено|обсуждалось|требует уточнения\", \"line\": номер}], "
     "\"tasks\": [{\"title\": \"поручение, начинается с глагола в инфинитиве\", \"owner\": \"u-... или null\", \"due\": \"YYYY-MM-DD или null\", \"line\": номер}], "
     "\"risks\": [{\"text\": \"риск\", \"line\": номер}], \"questions\": [{\"text\": \"открытый вопрос, по которому не решили\", \"line\": номер}], "
-    "\"numbers\": [{\"text\": \"важная цифра или срок и к чему относится\", \"line\": номер}]}. "
+    "\"numbers\": [{\"text\": \"важная цифра или срок и к чему относится\", \"line\": номер}], "
+    "\"options\": [{\"about\": \"открытый вопрос или риск одной фразой\", \"variants\": [\"вариант решения\", \"другой вариант\"]}]}. "
     "Правила: «решено» — только то, что прямо решили; «предложено» — предложение без решения; «обсуждалось» — тема без итога. "
     "Задача — только явное поручение или явное обещание сделать. owner — код того, кому поручили; если человек не назван — null. "
     "due — только если срок назван; «до пятницы», «завтра» считай от даты встречи; иначе null. Ничего не выдумывай: чего не было в разговоре, "
-    "того нет в отчёте. Пиши коротко, одной фразой на пункт. Не больше 10 пунктов, 12 задач, 5 рисков, 5 вопросов и 6 цифр — только самое важное. line — номер реплики в квадратных скобках."
+    "того нет в отчёте. Единственное исключение — options: это твои предложения, как можно решить открытые вопросы и риски: "
+    "по два-три коротких варианта на каждый, только из того, что звучало на встрече и что по силам компании; не больше трёх блоков; "
+    "если открытых вопросов и рисков нет — пустой список. Пиши коротко, одной фразой на пункт. Не больше 10 пунктов, 12 задач, 5 рисков, 5 вопросов и 6 цифр — только самое важное. line — номер реплики в квадратных скобках."
 )
 
 
@@ -98,7 +101,7 @@ def _model(core, title, day, lines):
     numbered = ["[{}] {}".format(i, _codes(ln["text"], al)) for i, ln in enumerate(lines)]
     head = "Встреча: {}, {} (день недели: {}).\nСотрудники компании:\n{}".format(
         title, day.isoformat(), ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"][day.weekday()], roles)
-    keys = ("points", "tasks", "risks", "questions", "numbers")
+    keys = ("points", "tasks", "risks", "questions", "numbers", "options")
     parts = _parts(numbered)
     if len(parts) == 1:
         j, r = _ask(core, head, numbered)
@@ -119,7 +122,7 @@ def _model(core, title, day, lines):
         if not ok:
             return None, r
         j = {"points": A._merge(got["points"], "text"), "tasks": A._merge(got["tasks"], "title", True), "risks": A._merge(got["risks"], "text"),
-             "questions": A._merge(got["questions"], "text"), "numbers": A._merge(got["numbers"], "text"), "summary": " ".join(sums)}
+             "questions": A._merge(got["questions"], "text"), "numbers": A._merge(got["numbers"], "text"), "options": got["options"], "summary": " ".join(sums)}
         if len(sums) > 1:                                   # общий итог — одним коротким запросом по итогам частей
             mapping = {}
             rs = core.ask_model("Сведи итоги частей одной встречи в общий итог из 3–4 предложений: о чём встреча и к чему пришли. "
@@ -153,6 +156,9 @@ def _model(core, title, day, lines):
                        due=t.get("due") if re.match(r"^\d{4}-\d{2}-\d{2}$", str(t.get("due") or "")) else None, line=line(t.get("line")))
                   for t in j.get("tasks") or [] if isinstance(t, dict) and t.get("title")][:14],
         "risks": plain("risks"), "questions": plain("questions"), "numbers": plain("numbers"),
+        # варианты решения — предложения помощника, а не решения встречи: в интерфейсе они так и подписаны
+        "options": [{"about": name(o.get("about"))[:240], "variants": [name(v)[:240] for v in (o.get("variants") or []) if isinstance(v, str) and v.strip()][:3]}
+                    for o in j.get("options") or [] if isinstance(o, dict) and o.get("about") and isinstance(o.get("variants"), list)][:3],
     }, r
 
 
@@ -171,6 +177,7 @@ def report(core, user, body):
         p = A.rule_protocol(meeting, tr)
         p.setdefault("questions", [])
         p["numbers"] = []
+        p["options"] = []
         p["summary"] = "Модель недоступна — отчёт собран по правилам: решений {}, поручений {}.".format(
             sum(1 for x in p["points"] if x["status"] == "решено"), len(p["tasks"]))
     p = A.finish_protocol(core, meeting, tr, p)
