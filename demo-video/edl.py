@@ -35,12 +35,11 @@ def pieces_inverse(pieces, ts):
 
 
 def build():
-    P, G, Hh, A = shot("pulse"), shot("gate"), shot("helper"), shot("app")
+    P, Hh, A = shot("pulse"), shot("helper"), shot("app")
 
     # 1. пульт: один к одному, последняя секунда — стоп-кадр
     pulse = [(4.0, 4.0 + P["dur"] - 0.05, 0.0, P["dur"] - 0.05), (4.0 + P["dur"] - 0.05, 16.0, P["dur"] - 0.05, P["dur"] - 0.05)]
-    # 2. шлюз: схема 16–19.6, настоящий экран 19.6–24
-    gate = [(19.4, 24.0, 0.9, min(G["dur"] - 0.05, 8.0))]
+    # 2. шлюз (16–24): только схема — её рисует comp.html, снятого экрана в этой сцене нет
     # 3. помощник
     ask, ans = ev(Hh, "ask"), ev(Hh, "answer")
     meet, fin, rep = ev(Hh, "meet"), ev(Hh, "finish"), ev(Hh, "report")
@@ -63,7 +62,7 @@ def build():
         (41.6, 43.4, dropped + 1.0, done),
         (43.4, 48.0, done, A["dur"] - 0.05),
     ]
-    scenes = {"pulse": pulse, "gate": gate, "helper": helper, "app": app}
+    scenes = {"pulse": pulse, "helper": helper, "app": app}
 
     def marks(s, pcs, kinds):
         out = []
@@ -74,7 +73,7 @@ def build():
                     out.append(dict(e, T=round(T, 3), Tend=round(pieces_inverse(pcs, e["t"] + e.get("dur", 0)) or T, 3)))
         return out
 
-    cursor = {"pulse": marks(P, pulse, ("move", "click")), "gate": marks(G, gate, ("move", "click"))}
+    cursor = {"pulse": marks(P, pulse, ("move", "click"))}
     taps = {"helper": marks(Hh, helper, ("tap",)), "app": marks(A, app, ("tap",))}
 
     # камера внутри окна браузера: (время ролика, x, y страницы в центре, приближение)
@@ -88,12 +87,11 @@ def build():
         (4.3, 6.5, "01 · Пульт руководителя", "Вся компания — на одном экране"),
         (6.7, 9.6, "01 · Пульт руководителя", "Навели на сферу — раскрылись показатели и задачи"),
         (9.8, 15.8, "01 · Пульт руководителя", "От отклонения — к причине и решению"),
-        (19.7, 23.8, "02 · ИИ-шлюз", "Что ушло в облако и что скрыто — видно в журнале"),
     ]
     clicks = sorted([m["T"] for k in cursor.values() for m in k if m["type"] == "click"] + [m["T"] for k in taps.values() for m in k])
     return {"fps": FPS, "W": W, "H": H, "dur": DUR, "hits": HITS, "scenes": scenes, "cursor": cursor, "taps": taps, "cams": cams,
             "captions": captions, "clicks": clicks,
-            "shots": {n: {"w": s["w"], "h": s["h"], "frames": s["frames"]} for n, s in (("pulse", P), ("gate", G), ("helper", Hh), ("app", A))}}
+            "shots": {n: {"w": s["w"], "h": s["h"], "frames": s["frames"]} for n, s in (("pulse", P), ("helper", Hh), ("app", A))}}
 
 
 if __name__ == "__main__":

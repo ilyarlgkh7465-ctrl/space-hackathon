@@ -393,7 +393,9 @@ impact(H['gate'], .9)
 section(16.0, 24.0, .55, drums='half', arp_bright=.7, pad_bright=1400, bass_style='long', arp_gain=.8)
 for k, t in enumerate((16.95, 17.75, 17.95, 18.1)):         # узлы схемы появляются — мягкие звоночки
     put('sfx', bell(midi(81 + 2 * k), .7, 1.0, 2.0, .18), t, .11, pan=(-.4 + k * .28), verb=.3)
-put('fx', mk_whoosh(.9, .8), 19.3, .22, verb=.15)
+for k, t in enumerate((18.7, 20.4, 22.1)):                  # три маршрута подсвечиваются по очереди
+    put('sfx', bell(midi(86 + 2 * k), .9, 1.2, 2.0, .3), t, .13, pan=(-.3 + k * .3), verb=.35)
+    put('fx', mk_whoosh(.5, .7), t - .05, .12, verb=.1)
 put('fx', mk_riser(1.4, 300, 8000), 22.6, .28, verb=.25)
 # 03 · Помощник (24–36)
 impact(H['helper'], .9)
@@ -420,7 +422,7 @@ for k in range(12):
 E = edl.build()
 for t in E['clicks']:                                        # щелчки мыши и касания экрана
     put('sfx', tick(2100, 1.0) + .5 * tick(1300, .6), t, .2, verb=.05)
-for t in (4.0, 16.0, 19.4, 24.0, 36.0, 48.0):               # смена сцены — короткий шорох
+for t in (4.0, 16.0, 24.0, 36.0, 48.0):                     # смена сцены — короткий шорох
     put('sfx', hp(noise(.25), 5000) * np.exp(-tt(.25) / .05) * .5, t, .1, pan=-.3, verb=.2)
 
 # ─────────────── сведение ───────────────
