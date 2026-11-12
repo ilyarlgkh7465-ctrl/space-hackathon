@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 768 768" role="img" aria-label="Фотопринт">
+  <!-- Знак «Фотопринт», перерисован вектором по присланной картинке 128×128: буква «Ф», разрезанная по диагонали. -->
+  <defs>
+    <linearGradient id="fp-y" x1="0.12" y1="0.08" x2="0.9" y2="0.95">
+      <stop offset="0" stop-color="#FFE23A"/><stop offset="0.55" stop-color="#FFD414"/><stop offset="1" stop-color="#FFC20A"/>
+    </linearGradient>
+    <clipPath id="fp-up"><polygon points="0,0 768,0 768,56.4 0,546.4"/></clipPath>
+    <clipPath id="fp-down"><polygon points="0,713.4 768,223.4 768,768 0,768"/></clipPath>
+  </defs>
+  <circle cx="384" cy="384" r="376" fill="url(#fp-y)"/>
+  <g fill="#161616">
+    <g clip-path="url(#fp-up)">
+      <path fill-rule="evenodd" d="M165 620V337A152.5 152.5 0 0 1 470 337V620Z M230 620V337A87.5 87.5 0 0 1 405 337V620Z"/>
+      <rect x="284" y="130" width="68" height="500"/>
+    </g>
+    <g clip-path="url(#fp-down)">
+      <path fill-rule="evenodd" d="M290 150V455A155 155 0 0 0 600 455V150Z M355 150V455A90 90 0 0 0 535 455V150Z"/>
+      <rect x="411" y="150" width="68" height="495"/>
+    </g>
+  </g>
+  <line x1="104" y1="562" x2="662" y2="206" stroke="#161616" stroke-width="34"/>
+</svg>
