@@ -18,7 +18,7 @@ $pids = @()
 function Run($name, $exe, $argv, $dir) {
   $p = Start-Process -FilePath $exe -ArgumentList $argv -WorkingDirectory $dir -WindowStyle Hidden -PassThru `
        -RedirectStandardOutput "$log\$name.out.log" -RedirectStandardError "$log\$name.err.log"
-  "$name pid $($p.Id)"; return $p.Id
+  Write-Host "$name pid $($p.Id)"; return $p.Id
 }
 $pids += Run 'llm' $llama $llmArgs $root
 $pids += Run 'stt' "$root\whisper\Release\whisper-server.exe" @('-m', "$root\models\$Whisper", '-l', 'ru', '-t', "$WThreads", '--host', '127.0.0.1', '--port', '8090') "$root\whisper\Release"
