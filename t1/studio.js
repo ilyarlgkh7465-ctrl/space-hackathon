@@ -376,6 +376,7 @@
       const orb = $('#vOrb'); if (!orb || !Vc.on) return;
       let target = 0;
       if (Vc.state === 'listening' && Vc.an) { Vc.an.getByteTimeDomainData(buf); let s = 0; for (let i = 0; i < buf.length; i++) { const x = (buf[i] - 128) / 128; s += x * x; } target = Math.min(1, Math.sqrt(s / buf.length) * 6); Vc.heard = Math.max(Vc.heard || 0, target); }
+      else if (Vc.state === 'listening') target = 0.16 + 0.14 * Math.abs(Math.sin(performance.now() / 300));
       else if (Vc.state === 'speaking') target = Vc.outAn ? outLevel() : 0.35 + 0.3 * Math.abs(Math.sin(performance.now() / 130)) * (0.6 + 0.4 * Math.sin(performance.now() / 470));
       Vc.lvl += (target - Vc.lvl) * 0.25;
       orb.style.setProperty('--lvl', Vc.lvl.toFixed(3));
@@ -450,7 +451,7 @@
   async function meetListen() {
     if (!meetLive() || Vc.muted) return;
     const run = Vc.run, M = Vc.meet;
-    try { if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await micStream(); }
+    try { if (ownMic() && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await micStream(); }
     catch (e) { if (Vc.engine === 'server') { vSet('idle', 'Нет доступа к микрофону. Разрешите его в настройках'); return; } }
     if (run !== Vc.run) return;
     vSet('listening', 'Слушаю встречу');
@@ -566,6 +567,19 @@
       F().toast('Протокол сохранён, задачи — в реестре помощника');
     } catch (e) { b.disabled = false; F().toast(e.message); }
   }
+  /* Телефон разрешает синтез речи только по касанию. Ответ приходит позже, поэтому при первом касании внутри помощника
+     произносим пустую фразу без звука — после этого голос устройства работает и без касания. Заодно будим звуковой контекст. */
+  const MOBILE = /Android|iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  function unlockVoice() {
+    if (Vc.unlocked) return;
+    Vc.unlocked = true;
+    try { if (window.speechSynthesis) { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; u.lang = 'ru-RU'; window.speechSynthesis.speak(u); window.speechSynthesis.getVoices(); } } catch (e) { /* нет синтеза */ }
+    try { audioCtx(); } catch (e) { /* нет звукового контекста */ }
+  }
+  /* На телефоне, когда речь распознаёт само устройство, свой микрофон не открываем: открытый микрофон глушит ответ на iPhone
+     и мешает распознаванию на Android. Микрофон нужен странице только для записи на сервер. */
+  const ownMic = () => Vc.engine === 'server' || !MOBILE;
+  function releaseMic() { if (Vc.stream && MOBILE) { Vc.stream.getTracks().forEach((t) => t.stop()); Vc.stream = null; Vc.an = null; } }
   function vEngine(extra) {
     const el = $('#vEngine'); if (!el) return;
     el.textContent = (Vc.engine === 'server' ? 'речь распознаётся на сервере компании' : Vc.engine === 'browser' ? 'речь распознаёт устройство' : 'микрофон недоступен') + (extra ? ' · ' + extra : '');
@@ -600,7 +614,7 @@
     const run = Vc.run;
     stopSpeaking(); stopListening();
     Vc.heard = 0;
-    try { if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await micStream(); }
+    try { if (ownMic() && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) await micStream(); }
     catch (e) { if (Vc.engine === 'server') { vSet('idle', 'Нет доступа к микрофону. Разрешите его в браузере или перейдите в чат'); return; } }
     if (run !== Vc.run) return;
     vSet('listening');
@@ -667,7 +681,9 @@
     if (Vc.muted) vSet('muted'); else listen();
   }
   const speakable = (t) => String(t || '').replace(/\[D:[^\]]+\]/g, '').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim().slice(0, 700);
-  const phrases = (t) => (t.match(/[^.!?…]+[.!?…]+(?=\s|$)|[^.!?…]+$/g) || [t]).map((x) => x.trim()).filter(Boolean);
+  /* фразы для озвучки: по концу предложения, но инициалы («Гринь Д. А.») и короткие обрывки не отделяются */
+  const phrases = (t) => (t.match(/[^.!?…]+[.!?…]+(?=\s|$)|[^.!?…]+$/g) || [t]).map((x) => x.trim()).filter(Boolean)
+    .reduce((out, x) => { const last = out[out.length - 1]; if (last && (/(^|\s)[А-ЯЁA-Z]\.$/.test(last) || x.length < 14)) out[out.length - 1] = last + ' ' + x; else out.push(x); return out; }, []);
   const ttsFetch = async (text) => {
     const r = await fetch('/api/assistant/voice/tts', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + F().S.token }, body: JSON.stringify({ text, voice: 'robot' }) });
     if (!r.ok) throw new Error('tts');
@@ -679,6 +695,7 @@
   };
   async function speak(text, run) {
     if (!text) return;
+    releaseMic();
     const parts = phrases(text);
     if (Vc.status && Vc.status.tts) {
       try {
@@ -699,11 +716,17 @@
     if (!window.speechSynthesis) return new Promise((res) => setTimeout(res, Math.min(9000, 900 + text.length * 45)));
     await new Promise((res) => {
       const v = ruVoice();
-      parts.forEach((p, i) => {                                             // по фразам: голос устройства начинает без паузы и не обрывается на длинном тексте
-        const u = new SpeechSynthesisUtterance(p); u.lang = 'ru-RU'; u.rate = 1.05; if (v) u.voice = v;
-        if (i === parts.length - 1) u.onend = u.onerror = res;
-        window.speechSynthesis.speak(u);
-      });
+      let started = false;
+      try { window.speechSynthesis.cancel(); window.speechSynthesis.resume(); } catch (e) { /* не страшно */ }
+      setTimeout(() => {                                                     // после cancel() Safari пропускает фразу, сказанную в тот же миг
+        parts.forEach((p, i) => {                                           // по фразам: голос начинает без паузы и не обрывается на длинном тексте
+          const u = new SpeechSynthesisUtterance(p); u.lang = 'ru-RU'; u.rate = 1.05; if (v) u.voice = v;
+          u.onstart = () => { started = true; };
+          if (i === parts.length - 1) u.onend = u.onerror = res;
+          window.speechSynthesis.speak(u);
+        });
+      }, 60);
+      setTimeout(() => { if (!started && run === Vc.run) vEngine('голос устройства не включился — проверьте звук и беззвучный режим'); }, 2600);
       setTimeout(res, Math.min(60000, 4000 + text.length * 110));          // на случай, если браузер не сообщит об окончании
     });
   }
@@ -834,6 +857,7 @@
     else if (g.doc) open('', { doc: g.doc, title: x.title });
   }
   document.addEventListener('click', async (e) => {
+    if (e.target.closest && e.target.closest('#studio')) unlockVoice();
     const b = e.target.closest('[data-sa]');
     if (!b) { const p = $('#stDocsPanel'); if (p && !p.hidden && !e.target.closest('#stDocsPanel')) toggleDocs(false); return; }
     const a = b.dataset.sa, key = b.dataset.k;
