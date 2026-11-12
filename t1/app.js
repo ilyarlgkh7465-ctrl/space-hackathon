@@ -374,7 +374,7 @@
   /* ---------- пульс компании: граф ----------
      В центре — компания, вокруг — её сферы. Цвет узла — состояние: чёрный в норме, жёлтый — внимание, красный — критично.
      Наведение на сферу приближает её и раскрывает то, что в ней происходит: показатели, решения в работе и то, что ещё никому не поручено. */
-  const GRAPH = { W: 1000, H: 640, cx: 500, cy: 320, zoom: 1.22 };
+  const GRAPH = { W: 1000, H: 640, cx: 500, cy: 320, zoom: 1.15 };
   const cut = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t);
   function graphKids(p, n) {
     if (n.locked) return [];
@@ -402,9 +402,9 @@
       const m = h.kids.length; if (!m) return '';
       return `<g class="kids" data-kids="${h.i}" transform="translate(${h.x.toFixed(1)} ${h.y.toFixed(1)})">${h.kids.map((k, j) => {
         const o = j - (m - 1) / 2, ox = h.side * 92, oy = o * 40, ca = h.a + o * 0.5, cd = h.r + 9 + (j % 2) * 6;
-        return `<path class="klnk" d="M0 0 C${(ox * 0.55).toFixed(1)} 0 ${(ox * 0.45).toFixed(1)} ${oy.toFixed(1)} ${ox} ${oy.toFixed(1)}"/>
+        return `<path class="klnk" pathLength="1" style="--d:${120 + j * 50}ms" d="M0 0 C${(ox * 0.55).toFixed(1)} 0 ${(ox * 0.45).toFixed(1)} ${oy.toFixed(1)} ${ox} ${oy.toFixed(1)}"/>
           <g class="kid k-${k.t} st-k-${k.st}" role="button" tabindex="-1" ${kidAttr(k)} aria-label="${kidWord[k.t]}: ${esc(k.name)}. ${esc(k.sub)}"
-            style="--cx:${(Math.cos(ca) * cd).toFixed(1)}px;--cy:${(Math.sin(ca) * cd).toFixed(1)}px;--ox:${ox}px;--oy:${oy.toFixed(1)}px;--d:${j * 40}ms">
+            style="--cx:${(Math.cos(ca) * cd).toFixed(1)}px;--cy:${(Math.sin(ca) * cd).toFixed(1)}px;--ox:${ox}px;--oy:${oy.toFixed(1)}px;--d:${120 + j * 50}ms">
             <rect class="khit" x="${h.side > 0 ? -10 : -236}" y="-18" width="246" height="36" rx="10"/>
             <circle r="5.5" ${k.t === 'kpi' ? dot(k.st) : ''}/>${k.t === 'add' ? '<path class="kplus" d="M-2.6 0H2.6M0 -2.6V2.6"/>' : ''}
             <text class="kn" x="${h.side * 13}" y="-2" text-anchor="${h.side > 0 ? 'start' : 'end'}">${esc(cut(k.name, 34))}</text>
@@ -419,7 +419,7 @@
         <circle class="core-dot" cx="${cx}" cy="${cy}" r="52"/>
         <text class="core-v" x="${cx}" y="${cy + 6}" text-anchor="middle">${total}</text>
         <text class="core-s" x="${cx}" y="${cy + 25}" text-anchor="middle">${coreWord}</text></g>
-      ${hubs.map((h) => `<g class="hub st-h-${h.status}${h.locked ? ' locked' : ''}" tabindex="0" role="button" data-node="${h.kpi}" data-i="${h.i}" data-x="${h.x.toFixed(1)}" data-y="${h.y.toFixed(1)}" data-side="${h.side}"
+      ${hubs.map((h) => `<g class="hub st-h-${h.status}${h.locked ? ' locked' : ''}" tabindex="0" role="button" data-node="${h.kpi}" data-i="${h.i}" data-x="${h.x.toFixed(1)}" data-y="${h.y.toFixed(1)}" data-side="${h.side}" data-m="${h.kids.length}" data-r="${h.r.toFixed(1)}" data-w="${Math.round(Math.max(60, ...h.kids.map((k) => Math.max(cut(k.name, 34).length * 7.1, cut(k.sub, 40).length * 6.1))))}"
           aria-label="${esc(h.name)}: ${h.locked ? 'закрыто для вашей роли' : WORD[h.status] + '. ' + esc(h.lines.join('. '))}">
         <circle class="hit" cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="${(h.r + 18).toFixed(1)}"/>
         <circle class="halo" cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="${(h.r + 7).toFixed(1)}"/>
@@ -430,40 +430,57 @@
     </g></svg></div>
     <div class="flow-list">${p.flow.map((f) => `<button class="glass-flat flow-item" data-node="${f.kpi}"><span class="no st-n-${f.status}" style="background:${COLOR[f.status]}">${f.n}</span><span><b>${esc(f.name)}</b> · <span class="st-${f.status}">${WORD[f.status]}</span><small>${esc(f.locked ? 'детали закрыты для вашей роли' : f.lines.join(' · '))}</small></span></button>`).join('')}</div>`;
   }
-  let mapOn = null, mapTouch = false, mapLock = 0;
+  let mapOn = null, mapTouch = false, mapLock = 0, mapOpenT = 0, mapCloseT = 0;
   function graphOpen(i) {
-    const svg = $('#map'), world = $('#mapWorld'), hub = $(`#map .hub[data-i="${i}"]`);
-    if (!svg || !world || !hub || mapOn === hub || hub.classList.contains('locked')) return;
+    const svg = $('#map'), hub = $(`#map .hub[data-i="${i}"]`);
+    if (!svg || !hub || mapOn === hub || hub.classList.contains('locked')) return;
     graphClose(true);
     mapOn = hub;
-    mapLock = performance.now() + 560;       // пока картинка едет, под неподвижным курсором проезжают соседние узлы — их не открываем
+    mapLock = performance.now() + 380;       // пока картинка едет, соседний узел может проехать под неподвижным курсором — его не открываем
     hub.classList.add('is-on'); svg.classList.add('has-focus');
     $(`#map .lnk[data-l="${i}"]`)?.classList.add('is-on');
     const kids = $(`#map .kids[data-kids="${i}"]`);
     if (kids) { kids.classList.add('is-open'); $$('.kid', kids).forEach((k) => k.setAttribute('tabindex', '0')); }
-    // сфера чуть приближается и сдвигается к середине — так, чтобы раскрывшимся задачам хватило места
-    const x = +hub.dataset.x, y = +hub.dataset.y, z = GRAPH.zoom;
-    const tx = x + (GRAPH.cx - x) * 0.6 - +hub.dataset.side * 70, ty = y + (GRAPH.cy - y) * 0.6;
-    world.style.transform = `translate(${(tx - z * x).toFixed(1)}px, ${(ty - z * y).toFixed(1)}px) scale(${z})`;
+    /* Камера. Сфера приближается на месте — узел остаётся под курсором — и сдвигается только настолько, чтобы раскрытые задачи
+       поместились в кадр. Двигается весь рисунок целиком (преобразование самого svg): так браузер ведёт движение плавно, без перерисовки. */
+    const { W, H, zoom: z } = GRAPH, x = +hub.dataset.x, y = +hub.dataset.y, side = +hub.dataset.side, m = +hub.dataset.m, r = +hub.dataset.r, lw = 92 + 16 + (+hub.dataset.w || 240);
+    const half = Math.max((m - 1) * 20 + 26, r + 12), pad = 14;
+    const box = { l: side > 0 ? -76 : -lw, r: side > 0 ? lw : 76, t: -half, b: Math.max(half, r + 48) };
+    let tx = x, ty = y;
+    if (tx + z * box.r > W - pad) tx = W - pad - z * box.r;
+    if (tx + z * box.l < pad) tx = pad - z * box.l;
+    if (ty + z * box.b > H - pad) ty = H - pad - z * box.b;
+    if (ty + z * box.t < pad) ty = pad - z * box.t;
+    const cs = getComputedStyle(svg), cw = parseFloat(cs.width) || W, ch = parseFloat(cs.height) || H;
+    const k = Math.min(cw / W, ch / H), ox = (cw - W * k) / 2, oy = (ch - H * k) / 2;       // единицы рисунка → пиксели
+    svg.style.transform = `translate(${(ox + tx * k - z * (ox + x * k)).toFixed(1)}px, ${(oy + ty * k - z * (oy + y * k)).toFixed(1)}px) scale(${z})`;
   }
   function graphClose(keep) {
     $$('#map .is-on').forEach((x) => x.classList.remove('is-on'));
     $$('#map .kids.is-open').forEach((g) => { g.classList.remove('is-open'); $$('.kid', g).forEach((k) => k.setAttribute('tabindex', '-1')); });
     mapOn = null;
     if (keep) return;
-    $('#map')?.classList.remove('has-focus');
-    const world = $('#mapWorld'); if (world) world.style.transform = '';
+    const svg = $('#map'); if (svg) { svg.classList.remove('has-focus'); svg.style.transform = ''; }
   }
-  const hideMapCard = () => graphClose();
+  const hideMapCard = () => { clearTimeout(mapOpenT); clearTimeout(mapCloseT); graphClose(); };
   const showMapCard = (el) => graphOpen(+el.dataset.i);
   function fitMap() { /* подписи графа не требуют подгонки */ }
+  /* Наведение с небольшой задержкой: проведя мышью через несколько сфер, граф не дёргается — открывается та, на которой курсор остановился. */
+  function graphLater(i) {
+    clearTimeout(mapOpenT); clearTimeout(mapCloseT);
+    const wait = Math.max(mapOn ? 140 : 70, mapLock - performance.now() + 20);
+    mapOpenT = setTimeout(() => { if ($(`#map .hub[data-i="${i}"]:hover`)) graphOpen(i); }, wait);
+  }
   document.addEventListener('pointerover', (e) => {
     mapTouch = e.pointerType === 'touch';
     if (mapTouch || !e.target.closest) return;
     const hub = e.target.closest('#map .hub');
-    if (hub) { if (!mapOn || performance.now() > mapLock) graphOpen(+hub.dataset.i); return; }
+    if (hub) { clearTimeout(mapCloseT); if (hub !== mapOn) graphLater(+hub.dataset.i); return; }
+    clearTimeout(mapOpenT);
     if (!mapOn) return;
-    if (!e.target.closest('#pulseStage') || (e.target.closest('#map .core') && performance.now() > mapLock)) graphClose();   // ушли с карты или вернулись к центру
+    clearTimeout(mapCloseT);
+    if (!e.target.closest('#pulseStage')) mapCloseT = setTimeout(() => graphClose(), 260);                 // ушли с карты
+    else if (e.target.closest('#map .core')) mapCloseT = setTimeout(() => { if ($('#map .core:hover')) graphClose(); }, 200);   // вернулись к центру
   });
   document.addEventListener('focusin', (e) => { const hub = e.target.closest && e.target.closest('#map .hub'); if (hub) graphOpen(+hub.dataset.i); });
 

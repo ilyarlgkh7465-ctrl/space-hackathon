@@ -503,20 +503,21 @@ html { scrollbar-color: rgba(20, 20, 20, .28) transparent; scrollbar-width: thin
   .dept-summary-when > span { display: none; }
 }
 
-/* «Пульс компании» — граф: центр, сферы и раскрывающиеся задачи */
-#map { width: 100%; height: auto; max-height: calc(100vh - 196px); min-height: 440px; display: block; margin-inline: auto; overflow: visible; }
-#mapWorld { transform-origin: 0 0; transition: transform .6s cubic-bezier(.22, 1, .36, 1); }
+/* «Пульс компании» — граф: центр, сферы и раскрывающиеся задачи.
+   Движение: одна мягкая кривая на всё (--glide), без рывка в начале; камера, затемнение и задачи идут вместе. */
+#map { --glide: cubic-bezier(.32, .72, 0, 1); width: 100%; height: auto; max-height: calc(100vh - 196px); min-height: 440px; display: block; margin-inline: auto; overflow: visible;
+  transform-origin: 0 0; transition: transform .9s cubic-bezier(.4, 0, .2, 1); }      /* камера: плавный разгон и плавная остановка */
 #map text { paint-order: stroke; stroke: #fff; stroke-width: 4px; stroke-linejoin: round; }      /* белая обводка: подпись читается поверх линий */
-#map .lnk { stroke: #D2D2D2; stroke-width: 1; transition: stroke .25s, stroke-width .25s, opacity .3s; }
+#map .lnk { stroke: #D2D2D2; stroke-width: 1; transition: stroke .5s ease, stroke-width .5s ease, opacity .5s ease; }
 #map .lnk.is-on { stroke: var(--ink); stroke-width: 1.4; }
-#map .chain { stroke: #E4E4E4; stroke-width: 1; stroke-dasharray: 2 5; transition: opacity .3s; }
+#map .chain { stroke: #E4E4E4; stroke-width: 1; stroke-dasharray: 2 5; transition: opacity .5s ease; }
 #map .hub, #map .core, #map .kid { cursor: pointer; outline: none; }
-#map .hub, #map .core { transition: opacity .3s; }
+#map .hub, #map .core { transition: opacity .5s ease; }
 #map .hit, #map .khit { fill: transparent; }
-#map .hub .dot { stroke: #fff; stroke-width: 2.5; transform-box: fill-box; transform-origin: center; transition: transform .3s var(--ease); }
+#map .hub .dot { stroke: #fff; stroke-width: 2.5; transform-box: fill-box; transform-origin: center; transition: transform .5s var(--glide); }
 #map .hub.st-h-warn .dot { stroke: var(--ink); stroke-width: 1.4; }
-#map .hub .halo { fill: none; stroke: var(--brand); stroke-width: 3.5; opacity: 0; transform-box: fill-box; transform-origin: center; transform: scale(.7); transition: opacity .25s, transform .3s var(--ease); }
-#map .hub:hover .dot, #map .hub.is-on .dot { transform: scale(1.14); }
+#map .hub .halo { fill: none; stroke: var(--brand); stroke-width: 3.5; opacity: 0; transform-box: fill-box; transform-origin: center; transform: scale(.8); transition: opacity .45s ease, transform .6s var(--glide); }
+#map .hub:hover .dot, #map .hub.is-on .dot { transform: scale(1.12); }
 #map .hub.is-on .halo, #map .hub:focus-visible .halo { opacity: 1; transform: scale(1); }
 #map .hub .nm { font: 600 14.5px var(--sans); fill: var(--ink); }
 #map .hub .ln { font: 400 12px var(--sans); fill: var(--ink3); }
@@ -527,19 +528,20 @@ html { scrollbar-color: rgba(20, 20, 20, .28) transparent; scrollbar-width: thin
 #map .core text { stroke: none; }
 #map .core-v { font: 700 32px var(--mono); fill: var(--on-brand); letter-spacing: -.03em; }
 #map .core-s { font: 500 11.5px var(--sans); fill: var(--on-brand); }
-#map .beat { fill: none; stroke: var(--brand); stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: beat 2.8s cubic-bezier(.2, .7, .3, 1) infinite; }
-#map .beat.b2 { animation-delay: 1.4s; }
+#map .beat { fill: none; stroke: var(--brand); stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: beat 3.4s cubic-bezier(.25, .6, .35, 1) infinite; }
+#map .beat.b2 { animation-delay: 1.7s; }
 #map.has-focus .hub:not(.is-on) { opacity: .2; }
 #map.has-focus .lnk:not(.is-on), #map.has-focus .chain { opacity: .28; }
 #map.has-focus .core { opacity: .3; }
-#map .kids { transition: opacity .3s; }
+#map .kids { transition: opacity .5s ease; }
 #map.has-focus .kids:not(.is-open) { opacity: .15; }
-#map .klnk { fill: none; stroke: var(--ink); stroke-width: 1; opacity: 0; transition: opacity .25s; }
-#map .kids.is-open .klnk { opacity: .5; transition-delay: .14s; }
-#map .kid { transform: translate(var(--cx), var(--cy)) scale(.58); transition: transform .55s cubic-bezier(.22, 1, .36, 1); pointer-events: none; }
-#map .kids.is-open .kid { transform: translate(var(--ox), var(--oy)) scale(1); transition-delay: var(--d); pointer-events: auto; }
-#map .kid text { opacity: 0; transition: opacity .2s; }
-#map .kids.is-open .kid text { opacity: 1; transition-delay: calc(var(--d) + 140ms); }
+/* связь «дорисовывается» от сферы к задаче, а не вспыхивает */
+#map .klnk { fill: none; stroke: var(--ink); stroke-width: 1; opacity: .5; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset .35s ease; }
+#map .kids.is-open .klnk { stroke-dashoffset: 0; transition: stroke-dashoffset .7s var(--glide) var(--d); }
+#map .kid { transform: translate(var(--cx), var(--cy)) scale(.6); transition: transform .6s var(--glide); pointer-events: none; }
+#map .kids.is-open .kid { transform: translate(var(--ox), var(--oy)) scale(1); transition: transform .8s var(--glide) var(--d); pointer-events: auto; }
+#map .kid text { opacity: 0; transition: opacity .25s ease; }
+#map .kids.is-open .kid text { opacity: 1; transition: opacity .5s ease calc(var(--d) + 220ms); }
 #map .kid .kn { font: 500 12.5px var(--sans); fill: var(--ink); }
 #map .kid .ks { font: 400 11px var(--sans); fill: var(--ink3); }
 #map .kid circle { stroke: #fff; stroke-width: 1.5; }
@@ -550,5 +552,5 @@ html { scrollbar-color: rgba(20, 20, 20, .28) transparent; scrollbar-width: thin
 #map .kplus { stroke: var(--ink); stroke-width: 1.4; stroke-linecap: round; }
 #map .kid:hover .kn, #map .kid:focus-visible .kn { text-decoration: underline; }
 #map .kid:focus-visible circle { stroke: var(--brand); stroke-width: 3; }
-@media (prefers-reduced-motion: reduce) { #mapWorld, #map .kid { transition: none; } #map .beat { animation: none; } }
+@media (prefers-reduced-motion: reduce) { #map, #map .kid, #map .klnk, #map .kid text { transition: none !important; } #map .beat { animation: none; } }
 .flow-item .no.st-n-warn { color: var(--on-brand); }
