@@ -1839,7 +1839,9 @@ def _cat_facts(core, user, view):
         opts = "; ".join("%s: %s" % (o["name"].lower(), ", ".join(x["name"].lower() + (" (+%s %s)" % (x["price"].replace(".", ","), CUR) if x.get("price") else "") for x in o["values"]))
                          for o in pr["options"] if o.get("kind") != "number")
         f.append("%s: от %s %s, изготовление %d–%d дн. Варианты: %s.%s" % (
-            pr["name"], ("%.2f" % min(prices)).replace(".", ","), CUR, pr["lead_days"][0], pr["lead_days"][1], ", ".join(v["name"] for v in pr["variants"]), (" Параметры — " + opts + ".") if opts else ""))
+            pr["name"], ("%.2f" % min(prices)).replace(".", ","), CUR, pr["lead_days"][0], pr["lead_days"][1],
+            "; ".join("%s — %s%s %s" % (v["name"], "от " if v.get("tiers") else "", str(v["tiers"][-1][1] if v.get("tiers") else v.get("base") or v.get("price")).replace(".", ","), CUR)
+                      for v in pr["variants"]), (" Параметры — " + opts + ".") if opts else ""))
     f.append("Доставка: " + "; ".join("%s — %s %s" % (d["name"], d["price"].replace(".", ","), CUR) for d in CATALOG["delivery"]) + ". Оплата при получении.")
     f.append("Брак по вине типографии перепечатывают бесплатно. Черновик сохраняется сам, даже без сети.")
     if user:
