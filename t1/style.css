@@ -56,8 +56,8 @@
 .login { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
 .login-card { width: min(440px, 100%); padding: 30px 28px 26px; display: flex; flex-direction: column; gap: 16px; }
 .login-card h1 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
-.logo { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: var(--grad);
-  font-weight: 700; font-size: 20px; color: #fff; }
+.logo { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; flex: none; }
+.logo img, .rail-brand > span img { width: 100%; height: 100%; display: block; }
 .roles { display: flex; flex-wrap: wrap; gap: 8px; }
 .err { color: var(--bad); font-size: 14px; min-height: 20px; }
 
@@ -67,8 +67,7 @@
   background: #fff; border-right: 1px solid var(--edge); color: var(--ink); padding: 20px 14px; }
 .rail-brand { display: flex; align-items: center; gap: 8px; margin: 0 6px 18px; color: var(--ink);
   text-decoration: none; font-size: 19px; font-weight: 650; letter-spacing: -.045em; }
-.rail-brand > span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 6px;
-  background: var(--bad-bg); color: var(--brand-ink); font-size: 14px; }
+.rail-brand > span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; flex: none; }
 .rail-profile { display: flex; align-items: center; gap: 8px; padding: 0 6px 12px; border-bottom: 1px solid var(--edge); }
 .avatar { width: 31px; height: 31px; flex: none; border-radius: 50%; display: grid; place-items: center;
   font-size: 11px; font-weight: 600; background: var(--glass3); color: var(--ink2); }

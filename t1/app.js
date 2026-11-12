@@ -117,7 +117,7 @@
   function renderLogin(msg = '') {
     $('#layer').innerHTML = '';
     $('#app').innerHTML = `<main class="login"><form class="glass login-card" id="loginForm" autocomplete="off">
-      <span class="logo" aria-hidden="true">Ф</span>
+      <span class="logo" aria-hidden="true"><img src="/shared/logo-fotoprint.png" alt=""></span>
       <div><p class="eyebrow">Фотопринт · единая система</p><h1>Пульт руководителя</h1></div>
       <p class="muted">Состояние компании, причины отклонений и ответственные — в одном окне. Данные тестовые.</p>
       <label class="field">Логин<input class="input" name="login" required autocapitalize="none" spellcheck="false"></label>
@@ -156,7 +156,7 @@
     try { S.user = await api('/api/me'); } catch (e) { if (e.code !== 401) renderLogin(e.message); return; }
     if (S.user.role === 'operator') return renderMy();
     if (!['director', 'head', 'analyst'].includes(S.user.role)) {
-      $('#app').innerHTML = `<main class="login"><div class="glass login-card"><span class="logo">Ф</span><h1>Пульт — для руководителей</h1>
+      $('#app').innerHTML = `<main class="login"><div class="glass login-card"><span class="logo"><img src="/shared/logo-fotoprint.png" alt=""></span><h1>Пульт — для руководителей</h1>
         <p class="muted">Вы вошли как «${esc(S.user.title)}». Для операционной команды есть экран участка с очередью и отметками этапов.</p>
         <a class="btn btn-primary" href="/t2/admin.html">Открыть экран участка</a><button class="btn" id="lo">Выйти</button></div></main>`;
       $('#lo').onclick = () => logout();
@@ -172,7 +172,7 @@
     $('#app').innerHTML = `<div class="shell">
       <button class="nav-scrim" id="navScrim" type="button" aria-label="Закрыть меню" hidden></button>
       <aside class="rail" id="rail" aria-label="Разделы">
-        <a class="rail-brand" href="/" aria-label="Фотопринт, все треки"><span aria-hidden="true">Ф</span>Фотопринт</a>
+        <a class="rail-brand" href="/" aria-label="Фотопринт, все треки"><span aria-hidden="true"><img src="/shared/logo-fotoprint.png" alt=""></span>Фотопринт</a>
         <div class="rail-profile">
           <span class="avatar" aria-hidden="true">${esc(initials)}</span>
           <div><strong>${esc(S.user.name)}</strong><small>${esc(S.user.title)}</small></div>
@@ -878,7 +878,7 @@
     const blk = (title, x) => `<div class="glass panel"><header><h2>${title}</h2></header><div class="facts"><div class="fact"><small>Заказов прошло участок</small><b>${fmt(x.done)}</b></div>
       <div class="fact"><small>Обычное время на заказ</small><b>${fmt(x.median)}</b> <span class="faint">ч при норме ${fmt(d.norm)}</span></div><div class="fact"><small>Уложились в норму</small><b>${fmt(x.in_norm)}</b> <span class="faint">%</span></div></div></div>`;
     $('#layer').innerHTML = '';
-    $('#app').innerHTML = `<main class="my"><header class="page-head"><span class="logo" aria-hidden="true">Ф</span><div><p class="eyebrow">${esc(S.user.title)} · ${esc(S.user.name)}</p><h1>Моя смена: ${esc(d.stage_name.toLowerCase())}</h1></div>
+    $('#app').innerHTML = `<main class="my"><header class="page-head"><span class="logo" aria-hidden="true"><img src="/shared/logo-fotoprint.png" alt=""></span><div><p class="eyebrow">${esc(S.user.title)} · ${esc(S.user.name)}</p><h1>Моя смена: ${esc(d.stage_name.toLowerCase())}</h1></div>
         <span class="spacer"></span><a class="btn btn-primary" href="/t2/admin.html">Отметить этапы заказов</a><button class="btn" id="lo">Выйти</button></header>
       ${blk('Сегодня', d.today)}${blk('За неделю', d.week)}
       <div class="glass panel"><header><h2>Сейчас на участке</h2></header><div class="facts"><div class="fact"><small>Заказов в очереди</small><b>${d.queue.count}</b></div><div class="fact"><small>Ждут дольше нормы</small><b class="${d.queue.stuck ? 'st-bad' : ''}">${d.queue.stuck}</b></div>
