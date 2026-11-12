@@ -31,7 +31,7 @@ WorkingDirectory=/opt/fp/app
 EnvironmentFile=/etc/fp-stand.env
 Environment=FP_PUBLIC=1
 Environment=FP_AI_PER_DAY=4000
-Environment="CLAUDE_OFF_NOTE=с этого сервера недоступен: Anthropic не обслуживает Беларусь, сложные разборы идут в DeepSeek"
+Environment="CLAUDE_OFF_NOTE=подключён в системе · на этом стенде выключен"
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=STT_HTTP_URL=http://127.0.0.1:8000/api/voice/stt
 ExecStart=/opt/fp/venv/bin/python -u /opt/fp/app/server.py $PORT
