@@ -437,6 +437,8 @@ def ai_state() -> dict:
     ready, note = llm_gateway.claude_ready(CLAUDE)
     if ready and time.time() < _claude_down["until"]:
         note = "сейчас недоступен: " + _claude_down["why"]
+    elif not ready and os.environ.get("CLAUDE_OFF_NOTE"):
+        note = os.environ["CLAUDE_OFF_NOTE"]            # стенд, где Claude не подключают намеренно: причина вместо «нет ключа»
     routes = []
     if mode == "auto":
         for task, title in TASKS.items():
