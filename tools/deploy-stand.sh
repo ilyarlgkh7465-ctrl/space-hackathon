@@ -3,10 +3,10 @@
 #   tools/deploy-stand.sh            — обновить код и экраны (рабочие данные стенда сохраняются)
 #   tools/deploy-stand.sh --reset    — то же и вернуть демо-данные к исходным
 #   tools/deploy-stand.sh --setup    — первый запуск: пользователь, окружение Python, служба, адрес в Caddy, ключ DeepSeek
-# Подключение: FP_SSH="ssh -F <файл настроек> mila" (по умолчанию «ssh mila»). Ключи моделей лежат только на сервере: /etc/fp-stand.env.
+# Подключение: FP_SSH="ssh -F <файл настроек> <имя сервера>" (по умолчанию «ssh fp-stand»). Ключи моделей лежат только на сервере: /etc/fp-stand.env.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-SSH=${FP_SSH:-ssh mila}
+SSH=${FP_SSH:-ssh fp-stand}
 HOST=fotoprint.130-49-141-77.sslip.io
 PORT=8795
 MODE=${1:-}
@@ -47,7 +47,7 @@ ReadWritePaths=/opt/fp/app/data
 WantedBy=multi-user.target
 UNIT
 cat > /etc/caddy/fp-stand.caddy <<CADDY
-# Стенд хакатона «Фотопринт» — отдельная служба, сайт Mila не трогает
+# Стенд хакатона «Фотопринт» — отдельная служба, другие сайты на сервере не трогает
 $HOST {
 	encode zstd gzip
 	header {
