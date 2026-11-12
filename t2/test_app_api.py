@@ -178,7 +178,14 @@ class Api(unittest.TestCase):
         t = self.login("sales")
         # шаблон публикует только сотрудник компании (head/director)
         tpl = {"title": "Выпускной альбом", "product": "book", "variant": "lite", "options": {"pages": 24}, "per_page": 2, "occasion": "Праздник"}
-        self.assertEqual(self.call("POST", "/api/app/social/templates", tpl, self.client)[0], 403)
+        # покупатель делится оформлением своего альбома: в шаблон идёт каркас страниц, без фото; ссылки не проходят
+        st, mine = self.call("POST", "/api/app/social/templates", dict(tpl, skel=[{"n": 2, "t": "b", "bg": "#141414"}, {"n": 9, "t": "z", "bg": "red"}]), self.client)
+        self.assertEqual(st, 201)
+        self.assertEqual(mine["skel"], [{"n": 2, "t": "b", "bg": "#141414"}, {"n": 4, "t": "a", "bg": "#FFFFFF"}])
+        self.assertTrue(mine["mine"] and not mine["company"] and mine["author"] != "picPac")
+        self.assertEqual(self.call("POST", "/api/app/social/templates", dict(tpl, desc="пишите на www.site.by"), self.client)[0], 400)
+        self.assertEqual(self.call("POST", "/api/app/social/templates", dict(tpl, cover="data:text/html;base64,AAAA"), self.client)[0], 400)
+        self.assertEqual(self.call("POST", "/api/app/social/templates/%s/delete" % mine["id"], token=self.client)[0], 200)
         self.assertEqual(self.call("POST", "/api/app/social/templates", dict(tpl, variant="нет"), t)[0], 400)
         self.assertEqual(self.call("POST", "/api/app/social/templates", dict(tpl, options={"pages": 23}), t)[0], 400)
         a = self.call("POST", "/api/app/social/templates", tpl, t, {"Idempotency-Key": "t-1"})[1]

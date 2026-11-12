@@ -530,6 +530,49 @@ def _clean_layout(lay):
     return [[str(i)[:40] for i in pg[:6]] if isinstance(pg, list) else [] for pg in lay[:140]]
 
 
+HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+def _clean_pm(pm):
+    """Оформление страниц: шаблон, фон, подпись и кадрирование — по одной записи на страницу макета."""
+    if not isinstance(pm, list):
+        return None
+    out = []
+    for m in pm[:140]:
+        if not isinstance(m, dict):
+            out.append(None)
+            continue
+        z = {}
+        for k, v in list((m.get("z") or {}).items())[:6] if isinstance(m.get("z"), dict) else []:
+            if isinstance(v, dict):
+                try:
+                    z[str(k)[:40]] = {"x": max(0, min(100, int(v.get("x", 50)))), "y": max(0, min(100, int(v.get("y", 50)))),
+                                      "s": max(1.0, min(2.5, float(v.get("s", 1))))}
+                except (TypeError, ValueError):
+                    pass
+        bg = str(m.get("bg") or "#FFFFFF")
+        out.append({"t": str(m.get("t") or "a")[:1] if str(m.get("t") or "a")[:1] in "abc" else "a", "bg": bg if HEX_RE.match(bg) else "#FFFFFF",
+                    "tx": " ".join(str(m.get("tx") or "").split())[:60], "tp": "t" if m.get("tp") == "t" else "b", "z": z})
+    return out
+
+
+def _clean_skel(skel):
+    """Каркас шаблона: сколько фото на странице, какой шаблон и фон. Фото и подписи в шаблон не попадают."""
+    if not isinstance(skel, list):
+        return []
+    out = []
+    for m in skel[:60]:
+        if not isinstance(m, dict):
+            continue
+        try:
+            n = max(0, min(4, int(m.get("n", 1))))
+        except (TypeError, ValueError):
+            n = 1
+        bg = str(m.get("bg") or "#FFFFFF")
+        out.append({"n": n, "t": str(m.get("t") or "a")[:1] if str(m.get("t") or "a")[:1] in "abc" else "a", "bg": bg if HEX_RE.match(bg) else "#FFFFFF"})
+    return out
+
+
 def _project_save(h, core, user, pid):
     b = h._body()
     prod = PROD.get(b.get("product"))
@@ -546,7 +589,7 @@ def _project_save(h, core, user, pid):
         # иначе: проект создан офлайн на телефоне — сохраняем под его id
         data = {"product": prod["id"], "variant": variant, "options": b.get("options") if isinstance(b.get("options"), dict) else {},
                 "fit": bool(b.get("fit")), "title": str(b.get("title") or "")[:80],
-                "layout": _clean_layout(b.get("layout")),
+                "layout": _clean_layout(b.get("layout")), "pm": _clean_pm(b.get("pm")), "skel": _clean_skel(b.get("skel")),
                 "photos": _clean_photos(b.get("photos"), owned), "qty": max(1, min(5000, int(b.get("qty") or 1))),
                 "delivery": str(b.get("delivery") or "pickup")[:20], "promo": str(b.get("promo") or "")[:30]}
         if cur:
@@ -1163,17 +1206,32 @@ LINK_RE = re.compile(r"(https?:|www\.|\.(by|com|ru|org|net)\b|@\w{3,})", re.I)
 # шаблоны от picPac, всегда в ленте (их нельзя удалить); свои компания добавляет через экран публикации
 SEED_TEMPLATES = [
     {"id": "t-seed-wedding", "title": "Свадебный альбом «Наш день»", "desc": "Крупные кадры на разворот, по одному фото на страницу. Подойдёт для 20–40 лучших снимков.",
-     "product": "book", "variant": "classic", "options": {"pages": 24}, "per_page": 1, "occasion": "Свадьба", "tone": 0},
+     "product": "book", "variant": "classic", "options": {"pages": 24}, "per_page": 1, "occasion": "Свадьба", "tone": 0, "img": "wedding",
+     "skel": [{"n": 1, "t": "a", "bg": "#FFFFFF"}, {"n": 1, "t": "b", "bg": "#FFFFFF"}, {"n": 2, "t": "a", "bg": "#F6F1E7"}, {"n": 1, "t": "c", "bg": "#FFFFFF"}]},
+    {"id": "t-seed-bw", "title": "Чёрно-белая история", "desc": "Тёмные страницы, один кадр крупно, рядом — пара деталей. Хорошо смотрятся портреты.",
+     "product": "book", "variant": "premium", "options": {"pages": 24}, "per_page": 2, "occasion": "Семья", "tone": 2, "img": "album-bw",
+     "skel": [{"n": 1, "t": "b", "bg": "#141414"}, {"n": 2, "t": "b", "bg": "#141414"}, {"n": 1, "t": "a", "bg": "#141414"}, {"n": 3, "t": "a", "bg": "#141414"}]},
     {"id": "t-seed-travel", "title": "Фотокнига о поездке", "desc": "Два-три кадра на странице: пейзаж крупно, рядом детали маршрута.",
-     "product": "book", "variant": "classic", "options": {"pages": 20}, "per_page": 3, "occasion": "Путешествие", "tone": 3},
+     "product": "book", "variant": "classic", "options": {"pages": 20}, "per_page": 3, "occasion": "Путешествие", "tone": 3, "img": "book",
+     "skel": [{"n": 1, "t": "a", "bg": "#FFFFFF"}, {"n": 3, "t": "b", "bg": "#FFFFFF"}, {"n": 2, "t": "b", "bg": "#DCE9F5"}, {"n": 3, "t": "a", "bg": "#FFFFFF"}]},
+    {"id": "t-seed-prints", "title": "Двадцать отпечатков в руки", "desc": "Лучшие кадры месяца на настоящей фотобумаге — раздать друзьям и повесить на стену.",
+     "product": "print", "variant": "10x15", "options": {}, "per_page": 1, "occasion": "Любой повод", "tone": 4, "img": "prints-hand"},
     {"id": "t-seed-year", "title": "Календарь «Наш год»", "desc": "По одному фото на месяц. Семейные кадры за год — и на стене весь следующий.",
-     "product": "calendar", "variant": "wall", "options": {}, "per_page": 1, "occasion": "Семья", "tone": 1},
+     "product": "calendar", "variant": "wall", "options": {}, "per_page": 1, "occasion": "Семья", "tone": 1, "img": "calendar"},
+    {"id": "t-seed-old", "title": "Альбом «Как у бабушки»", "desc": "Кремовые страницы, фото с полями и подписи от руки: кто, где и когда.",
+     "product": "book", "variant": "classic", "options": {"pages": 20}, "per_page": 2, "occasion": "Семья", "tone": 5, "img": "album-old",
+     "skel": [{"n": 1, "t": "c", "bg": "#F6F1E7"}, {"n": 2, "t": "a", "bg": "#F6F1E7"}, {"n": 4, "t": "a", "bg": "#F6F1E7"}, {"n": 2, "t": "b", "bg": "#F6F1E7"}]},
     {"id": "t-seed-kids", "title": "Магниты «Мои первые…»", "desc": "Яркие квадратные снимки детей на холодильник. Хороший подарок бабушкам.",
-     "product": "magnet", "variant": "10x10", "options": {}, "per_page": 1, "occasion": "Дети", "tone": 2},
+     "product": "magnet", "variant": "10x10", "options": {}, "per_page": 1, "occasion": "Дети", "tone": 2, "img": "magnet"},
+    {"id": "t-seed-desk", "title": "Календарь на рабочий стол", "desc": "Перекидной: каждый месяц — новый кадр перед глазами. Подарок коллеге или себе.",
+     "product": "calendar", "variant": "desk", "options": {}, "per_page": 1, "occasion": "Подарок", "tone": 3, "img": "calendar-desk"},
+    {"id": "t-seed-cosy", "title": "Книга для уютных вечеров", "desc": "Четыре кадра сеткой и страницы с одним большим фото — листать с чаем.",
+     "product": "book", "variant": "lite", "options": {"pages": 20}, "per_page": 4, "occasion": "Подарок", "tone": 1, "img": "album-chair",
+     "skel": [{"n": 1, "t": "b", "bg": "#FFFFFF"}, {"n": 4, "t": "a", "bg": "#FFFFFF"}, {"n": 4, "t": "b", "bg": "#EDEDF0"}, {"n": 1, "t": "a", "bg": "#FFFFFF"}]},
     {"id": "t-seed-mini", "title": "Мини-печать для открыток", "desc": "Набор 10×15 для кармана и открыток. Двенадцать снимков за один заказ.",
-     "product": "print", "variant": "10x15", "options": {}, "per_page": 1, "occasion": "Любой повод", "tone": 4},
+     "product": "print", "variant": "10x15", "options": {}, "per_page": 1, "occasion": "Любой повод", "tone": 4, "img": "prints"},
     {"id": "t-seed-canvas", "title": "Холст «Один главный кадр»", "desc": "Самая удачная фотография — на стену. Приложение подскажет, хватит ли у неё пикселей.",
-     "product": "canvas", "variant": "30x40", "options": {}, "per_page": 1, "occasion": "Подарок", "tone": 5},
+     "product": "canvas", "variant": "30x40", "options": {}, "per_page": 1, "occasion": "Подарок", "tone": 5, "img": "canvas"},
 ]
 SEED_REVIEWS = [  # примеры, чтобы лента не была пустой; в интерфейсе помечены «пример»
     {"id": "r-demo-1", "name": "Анна", "product": "Фотокнига", "rating": 5, "demo": True, "ts": "2026-10-28T10:00:00+03:00",
@@ -1220,8 +1278,9 @@ def _bump_use(r):
 
 def _template_view(t, stats, uid):
     s = stats.get(t["id"]) or {}
-    v = {k: t.get(k) for k in ("id", "title", "desc", "product", "variant", "options", "per_page", "occasion", "tone", "ts")}
-    v.update(author="picPac", likes=len(s.get("likes", [])), liked=uid in s.get("likes", []),
+    v = {k: t.get(k) for k in ("id", "title", "desc", "product", "variant", "options", "per_page", "occasion", "tone", "ts", "img", "cover")}
+    v.update(author=t.get("author") or "picPac", company=not t.get("author"), mine=bool(uid) and t.get("by") == uid and bool(t.get("author")),
+             skel=t.get("skel") or [], likes=len(s.get("likes", [])), liked=uid in s.get("likes", []),
              uses=s.get("uses", 0), seed=t["id"].startswith("t-seed-"))
     return v
 
@@ -1263,7 +1322,7 @@ def _social_feed(h, core, u):
     revs = [_review_view(r, stats, uid) for r in real][::-1] + [_review_view(r, stats, uid) for r in SEED_REVIEWS]
     shown = [x for x in revs if not x["hidden"]]
     dist = {str(i): sum(1 for x in shown if x["rating"] == i) for i in range(1, 6)}
-    out = {"templates": tpls, "reviews": revs, "occasions": OCCASIONS, "can_publish": pub,
+    out = {"templates": tpls, "reviews": revs, "occasions": OCCASIONS, "can_publish": pub, "can_share": bool(u),
            "summary": {"count": len(shown), "avg": round(sum(x["rating"] for x in shown) / len(shown), 1) if shown else 0, "dist": dist}}
     if u:
         mine = {r["order_id"] for r in core.load("reviews") if r.get("user") == uid}
@@ -1347,14 +1406,23 @@ def _review_act(h, core, user, rid, act):
 
 
 def _template_publish(h, core, user):
-    if not _can_publish(user):
+    company = _can_publish(user)
+    if not company and user.get("role") != "customer":
         core.audit(user["name"], "публикация шаблона", "нет прав", obj="template", result="отказ")
-        raise Bad("Публиковать шаблоны могут сотрудники компании", 403)
+        raise Bad("Публиковать шаблоны могут покупатели и сотрудники компании", 403)
     b = h._body()
     title = " ".join(str(b.get("title") or "").split())
     if not 3 <= len(title) <= 60:
         raise Bad("Название — от 3 до 60 знаков", extra={"field": "title"})
     desc = " ".join(str(b.get("desc") or "").split())[:200]
+    if not company:
+        if LINK_RE.search(title + " " + desc):
+            raise Bad("Без ссылок и контактов, пожалуйста", extra={"field": "desc"})
+        if sum(1 for x in core.load("templates") if x.get("by") == user["id"]) >= 12:
+            raise Bad("Можно поделиться не больше чем 12 шаблонами. Уберите старый, чтобы добавить новый", 429)
+    cover = str(b.get("cover") or "")
+    if cover and (not cover.startswith("data:image/jpeg;base64,") or len(cover) > 140000):
+        raise Bad("Обложка должна быть уменьшенным снимком JPEG", extra={"field": "cover"})
     prod = PROD.get(str(b.get("product") or ""))
     if not prod:
         raise Bad("Выберите продукт", extra={"field": "product"})
@@ -1389,7 +1457,8 @@ def _template_publish(h, core, user):
                 h._json(dict(_template_view(old, {}, user["id"]), replayed=True))
                 return True
         rec = {"id": _new_id("t-"), "key": key, "title": title, "desc": desc, "product": prod["id"], "variant": variant, "options": options,
-               "per_page": per, "occasion": occ, "tone": len(items) % 6, "ts": core.now(), "by": user["id"]}
+               "per_page": per, "occasion": occ, "tone": len(items) % 6, "ts": core.now(), "by": user["id"],
+               "author": "" if company else _author_name(user), "skel": _clean_skel(b.get("skel")), "cover": cover}
         items.append(rec)
         core.save("templates", items)
     core.audit(user["name"], "опубликовал шаблон", title, obj="template " + rec["id"])
@@ -1410,8 +1479,9 @@ def _template_act(h, core, user, tid, act):
         h._json({"uses": rec["uses"]})
         return True
     if act == "delete":
-        if not _can_publish(user) or tid.startswith("t-seed-"):
-            raise Bad("Удалить можно только шаблон, который опубликовала компания", 403)
+        own = any(t["id"] == tid and t.get("by") == user["id"] and t.get("author") for t in core.load("templates"))
+        if tid.startswith("t-seed-") or not (_can_publish(user) or own):
+            raise Bad("Убрать можно только свой шаблон; шаблоны picPac не удаляются", 403)
         with core.lock:
             core.save("templates", [t for t in core.load("templates") if t["id"] != tid])
         core.audit(user["name"], "удалил шаблон", tid, obj="template " + tid)

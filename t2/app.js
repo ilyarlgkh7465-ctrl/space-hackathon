@@ -300,7 +300,9 @@
   /* ---------- иконки ---------- */
   const SV = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
   const ICON = {
-    back: SV('<path d="M15 18l-6-6 6-6"/>'), check: SV('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+    back: SV('<path d="M15 18l-6-6 6-6"/>'),
+    grid: SV('<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>'),
+    text: SV('<path d="M5 6h14M12 6v13M9 19h6"/>'), drop: SV('<path d="M12 3.5s6 6.2 6 10.4a6 6 0 0 1-12 0C6 9.7 12 3.5 12 3.5z"/>'), check: SV('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
     photos: SV('<rect x="3" y="5" width="15" height="13" rx="2"/><path d="M7 3h12a2 2 0 0 1 2 2v10"/><path d="M3 15l4-4 4 4 3-3 4 4"/><circle cx="13.5" cy="9" r="1.3"/>'),
     book: SV('<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/><path d="M9 8h6"/>'),
     cal: SV('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
@@ -321,7 +323,7 @@
   const haptic = (ok) => { try { navigator.vibrate && navigator.vibrate(ok ? [20, 40, 20] : 10); } catch (e) { /* нет вибрации */ } };
 
   /* ---------- навигация и отрисовка ---------- */
-  const TITLES = { home: 'picPac', product: 'Продукт', photos: 'Фото', layout: 'Макет', check: 'Проверка', cart: 'Оформление', done: 'Заказ', orders: 'Мои заказы', order: 'Заказ', profile: 'Профиль', login: 'Вход', feed: 'Мои фото', social: 'Идеи', join: 'Общий альбом' };
+  const TITLES = { home: 'picPac', product: 'Продукт', photos: 'Фото', layout: 'Конструктор', check: 'Проверка', cart: 'Оформление', done: 'Заказ', orders: 'Мои заказы', order: 'Заказ', profile: 'Профиль', login: 'Вход', feed: 'Мои фото', social: 'Идеи', join: 'Общий альбом' };
   const TABS = ['home', 'feed', 'social', 'orders', 'profile'];
   const flowOf = () => S.draft && hasLayout(S.draft) ? ['product', 'photos', 'layout', 'check', 'cart'] : ['product', 'photos', 'check', 'cart'];
   function go(view, replace) {
@@ -432,7 +434,7 @@
     return {
       html: `<section class="hello"><h1>Фото — в печать за пару касаний</h1><p>Выберите снимки из галереи. Подскажем, что из них получится.</p></section>
         <label class="btn btn-primary btn-xl cta" for="file" id="cta">${ICON.photos.replace('<svg', '<svg width="22" height="22"')} Выбрать фото</label>
-        ${ob}${cont}${recsHtml()}
+        ${ob}${orderPanel()}${cont}${recsHtml()}
         <p class="sec-t">Для чего?</p><div class="occ" role="list">${OCCASIONS.map(([t, pid, vid], i) => `<button class="occ-i" role="listitem" data-oc="${i}">${esc(t)}</button>`).join('')}</div>
         <p class="sec-t">Все продукты</p><div class="pgrid">${cards}</div>
         ${cat ? '' : '<p class="muted" style="text-align:center">Загружаю каталог…</p>'}
@@ -441,12 +443,22 @@
         scr.querySelectorAll('[data-pr]').forEach((b) => { b.onclick = () => openProduct(b.dataset.pr); });
         scr.querySelectorAll('[data-oc]').forEach((b) => { const o = OCCASIONS[+b.dataset.oc]; b.onclick = () => openProduct(o[1], o[2]); });
         const c = $('#cont'); if (c) c.onclick = () => go('photos');
+        const os = $('#ostat'); if (os) os.onclick = () => openOrder(os.dataset.o);
         const r = $('#retry'); if (r) r.onclick = flushOutbox;
         scr.querySelectorAll('[data-rec]').forEach((b) => { b.onclick = () => runRec(recs()[+b.dataset.rec].act); });
         $('#file').accept = 'image/jpeg,image/png';
       },
     };
   };
+  /* статус заказа — сразу на главной: от оформления до выдачи */
+  function orderPanel() {
+    const o = S.orders.find((x) => ribIndex(x) < 5); if (!o) return '';
+    const idx = ribIndex(o), defect = o.stage_status === 'defect';
+    return `<button class="card ostat" id="ostat" data-o="${o.id}" aria-label="Статус заказа ${esc(o.number)}. Открыть">
+      <span class="ostat-h"><b>Заказ ${esc(o.number)}</b>${stageChip(o)}</span>
+      <span class="ostat-steps" aria-hidden="true">${RIB.map(([id, short], i) => `<span class="${i < idx ? 'on' : i === idx ? 'cur' : ''}"><i></i><em>${id === 'moderation' ? 'Проверка' : id === 'done' ? 'Выдан' : short}</em></span>`).join('')}</span>
+      <span class="ostat-t">${esc(defect ? 'На этапе нашли брак — переделываем бесплатно.' : NOW[o.stage] || '')}</span></button>`;
+  }
   function openProduct(id, vid) {
     const prod = prodOf(id); if (!prod) return toast('Этот продукт сейчас недоступен');
     vid = vid && prod.variants.some((v) => v.id === vid) ? vid : null;
@@ -537,25 +549,59 @@
     }
     const base = Math.min(4, Math.floor(N / P)), extra = Math.min(N - base * P, P), pages = [];
     let k = 0;
+    if (d.skel && d.skel.length && N >= P) {            // шаблон из «Идей»: число фото на странице берём из его каркаса
+      for (let i = 0; i < P; i++) { const c = Math.max(1, Math.min(d.skel[i % d.skel.length].n || 1, N - k - (P - i - 1))); pages.push(ids.slice(k, k + c)); k += c; }
+      for (let i = 0; k < N && i < P * 4; i++) { const pg = pages[i % P]; if (pg.length < 4) pg.push(ids[k++]); }
+      return pages;
+    }
     if (N >= P) for (let i = 0; i < P; i++) { const c = Math.min(4, base + (i < extra ? 1 : 0)); pages.push(ids.slice(k, k + c)); k += c; }
     else for (let i = 0; i < P; i++) pages.push(i < N ? [ids[i]] : []);
     return pages;
   }
   function ensureLayout(force) {
     const d = S.draft;
-    if (force || !d.layout || d.layoutKey !== layoutKey(d)) { d.layout = buildLayout(d); d.layoutKey = layoutKey(d); saveDraft(); }
+    if (force || !d.layout || d.layoutKey !== layoutKey(d)) {
+      d.layout = buildLayout(d); d.layoutKey = layoutKey(d);
+      if (d.skel && d.skel.length && (force || !d.pm || !d.pm.length)) d.pm = d.layout.map((pg, i) => { const m = d.skel[i % d.skel.length]; return { t: m.t || 'a', bg: m.bg || '#FFFFFF', tx: '', tp: 'b', z: {} }; });
+      saveDraft();
+    }
+  }
+  /* ---------- конструктор страницы: шаблон, фото, подпись, фон ---------- */
+  const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  const TPL = {
+    1: [['a', 'Во всю страницу'], ['b', 'С полями'], ['c', 'Карточка']], 2: [['a', 'Рядом'], ['b', 'Друг над другом'], ['c', 'Без полей']],
+    3: [['a', 'Крупное слева'], ['b', 'Крупное сверху'], ['c', 'Три в ряд']], 4: [['a', 'Сетка'], ['b', 'Крупное сверху'], ['c', 'Крупное слева']],
+  };
+  const BGS = [['#FFFFFF', 'Белый'], ['#F6F1E7', 'Кремовый'], ['#EDEDF0', 'Серый'], ['#141414', 'Чёрный'], ['#FFD400', 'Жёлтый'], ['#F7D9DD', 'Розовый'], ['#DCE9F5', 'Голубой'], ['#DDEBDD', 'Зелёный']];
+  const darkBg = (c) => { const n = parseInt(String(c || '#FFFFFF').slice(1), 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 140; };
+  /* оформление страницы хранится рядом с раскладкой: d.pm[i] = { t: шаблон, bg: фон, tx: подпись, tp: где подпись, z: кадрирование фото } */
+  function pmOf(d, i) {
+    if (!Array.isArray(d.pm)) d.pm = [];
+    while (d.pm.length < d.layout.length) d.pm.push(null);
+    d.pm.length = d.layout.length;
+    return d.pm[i] || (d.pm[i] = { t: 'a', bg: '#FFFFFF', tx: '', tp: 'b', z: {} });
+  }
+  const tplOf = (m, n) => (TPL[n] || []).some((x) => x[0] === m.t) ? m.t : 'a';
+  function pv(d, i, o) {
+    o = o || {};
+    const pg = d.layout[i] || [], m = pmOf(d, i), n = Math.min(pg.length, 4);
+    const slots = pg.slice(0, 4).map((id) => {
+      const z = (m.z || {})[id] || {}, x = z.x == null ? 50 : z.x, y = z.y == null ? 50 : z.y, sc = z.s || 1;
+      const img = S.thumbs[id] ? `<img src="${S.thumbs[id]}" alt="" draggable="false" style="object-position:${x}% ${y}%;transform:scale(${sc});transform-origin:${x}% ${y}%">` : '';
+      return o.edit ? `<button class="sl${o.sel === id ? ' sel' : ''}" data-sl="${id}" aria-label="Фото на странице" aria-pressed="${o.sel === id}">${img}</button>` : `<i class="sl">${img}</i>`;
+    }).join('');
+    return `<span class="pv n${n} t${n}${tplOf(m, n)}${m.tx ? ' tx-' + (m.tp === 't' ? 't' : 'b') : ''}${darkBg(m.bg) ? ' dark' : ''}" style="background:${m.bg || '#FFFFFF'}">${slots || '<em>пусто</em>'}${m.tx ? `<span class="cap">${esc(m.tx)}</span>` : ''}</span>`;
   }
   VIEWS.layout = () => {
     const d = S.draft; ensureLayout();
     const lay = d.layout, prod = prodOf(d.product), cal = prod.kind === 'calendar', N = d.photos.length, P = pagesOf(d);
     const empty = lay.slice(0, cal ? 12 : P).filter((pg) => !pg.length).length;
-    const MON = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-    const page = (pg, i) => `<button class="pg ${pg.length ? '' : 'empty'}" data-pg="${i}" aria-label="${cal ? (i < 12 ? MON[i] : 'Обложка') : 'Страница ' + (i + 1)}, фото: ${pg.length}">
-      <span class="mos m${Math.min(pg.length, 4)}">${pg.slice(0, 4).map((id) => `<i style="background-image:url(${S.thumbs[id] || ''})"></i>`).join('') || '<em>пусто</em>'}</span>
-      <small>${cal ? (i < 12 ? MON[i] : 'Обложка') : i + 1}</small></button>`;
-    const fewPages = !cal && N < P && P > prod.options[0].min ? Math.max(prod.options[0].min, N + (N % 2)) : 0;
+    const page = (pg, i) => `<button class="pg ${pg.length ? '' : 'empty'}" data-pg="${i}" aria-label="${cal ? (i < 12 ? MONTHS[i] : 'Обложка') : 'Страница ' + (i + 1)}, фото: ${pg.length}. Открыть конструктор">
+      ${pv(d, i)}<small>${cal ? (i < 12 ? MONTHS[i] : 'Обложка') : i + 1}</small></button>`;
     return {
-      html: `<div class="ai-note"><span class="ai-ava">${ICON.spark}</span><div class="ai-body">Разложила <b>${N}</b> ${plural(N, 'фото', 'фото', 'фото')} по ${cal ? 'месяцам' : P + ' ' + plural(P, 'странице', 'страницам', 'страницам')} в порядке съёмки. ${empty ? `Пустых ${cal ? 'месяцев' : 'страниц'}: <b>${empty}</b>.` : 'Пустых мест нет.'} Касанием можно переставить.</div></div>
+      html: `<div class="ai-note"><span class="ai-ava">${ICON.spark}</span><div class="ai-body">Разложила <b>${N}</b> ${plural(N, 'фото', 'фото', 'фото')} по ${cal ? 'месяцам' : P + ' ' + plural(P, 'странице', 'страницам', 'страницам')} в порядке съёмки. ${empty ? `Пустых ${cal ? 'месяцев' : 'страниц'}: <b>${empty}</b>.` : 'Пустых мест нет.'}</div></div>
+        <div class="ctor-how" aria-label="Что можно сделать со страницей"><b>Нажмите на страницу — откроется конструктор</b>
+          <span>${ICON.grid} Шаблон</span><span>${ICON.photos} Фото</span><span>${ICON.text} Подпись</span><span>${ICON.drop} Фон</span></div>
         ${!cal && N < P ? `<div class="warnbox"><span>Фото меньше, чем страниц. Можно уменьшить книгу${P > prod.options[0].min ? '' : ' (меньше 20 страниц нельзя)'}.</span>${P > prod.options[0].min ? `<button class="btn btn-sm" id="fit">${Math.max(prod.options[0].min, P - 2)} стр.</button>` : ''}</div>` : ''}
         <div class="pages">${lay.map(page).join('')}</div>
         <section class="card aiedit" aria-label="Правка альбома с помощью ИИ"><div class="ai-head"><span class="ai-ava">${ICON.spark}</span><b>Править с помощью ИИ</b></div>
@@ -563,14 +609,15 @@
           <div class="field"><label for="aiq">Напишите, что изменить</label><textarea class="textarea" id="aiq" rows="2" maxlength="300" placeholder="Например: убери размытые и поставь страницу 5 в начало"></textarea></div>
           ${S.aiMsg ? `<p class="ai-say" role="status">${esc(S.aiMsg)}</p>` : ''}
           <div class="row2"><button class="btn btn-accent" id="aigo">Применить</button>${d.layoutPrev ? '<button class="btn" id="aiundo">Отменить</button>' : ''}</div></section>
-        <button class="btn" id="re">Собрать заново</button>`,
+        <div class="row2"><button class="btn" id="re">Собрать заново</button><button class="btn" id="shtpl">Поделиться шаблоном</button></div>`,
       bar: `<button class="btn btn-primary btn-xl" id="next">Дальше · проверка</button><div class="sub">Макет можно не править: мы уже всё разложили</div>`,
       bind(scr) {
-        scr.querySelectorAll('[data-pg]').forEach((b) => { b.onclick = () => { S.pgSheet = +b.dataset.pg; renderPgSheet(); }; });
+        scr.querySelectorAll('[data-pg]').forEach((b) => { b.onclick = () => { S.pgSheet = +b.dataset.pg; S.ed = { tab: 'tpl', sel: null }; renderPgSheet(); }; });
         scr.querySelectorAll('[data-hint]').forEach((b) => { b.onclick = () => { $('#aiq').value = AI_HINTS[+b.dataset.hint]; $('#aiq').focus(); }; });
         $('#aigo').onclick = aiEdit;
         const ud = $('#aiundo'); if (ud) ud.onclick = () => { d.layout = d.layoutPrev; d.layoutPrev = null; S.aiMsg = 'Вернула прежнюю раскладку'; saveDraft(); rerender(); };
-        $('#re').onclick = () => { d.layoutPrev = null; S.aiMsg = ''; ensureLayout(true); toast('Собрала заново'); rerender(); };
+        $('#re').onclick = () => { d.layoutPrev = null; d.pm = []; S.aiMsg = ''; ensureLayout(true); toast('Собрала заново'); rerender(); };
+        $('#shtpl').onclick = () => shareTemplate();
         const f = $('#fit'); if (f) f.onclick = () => { d.options.pages = Math.max(prod.options[0].min, P - 2); d.layoutKey = ''; saveDraft(); refreshPrice(); rerender(); };
         $('#next').onclick = async () => { await runCheck(); go('check'); };
       },
@@ -591,18 +638,86 @@
   function renderPgSheet() {
     const old = $('#sheet'); if (old) old.remove();
     const d = S.draft, i = S.pgSheet; if (i == null || !d.layout[i]) return;
-    const lay = d.layout, el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet';
-    el.innerHTML = `<div class="sheet-bg" data-x></div><div class="sheet-body" role="dialog" aria-label="Страница ${i + 1}">
-      <b>${prodOf(d.product).kind === 'calendar' ? (i < 12 ? 'Месяц ' + (i + 1) : 'Обложка') : 'Страница ' + (i + 1)}</b>
-      <div class="pgfull">${lay[i].map((id) => `<img src="${S.thumbs[id] || ''}" alt="">`).join('') || '<p class="muted">Здесь пока пусто</p>'}</div>
-      <div class="row2"><button class="btn" data-a="up" ${i === 0 ? 'disabled' : ''}>← Раньше</button><button class="btn" data-a="dn" ${i === lay.length - 1 ? 'disabled' : ''}>Позже →</button></div>
+    const E = S.ed || (S.ed = { tab: 'tpl', sel: null });
+    const lay = d.layout, pg = lay[i], m = pmOf(d, i), cal = prodOf(d.product).kind === 'calendar', n = Math.min(pg.length, 4);
+    if (E.sel && !pg.includes(E.sel)) E.sel = null;
+    const where = {}; lay.forEach((x, k) => x.forEach((id) => { where[id] = k; }));
+    const name = cal ? (i < 12 ? MONTHS[i] : 'Обложка') : 'Страница ' + (i + 1) + ' из ' + lay.length, curT = tplOf(m, n), si = pg.indexOf(E.sel);
+    const zs = E.sel ? ((m.z || {})[E.sel] || {}).s || 1 : 1;
+    const panel = {
+      tpl: () => n ? `<div class="ed-tpls">${TPL[n].map(([k, nm]) => `<button class="ed-tpl" data-t="${k}" aria-pressed="${curT === k}"><span class="pv mini n${n} t${n}${k}">${'<i class="sl"></i>'.repeat(n)}</span><small>${nm}</small></button>`).join('')}</div>
+          <button class="btn btn-sm btn-ghost" data-a="tall">Так же на всех страницах, где ${n} фото</button>`
+        : '<p class="ed-tip">На странице пока нет фото. Откройте «Фото» и добавьте до четырёх.</p>',
+      photo: () => `<p class="ed-tip">${E.sel ? 'Выберите фото на замену выделенному' : n >= 4 ? 'На странице уже 4 фото. Нажмите на фото на странице, чтобы заменить его' : 'Нажмите на фото, чтобы добавить его на эту страницу'}</p>
+          <div class="ed-photos">${d.photos.map((ph) => `<button class="ed-ph${where[ph.id] === i ? ' here' : ''}" data-ph="${ph.id}" aria-label="Фото ${esc(ph.name || '')}">${S.thumbs[ph.id] ? `<img src="${S.thumbs[ph.id]}" alt="">` : ''}${where[ph.id] == null ? '<small class="free">не в книге</small>' : where[ph.id] === i ? '<small>здесь</small>' : `<small>${cal ? 'мес.' : 'стр.'} ${where[ph.id] + 1}</small>`}</button>`).join('')}</div>`,
+      text: () => `<div class="field"><label for="edtx">Подпись на странице</label><input class="input" id="edtx" maxlength="60" value="${esc(m.tx || '')}" placeholder="Например: Лето 2026, Нарочь"></div>
+          <div class="seg" role="group" aria-label="Где подпись"><button data-tp="b" aria-pressed="${m.tp !== 't'}">Снизу</button><button data-tp="t" aria-pressed="${m.tp === 't'}">Сверху</button></div>`,
+      bg: () => `<div class="ed-bgs">${BGS.map(([c, nm]) => `<button class="ed-bg" data-bg="${c}" style="background:${c}" aria-label="${nm}" title="${nm}" aria-pressed="${(m.bg || '#FFFFFF') === c}"></button>`).join('')}</div>
+          <button class="btn btn-sm btn-ghost" data-a="ball">Этот фон — на все страницы</button>`,
+    };
+    const selBar = E.sel ? `<div class="ed-sel"><button class="btn btn-sm" data-a="repl">Заменить</button><button class="btn btn-sm" data-a="sl" ${si <= 0 ? 'disabled' : ''}>← Левее</button><button class="btn btn-sm" data-a="sr" ${si >= pg.length - 1 ? 'disabled' : ''}>Правее →</button><button class="btn btn-sm" data-a="rm">Убрать</button>
+        <label class="ed-zoom">Крупнее<input type="range" id="edz" min="1" max="2.5" step="0.05" value="${zs}" aria-label="Увеличить фото"></label></div><p class="ed-tip">Фото можно двигать пальцем внутри рамки</p>`
+      : `<p class="ed-tip">${n ? 'Нажмите на фото — его можно заменить, подвинуть, увеличить или убрать' : 'Пустая страница. Добавьте фото на вкладке «Фото»'}</p>`;
+    const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet';
+    el.innerHTML = `<div class="sheet-bg" data-x></div><div class="sheet-body ed-body" role="dialog" aria-label="Конструктор: ${name}">
+      <div class="ed-top"><button data-a="prev" aria-label="Предыдущая страница" ${i === 0 ? 'disabled' : ''}>${ICON.back}</button><b>${name}</b><button data-a="next" class="fwd" aria-label="Следующая страница" ${i === lay.length - 1 ? 'disabled' : ''}>${ICON.back}</button></div>
+      <div class="ed-stage">${pv(d, i, { edit: true, sel: E.sel })}</div>${selBar}
+      <div class="ed-tabs" role="tablist">${[['tpl', 'Шаблон'], ['photo', 'Фото'], ['text', 'Подпись'], ['bg', 'Фон']].map(([k, nm]) => `<button role="tab" data-tab="${k}" aria-pressed="${E.tab === k}">${nm}</button>`).join('')}</div>
+      <div class="ed-panel">${panel[E.tab]()}</div>
+      <div class="row2"><button class="btn btn-sm" data-a="up" ${i === 0 ? 'disabled' : ''}>Страницу раньше</button><button class="btn btn-sm" data-a="dn" ${i === lay.length - 1 ? 'disabled' : ''}>Страницу позже</button></div>
       <button class="btn btn-accent btn-lg" data-x>Готово</button></div>`;
     $('.app').appendChild(el);
-    const done = () => { S.pgSheet = null; el.remove(); saveDraft(); rerender(); };
+    const body = el.querySelector('.ed-body'), keep = () => { const t = body.scrollTop; renderPgSheet(); const b = $('#sheet .ed-body'); if (b) b.scrollTop = t; };
+    const save = () => { LS.set('pp_draft', d); syncSoon(); };
+    const done = () => { S.pgSheet = null; S.ed = null; el.remove(); saveDraft(); rerender(); };
     el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = done; });
-    el.querySelectorAll('[data-a]').forEach((b) => {
-      b.onclick = () => { const j = b.dataset.a === 'up' ? i - 1 : i + 1;[lay[i], lay[j]] = [lay[j], lay[i]]; S.pgSheet = j; saveDraft(); renderPgSheet(); rerender(); };
+    el.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { E.tab = b.dataset.tab; keep(); }; });
+    el.querySelectorAll('[data-t]').forEach((b) => { b.onclick = () => { m.t = b.dataset.t; save(); keep(); }; });
+    el.querySelectorAll('[data-bg]').forEach((b) => { b.onclick = () => { m.bg = b.dataset.bg; save(); keep(); }; });
+    el.querySelectorAll('[data-tp]').forEach((b) => { b.onclick = () => { m.tp = b.dataset.tp; save(); keep(); }; });
+    const stage = el.querySelector('.ed-stage');
+    const tx = $('#edtx'); if (tx) tx.oninput = () => { m.tx = tx.value; stage.innerHTML = pv(d, i, { edit: true, sel: E.sel }); bindSlots(); save(); };
+    const zr = $('#edz'); if (zr) zr.oninput = () => { const z = (m.z = m.z || {}), c = z[E.sel] || (z[E.sel] = { x: 50, y: 50, s: 1 }); c.s = +zr.value; paint(E.sel); save(); };
+    function paint(id) {
+      const im = stage.querySelector(`[data-sl="${id}"] img`), c = (m.z || {})[id]; if (!im || !c) return;
+      im.style.objectPosition = im.style.transformOrigin = c.x + '% ' + c.y + '%'; im.style.transform = 'scale(' + (c.s || 1) + ')';
+    }
+    /* фото: короткое касание — выбрать; выбранное можно двигать пальцем внутри рамки */
+    function bindSlots() {
+      stage.querySelectorAll('[data-sl]').forEach((b) => {
+        const id = b.dataset.sl; let st = null, moved = false;
+        b.onpointerdown = (e) => { st = { x: e.clientX, y: e.clientY, r: b.getBoundingClientRect(), c: Object.assign({ x: 50, y: 50, s: 1 }, (m.z || {})[id]) }; moved = false; if (E.sel === id) { try { b.setPointerCapture(e.pointerId); } catch (er) { /* не страшно */ } } };
+        b.onpointermove = (e) => {
+          if (!st || E.sel !== id) return;
+          const dx = e.clientX - st.x, dy = e.clientY - st.y; if (!moved && Math.abs(dx) + Math.abs(dy) < 6) return;
+          moved = true; const z = (m.z = m.z || {}), c = z[id] || (z[id] = { x: 50, y: 50, s: 1 }), k = 130 / (st.c.s || 1);
+          c.x = Math.round(Math.min(100, Math.max(0, st.c.x - dx / st.r.width * k))); c.y = Math.round(Math.min(100, Math.max(0, st.c.y - dy / st.r.height * k))); c.s = st.c.s || 1; paint(id);
+        };
+        b.onpointerup = b.onpointercancel = () => { if (moved) save(); st = null; };
+        b.onclick = () => { if (moved) { moved = false; return; } E.sel = E.sel === id ? null : id; keep(); };
+      });
+    }
+    bindSlots();
+    el.querySelectorAll('[data-ph]').forEach((b) => {
+      b.onclick = () => {
+        const id = b.dataset.ph, from = where[id];
+        if (from === i) E.sel = E.sel === id ? null : id;
+        else if (E.sel) { const k = pg.indexOf(E.sel), was = E.sel; if (from != null) lay[from][lay[from].indexOf(id)] = was; pg[k] = id; E.sel = id; haptic(); }
+        else { if (pg.length >= 4) return toast('На странице уже 4 фото — сначала выберите, какое заменить'); if (from != null) lay[from].splice(lay[from].indexOf(id), 1); pg.push(id); E.sel = id; haptic(); }
+        save(); keep();
+      };
     });
+    const act = {
+      prev: () => { S.pgSheet = i - 1; E.sel = null; }, next: () => { S.pgSheet = i + 1; E.sel = null; },
+      up: () => { [lay[i], lay[i - 1]] = [lay[i - 1], lay[i]]; pmOf(d, i - 1); [d.pm[i], d.pm[i - 1]] = [d.pm[i - 1], d.pm[i]]; S.pgSheet = i - 1; },
+      dn: () => { [lay[i], lay[i + 1]] = [lay[i + 1], lay[i]]; pmOf(d, i + 1); [d.pm[i], d.pm[i + 1]] = [d.pm[i + 1], d.pm[i]]; S.pgSheet = i + 1; },
+      repl: () => { E.tab = 'photo'; },
+      sl: () => { [pg[si], pg[si - 1]] = [pg[si - 1], pg[si]]; }, sr: () => { [pg[si], pg[si + 1]] = [pg[si + 1], pg[si]]; },
+      rm: () => { pg.splice(si, 1); E.sel = null; toast('Фото убрано со страницы. Оно осталось на вкладке «Фото»'); },
+      tall: () => { let c = 0; lay.forEach((x, k) => { if (Math.min(x.length, 4) === n) { pmOf(d, k).t = m.t; c++; } }); toast('Шаблон применён к страницам: ' + c); },
+      ball: () => { lay.forEach((x, k) => { pmOf(d, k).bg = m.bg; }); toast('Фон применён ко всем страницам'); },
+    };
+    el.querySelectorAll('[data-a]').forEach((b) => { b.onclick = () => { act[b.dataset.a](); save(); keep(); }; });
   }
 
   /* ---------- лента «как в Instagram»: фото → «Напечатать» ---------- */
@@ -891,9 +1006,9 @@
     if (!S.session) return;
     try { const list = await call('GET', '/orders'), changed = JSON.stringify(list) !== JSON.stringify(S.orders), was = Object.fromEntries(S.orders.map((o) => [o.id, o]));
       list.forEach((o) => { const p = was[o.id]; if (p && (p.stage !== o.stage || p.stage_status !== o.stage_status)) { notify('Заказ ' + o.number, stageNews(o), o.id); wire('Статус из производства: ' + RIB[Math.min(ribIndex(o), 4)][1].toLowerCase()); } });
-      S.orders = list; LS.set('pp_orders', S.orders); if (changed && S.view === 'orders') rerender2(); } catch (e) { /* показываем сохранённые */ }
+      S.orders = list; LS.set('pp_orders', S.orders); if (changed && (S.view === 'orders' || S.view === 'home')) rerender2(); } catch (e) { /* показываем сохранённые */ }
   }
-  let r2; function rerender2() { clearTimeout(r2); r2 = setTimeout(() => { if (S.view === 'orders') rerender(); }, 0); }
+  let r2; function rerender2() { clearTimeout(r2); r2 = setTimeout(() => { if (S.view === 'orders' || S.view === 'home') rerender(); }, 0); }
   let ordersLoaded = false;
   VIEWS.orders = () => {
     const L = S.orders;
@@ -942,14 +1057,70 @@
   }
   const stars = (n, big) => `<span class="stars${big ? ' big' : ''}" role="img" aria-label="${n} из 5">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= Math.round(n) ? 'on' : ''}">${ICON.star}</i>`).join('')}</span>`;
   const heart = (liked) => liked ? ICON.heart.replace('fill="none"', 'fill="currentColor"') : ICON.heart;
-  function tplCard(t, pub) {
-    const prod = prodOf(t.product) || {}, v = (prod.variants || []).find((x) => x.id === t.variant);
+  const PIN_R = ['4 / 5', '1 / 1', '3 / 4', '5 / 6'];
+  const skelPv = (m) => `<span class="pv mini n${m.n} t${m.n}${m.t}${darkBg(m.bg) ? ' dark' : ''}" style="background:${m.bg}">${'<i class="sl"></i>'.repeat(m.n) || '<em></em>'}</span>`;
+  function pinCover(t) {
+    if (t.cover) return `<img class="art-photo" src="${t.cover}" alt="" loading="lazy">`;
+    if (t.img) return `<img class="art-photo" src="/t2/photos/photo-${esc(t.img)}.jpg" alt="" loading="lazy" decoding="async">`;
+    if (t.skel && t.skel.length) return `<span class="pin-skel">${t.skel.slice(0, 4).map(skelPv).join('')}</span>`;
+    return artOf((prodOf(t.product) || {}).kind || 'print');
+  }
+  const pinBy = (t) => t.company === false ? esc(t.author || 'Покупатель') : 'picPac';
+  function pinCard(t, k) {
+    return `<article class="pin"><button class="pin-cover tone${(t.tone || 0) % 6}" data-pin="${t.id}" style="aspect-ratio:${PIN_R[k % 4]}" aria-label="Открыть идею: ${esc(t.title)}">${pinCover(t)}<span class="chip">${esc(t.occasion)}</span></button>
+      <div class="pin-b"><b>${esc(t.title)}</b><div class="pin-m"><span class="by">${pinBy(t)}${t.mine ? ' · вы' : ''}</span><button class="like${t.liked ? ' on' : ''}" data-tl="${t.id}" aria-pressed="${!!t.liked}" aria-label="Нравится">${heart(t.liked)}<span class="num">${t.likes}</span></button></div></div></article>`;
+  }
+  function openPin(t) {
+    const old = $('#sheet'); if (old) old.remove();
+    const prod = prodOf(t.product) || {}, v = (prod.variants || []).find((x) => x.id === t.variant), D = S.soc.data;
     const meta = [prod.name, v && v.name, t.options && t.options.pages ? t.options.pages + ' стр.' : '', t.per_page > 1 ? 'до ' + t.per_page + ' фото на странице' : ''].filter(Boolean).join(' · ');
-    return `<article class="card tcard"><div class="tcover tone${(t.tone || 0) % 6}">${artOf(prod.kind || 'print')}<span class="chip">${esc(t.occasion)}</span></div>
-      <div class="tbody"><h3>${esc(t.title)}</h3><p>${esc(t.desc || '')}</p><small>${esc(meta)}</small>
-      <div class="trow"><span class="by">от picPac${t.seed ? '' : ' · новое'}</span><button class="like${t.liked ? ' on' : ''}" data-tl="${t.id}" aria-pressed="${!!t.liked}" aria-label="Нравится">${heart(t.liked)}<span class="num">${t.likes}</span></button></div>
-      <div class="trow"><button class="btn btn-accent" data-tu="${t.id}">Использовать шаблон</button>${pub && !t.seed ? `<button class="btn btn-sm btn-ghost" data-td="${t.id}">Убрать</button>` : ''}</div>
-      ${t.uses ? `<small class="uses">Использовали ${t.uses} ${plural(t.uses, 'раз', 'раза', 'раз')}</small>` : ''}</div></article>`;
+    const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet';
+    el.innerHTML = `<div class="sheet-bg" data-x></div><div class="sheet-body pin-sheet" role="dialog" aria-label="${esc(t.title)}">
+      <div class="pin-big tone${(t.tone || 0) % 6}">${pinCover(t)}</div>
+      <h3>${esc(t.title)}</h3><p>${esc(t.desc || '')}</p><small class="muted">${esc(meta)} · ${pinBy(t)}${t.uses ? ' · собрали ' + t.uses + ' ' + plural(t.uses, 'раз', 'раза', 'раз') : ''}</small>
+      ${(t.skel || []).length ? `<p class="sec-t">Страницы шаблона</p><div class="pin-pages">${t.skel.slice(0, 8).map(skelPv).join('')}</div>` : ''}
+      <p class="ed-tip">Оформление возьмём из шаблона, а фото будут только ваши.</p>
+      <button class="btn btn-accent btn-lg" data-use>Собрать такой же из своих фото</button>
+      <div class="row2"><button class="btn" data-x>Закрыть</button>${(D && D.can_publish && !t.seed) || t.mine ? '<button class="btn" data-del>Убрать из ленты</button>' : ''}</div></div>`;
+    $('.app').appendChild(el);
+    el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = () => el.remove(); });
+    el.querySelector('[data-use]').onclick = () => { el.remove(); useTemplate(t); };
+    const del = el.querySelector('[data-del]');
+    if (del) del.onclick = async () => { if (!confirm('Убрать шаблон из ленты?')) return; await socCall('/social/templates/' + t.id + '/delete').catch(() => null); el.remove(); loadSocial(); };
+  }
+  /* покупатель делится оформлением своего альбома: в шаблон идут число страниц, шаблоны и фоны — фото и подписи остаются у него */
+  function shareTemplate() {
+    const d = S.draft;
+    if (!d || !S.catalog || !hasLayout(d) || !d.photos.length) return toast('Сначала соберите книгу или календарь — поделиться можно их оформлением');
+    if (!S.session) return toast('Войдите, чтобы делиться шаблонами');
+    ensureLayout();
+    const old = $('#sheet'); if (old) old.remove();
+    const prod = prodOf(d.product), occ = (S.soc.data && S.soc.data.occasions) || ['Любой повод', 'Свадьба', 'Семья', 'Путешествие', 'Дети', 'Подарок', 'Праздник'];
+    const skel = d.layout.map((pg, i) => { const m = pmOf(d, i), n = Math.min(pg.length, 4); return { n, t: tplOf(m, n), bg: m.bg || '#FFFFFF' }; }).filter((m) => m.n).slice(0, 60);
+    const first = d.layout.find((pg) => pg.length), cov = first && S.thumbs[first[0]];
+    const el = document.createElement('div'); el.id = 'sheet'; el.className = 'sheet';
+    el.innerHTML = `<div class="sheet-bg" data-x></div><div class="sheet-body pin-sheet" role="dialog" aria-label="Поделиться шаблоном">
+      <b>Поделиться шаблоном</b>
+      <p class="ed-tip">В «Идеи» попадёт только оформление: число страниц, шаблоны и фоны. Ваши фото и подписи не публикуются.</p>
+      <div class="pin-pages">${skel.slice(0, 8).map(skelPv).join('')}</div>
+      <div class="field"><label for="stt">Название</label><input class="input" id="stt" maxlength="60" value="${esc(d.title || '')}" placeholder="Например: Наше лето на Нарочи"></div>
+      <div class="field"><label for="std">Для чего подойдёт</label><textarea class="textarea" id="std" rows="2" maxlength="200" placeholder="Например: отпуск, 40–60 фото, много пейзажей"></textarea></div>
+      <div class="field"><label for="sto">Повод</label><select class="select" id="sto">${occ.map((o) => `<option>${esc(o)}</option>`).join('')}</select></div>
+      ${cov ? `<label class="ed-check"><input type="checkbox" id="stc"><span>Показать обложку — первое фото альбома. <b>Его увидят все.</b></span></label>` : ''}
+      <p class="err" id="ste" role="alert" hidden></p>
+      <div class="row2"><button class="btn btn-accent" id="stgo">Опубликовать</button><button class="btn" data-x>Отмена</button></div></div>`;
+    $('.app').appendChild(el);
+    el.querySelectorAll('[data-x]').forEach((b) => { b.onclick = () => el.remove(); });
+    $('#stgo').onclick = async () => {
+      const title = $('#stt').value.trim(), withCover = $('#stc') && $('#stc').checked && cov && cov.startsWith('data:image/jpeg') && cov.length < 140000;
+      const body = { title, desc: $('#std').value, product: d.product, variant: d.variant, options: prod.kind === 'book' ? { pages: pagesOf(d) } : {},
+        per_page: Math.max(1, ...skel.map((m) => m.n)), occasion: $('#sto').value, skel, cover: withCover ? cov : '' };
+      $('#stgo').disabled = true;
+      try {
+        await call('POST', '/social/templates', body, { headers: { 'Idempotency-Key': 'tpl-' + rid() } });
+        el.remove(); haptic(true); wire('Покупатель поделился шаблоном: ' + title); toast('Шаблон опубликован в «Идеях»'); S.soc.tab = 'tpl'; S.soc.occ = 'Все'; await loadSocial(); go('social');
+      } catch (e) { const er = $('#ste'); if (er) { er.hidden = false; er.textContent = e.offline ? 'Нет сети — повторите, когда она появится' : e.message; } const g = $('#stgo'); if (g) g.disabled = false; }
+    };
   }
   function revCard(r, pub) {
     const reply = r.reply ? `<div class="rreply"><b>${esc(r.reply.by)}</b><p>${esc(r.reply.text)}</p></div>` : '';
@@ -974,7 +1145,7 @@
   }
   function composeTemplate(D) {
     const prods = S.catalog ? S.catalog.products : [], p0 = prods[0] || { variants: [] };
-    return `<div class="card compose"><h3>Новый шаблон от компании</h3>
+    return `<div class="card compose"><h3>Шаблон от компании</h3>
       <div class="field"><label for="tt">Название</label><input class="input" id="tt" maxlength="60" placeholder="Например: Альбом выпускника"></div>
       <div class="field"><label for="td">Описание</label><textarea class="textarea" id="td" rows="2" maxlength="200" placeholder="Для чего подходит и как лучше собрать"></textarea></div>
       <div class="row2"><div class="field"><label for="tp">Продукт</label><select class="select" id="tp">${prods.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
@@ -989,14 +1160,14 @@
     const so = S.soc, D = so.data;
     if (!D) return { html: `<div class="loading"><div class="ai-ava" style="margin:0 auto">${ICON.spark}</div><p>${so.off ? 'Нет сети — лента появится, когда она вернётся' : 'Загружаю ленту…'}</p></div>`, bind() { } };
     const pub = D.can_publish, sm = D.summary;
-    const seg = `<div class="seg" role="tablist"><button role="tab" data-sg="tpl" aria-pressed="${so.tab === 'tpl'}">Шаблоны</button><button role="tab" data-sg="rev" aria-pressed="${so.tab === 'rev'}">Отзывы · ${sm.count}</button></div>`;
+    const seg = `<div class="seg" role="tablist"><button role="tab" data-sg="tpl" aria-pressed="${so.tab === 'tpl'}">Идеи</button><button role="tab" data-sg="rev" aria-pressed="${so.tab === 'rev'}">Отзывы · ${sm.count}</button></div>`;
     const off = so.off ? '<div class="warnbox"><span>Нет сети — показываю сохранённую ленту</span></div>' : '';
     let body;
     if (so.tab === 'tpl') {
       const occ = ['Все'].concat(D.occasions || []), list = D.templates.filter((t) => so.occ === 'Все' || t.occasion === so.occ);
-      body = `${so.compose === 'tpl' ? composeTemplate(D) : pub ? '<button class="btn btn-lg" id="newt">+ Опубликовать шаблон</button>' : ''}
+      body = `${so.compose === 'tpl' ? composeTemplate(D) : `<div class="row2"><button class="btn" id="shareT">+ Поделиться своим</button>${pub ? '<button class="btn" id="newt">+ От компании</button>' : ''}</div>`}
         <div class="occ" role="list">${occ.map((o) => `<button class="occ-i" role="listitem" data-oc2="${esc(o)}" aria-pressed="${so.occ === o}">${esc(o)}</button>`).join('')}</div>
-        ${list.map((t) => tplCard(t, pub)).join('') || '<div class="empty"><p>Для этого повода шаблонов пока нет.</p></div>'}`;
+        ${list.length ? `<div class="pins">${list.map(pinCard).join('')}</div>` : '<div class="empty"><p>Для этого повода идей пока нет.</p></div>'}`;
     } else {
       const bars = [5, 4, 3, 2, 1].map((i) => `<div class="dist"><span class="num">${i}</span><i><b style="width:${sm.count ? (sm.dist[i] || 0) / sm.count * 100 : 0}%"></b></i><span class="num">${sm.dist[i] || 0}</span></div>`).join('');
       body = `<div class="card sumcard"><div class="avg"><b class="num">${sm.avg ? String(sm.avg).replace('.', ',') : '—'}</b>${stars(sm.avg, true)}<small>${sm.count} ${plural(sm.count, 'отзыв', 'отзыва', 'отзывов')}</small></div><div class="dists">${bars}</div></div>
@@ -1004,7 +1175,7 @@
         ${D.reviews.map((r) => revCard(r, pub)).join('')}`;
     }
     return {
-      html: `<section class="hello"><h1>Идеи и отзывы</h1><p>Готовые шаблоны от компании и отзывы тех, кто уже заказал.</p></section>${seg}${off}${body}
+      html: `<section class="hello"><h1>Идеи</h1><p>Смотрите, что собирают другие, и делайте так же — со своими фото. Понравилось своё оформление — поделитесь им.</p></section>${seg}${off}${body}
         <p class="src">Отзывы-примеры помечены. Ссылки и контакты в отзывах не публикуются.</p>`,
       bind(scr) { bindSocial(scr); },
     };
@@ -1019,7 +1190,8 @@
     scr.querySelectorAll('[data-oc2]').forEach((b) => { b.onclick = () => { so.occ = b.dataset.oc2; rerender(); }; });
     scr.querySelectorAll('[data-tl]').forEach((b) => { b.onclick = async () => { if (!S.session) return toast('Войдите, чтобы отмечать'); const r = await socCall('/social/templates/' + b.dataset.tl + '/like').catch(() => null); if (r) upd(D.templates, b.dataset.tl, (t) => { t.likes = r.likes; t.liked = r.liked; }); }; });
     scr.querySelectorAll('[data-rl]').forEach((b) => { b.onclick = async () => { if (!S.session) return toast('Войдите, чтобы отмечать'); const r = await socCall('/social/reviews/' + b.dataset.rl + '/like').catch(() => null); if (r) upd(D.reviews, b.dataset.rl, (t) => { t.likes = r.likes; t.liked = r.liked; }); }; });
-    scr.querySelectorAll('[data-tu]').forEach((b) => { b.onclick = () => useTemplate(D.templates.find((t) => t.id === b.dataset.tu)); });
+    scr.querySelectorAll('[data-pin]').forEach((b) => { b.onclick = () => openPin(D.templates.find((t) => t.id === b.dataset.pin)); });
+    const sh = $('#shareT'); if (sh) sh.onclick = () => shareTemplate();
     scr.querySelectorAll('[data-td]').forEach((b) => { b.onclick = async () => { if (!confirm('Убрать шаблон из ленты?')) return; await socCall('/social/templates/' + b.dataset.td + '/delete').catch(() => null); loadSocial(); }; });
     scr.querySelectorAll('[data-rd]').forEach((b) => { b.onclick = async () => { if (!confirm('Удалить отзыв?')) return; await socCall('/social/reviews/' + b.dataset.rd + '/delete').catch(() => null); loadSocial(); }; });
     scr.querySelectorAll('[data-rh]').forEach((b) => { b.onclick = async () => { await socCall('/social/reviews/' + b.dataset.rh + '/hide').catch(() => null); loadSocial(); }; });
@@ -1053,7 +1225,7 @@
     const prod = t && prodOf(t.product); if (!prod) return toast('Этот продукт сейчас недоступен');
     if (S.draft && S.draft.photos.length) { S.pool = S.pool.concat(S.draft.photos); LS.set('pp_pool', S.pool); }
     S.draft = newDraft(prod); if (t.variant) S.draft.variant = t.variant;
-    Object.assign(S.draft.options, t.options || {}); S.draft.title = t.title; S.draft.tpl = t.id; saveDraft();
+    Object.assign(S.draft.options, t.options || {}); S.draft.title = t.title; S.draft.tpl = t.id; S.draft.skel = (t.skel || []).slice(0, 60); S.draft.pm = []; saveDraft();
     call('POST', '/social/templates/' + t.id + '/use', {}).catch(() => { });
     step('catalog'); refreshPrice(); toast('Шаблон выбран — добавьте фото'); go('photos');
   }
