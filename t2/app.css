@@ -56,10 +56,12 @@ body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
 @media (max-width: 760px) {
   .stage { display: block; padding: 0; max-width: none; min-height: 0; }
   .side { display: none; }
-  .phone { width: auto; height: 100vh; height: 100dvh; border-radius: 0; padding: 0; background: none; box-shadow: none; }
+  /* на телефоне приложение занимает весь экран целиком — без полосы снизу, какой бы ни была высота окна по мнению браузера */
+  html, body { background: #fff; }
+  .phone { position: fixed; inset: 0; width: auto; height: auto; border-radius: 0; padding: 0; background: none; box-shadow: none; }
   .phone::before { display: none; }
   .app { border-radius: 0 !important; }
-  .app.in-frame .app-head { padding-top: calc(8px + env(safe-area-inset-top)) !important; }
+  .app.in-frame .app-head { padding-top: calc(8px + var(--sat, env(safe-area-inset-top))) !important; }
 }
 
 /* ---------- каркас приложения ---------- */
@@ -71,7 +73,7 @@ body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
     radial-gradient(360px 360px at 24% 106%, rgba(207, 227, 216, .8), transparent 70%),
     radial-gradient(260px 260px at 78% -6%, rgba(241, 222, 198, .75), transparent 70%); }
 .app-head { flex: none; position: relative; z-index: 5; display: grid; grid-template-columns: 96px 1fr 96px; align-items: center; gap: 4px;
-  padding: calc(8px + env(safe-area-inset-top)) 12px 8px; transition: background .2s, box-shadow .2s; }
+  padding: calc(8px + var(--sat, env(safe-area-inset-top))) 12px 8px; transition: background .2s, box-shadow .2s; }
 .app.in-frame .app-head { padding-top: 48px; }
 .app-head.scrolled { background: var(--sheet); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: 0 1px 0 var(--edge); }
 .app-head > :last-child { justify-self: end; }
@@ -106,7 +108,7 @@ body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
 
 /* нижняя панель: главная кнопка и вкладки «плавают» над содержимым, как панели пульта */
 .actionbar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; flex-direction: column; gap: 8px; pointer-events: none;
-  padding: 26px 14px calc(14px + env(safe-area-inset-bottom));
+  padding: 26px 14px calc(14px + var(--sab, env(safe-area-inset-bottom)));
   background: linear-gradient(180deg, rgba(250, 247, 245, 0), rgba(250, 247, 245, .9) 38%, var(--bg0)); }
 .actionbar:empty { display: none; }
 .actionbar > * { pointer-events: auto; }
@@ -306,7 +308,7 @@ body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
 .sheet-bg { position: absolute; inset: 0; background: var(--scrim); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); animation: fade .2s; }
 @keyframes fade { from { opacity: 0; } }
 .sheet-body { position: relative; width: 100%; max-height: 92%; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; border-radius: 30px 30px 0 0;
-  padding: 22px 16px calc(18px + env(safe-area-inset-bottom)); background: var(--sheet); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  padding: 22px 16px calc(18px + var(--sab, env(safe-area-inset-bottom))); background: var(--sheet); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
   box-shadow: 0 -18px 50px rgba(0, 0, 0, .18), inset 0 1px 0 rgba(255, 255, 255, .95); animation: sheet .34s var(--ease); }
 @keyframes sheet { from { transform: translateY(40px); opacity: 0; } }
 .sheet-body::before { content: ''; position: absolute; top: 8px; left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 4px; background: var(--edge2); }
@@ -413,7 +415,7 @@ body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
 .thread [data-human] { margin-top: 10px; }
 
 /* ---------- уведомления ---------- */
-.push { position: absolute; left: 10px; right: 10px; top: calc(10px + env(safe-area-inset-top)); z-index: 40; display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: center;
+.push { position: absolute; left: 10px; right: 10px; top: calc(10px + var(--sat, env(safe-area-inset-top))); z-index: 40; display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: center;
   padding: 12px 14px; border-radius: 22px; text-align: left; color: var(--ink); background: rgba(255, 255, 255, .92); border: 1px solid rgba(255, 255, 255, .9);
   box-shadow: var(--shine), 0 18px 44px rgba(0, 0, 0, .22), 0 0 0 1px var(--edge); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
   transform: translateY(-140%); opacity: 0; transition: transform .5s var(--ease), opacity .3s; pointer-events: none; }
@@ -500,4 +502,4 @@ button.allqty { width: 100%; text-align: left; color: inherit; font: inherit; fo
 .inbox > span:last-child:not(:first-child) { display: inline-flex; gap: 6px; flex: none; }
 .app-head { grid-template-columns: 1fr auto 1fr; }
 .app .btn-lg, .app .btn-xl { white-space: normal; text-align: center; line-height: 1.2; padding-top: 8px; padding-bottom: 8px; }
-@media (max-width: 760px) { .app.in-frame .push { top: calc(10px + env(safe-area-inset-top)); } }
+@media (max-width: 760px) { .app.in-frame .push { top: calc(10px + var(--sat, env(safe-area-inset-top))); } }

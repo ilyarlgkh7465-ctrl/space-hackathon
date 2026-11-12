@@ -409,7 +409,10 @@
     } catch (e) { ART = null; }
   }
   const bg = (k) => `style="background-image:url(${ART[k]})"`;
+  /* Фото продуктов — снимки с Unsplash (список и лицензия: ios/PHOTO-CREDITS.md); перед запуском заменить на съёмку «Фотопринта». */
+  const PHOTO = { print: 'prints', book: 'book', calendar: 'calendar', magnet: 'magnet', canvas: 'canvas' };
   function artOf(kind) {
+    if (PHOTO[kind]) return `<img class="art-photo" src="/t2/photos/photo-${PHOTO[kind]}.jpg" alt="">`;
     if (!ART) return ICON.photos;
     return {
       print: `<span class="art a-print"><i ${bg('c')}></i><i ${bg('b')}></i><i ${bg('a')}></i></span>`,

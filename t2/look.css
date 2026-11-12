@@ -174,3 +174,7 @@ body { background: #EDEDF0; }
 .rate button.on { background: #FFF7E6; border-color: #F2A91E; }
 .nitem.new i { background: var(--brand); }
 .side .mark { color: #fff; }      /* в приложении знак чёрный — текст на нём белый */
+/* настоящие фото продуктов: заполняют плитку целиком */
+.art-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.pcard .pic, .phero .pic, .oart, .empty .eart, .tcover { position: relative; overflow: hidden; }
+.phero .pic { height: 220px; }

@@ -20,6 +20,28 @@
 <link rel="stylesheet" href="/t2/app.css">
 <link rel="stylesheet" href="/t2/look.css">
 <link rel="stylesheet" href="/t2/intro.css">
+<script>
+/* Отступы под вырез (Dynamic Island) и нижнюю полосу iPhone. Обычно их даёт система; в приложении с экрана «Домой» она иногда
+   отдаёт ноль, хотя страница занимает весь экран — тогда шапка оказывается под вырезом. В этом случае отступы ставим сами. */
+(function () {
+  function fit() {
+    var root = document.documentElement, probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)';
+    root.appendChild(probe);
+    var cs = getComputedStyle(probe), top = parseFloat(cs.paddingTop) || 0, bottom = parseFloat(cs.paddingBottom) || 0;
+    probe.remove();
+    var ios = /iPhone|iPod/.test(navigator.userAgent), home = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+    var tall = Math.max(screen.width, screen.height), portrait = innerHeight > innerWidth, full = Math.abs(innerHeight - tall) < 3;
+    if (ios && home && portrait && full) {                       // страница на весь экран, а система отступов не дала
+      if (top < 1) top = tall >= 852 ? 59 : tall >= 812 ? 47 : 20;
+      if (bottom < 1) bottom = tall >= 812 ? 34 : 0;
+    }
+    root.style.setProperty('--sat', top + 'px');
+    root.style.setProperty('--sab', bottom + 'px');
+  }
+  fit(); addEventListener('resize', fit); addEventListener('orientationchange', fit); addEventListener('pageshow', fit);
+})();
+</script>
 </head>
 <body>
 <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
